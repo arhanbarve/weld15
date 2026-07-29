@@ -95,8 +95,11 @@ describe("weld.json", () => {
 
   it("records the metadata later phases depend on", () => {
     expect(weld.meta.height_ft).toBe(87.01);
-    expect(weld.meta.width_ft_gable_end).toBe(51.8);
-    expect(weld.meta.clear_width_gable_end_ft).toBe(48.8);
+    expect(weld.meta.width_ft_gable_end_north).toBe(52.0);
+    expect(weld.meta.clear_width_gable_end_ft).toBe(49.0);
+    expect(weld.meta.floors_above_grade).toBe(5);
+    expect(weld.meta.floor_to_floor_ft).toBe(12.0);
+    expect(weld.meta.gross_floor_area_sqft).toBe(43118);
     expect(weld.meta.long_axis_deg_e_of_n).toBe(13.2);
     expect(weld.meta.facility_id).toBe("CA-03374");
   });

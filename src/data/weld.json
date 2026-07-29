@@ -5,15 +5,65 @@
   "address": "3 Harvard Yard",
   "height_ft": 87.01,
   "long_axis_deg_e_of_n": 13.2,
-  "built": "1871-72",
+  "built": "begun 1 March 1871, completed 4 September 1872",
   "architect": "Ware & Van Brunt",
   "osm_way": 29824449,
-  "width_ft_gable_end": 51.8,
-  "width_ft_max_at_wings": 62.3,
-  "length_ft": 142.9,
+  "width_ft_max_at_wings": 63.0,
+  "length_ft": 143.3,
   "narrow_end_zone_depth_ft": 23,
-  "width_note": "Weld is not a plain rectangle. The gable ends are 51.8 ft wide for roughly the first 23 ft, then step out to 62.3 ft across the projecting wings in the middle. An earlier 54 ft figure was estimated from an OpenStreetMap edge and was wrong; these come from slicing the Facilities3D ring in the building frame.",
-  "clear_width_gable_end_ft": 48.8
+  "clear_width_gable_end_ft": 49.0,
+  "width_ft_gable_end_north": 52.0,
+  "width_ft_gable_end_south": 53.5,
+  "eave_height_ft": 60.0,
+  "ridge_height_ft": 85.4,
+  "floors_above_grade": 5,
+  "floor_to_floor_ft": 12.0,
+  "ceiling_height_ft_estimate": 10.75,
+  "gross_floor_area_sqft": 43118,
+  "living_area_sqft": 39512,
+  "shape_note": "Dumbbell plan, not a rectangle. Narrow gable ends (~52 ft north, ~53.5 ft south), two projecting wing zones at 23-52 ft and 90-120 ft along the axis reaching ~63 ft, and a NARROW waist of 41-48 ft in the middle. The north end zone runs 120-143 ft along the axis: 23 ft deep and 51-53 ft wide. That is the pocket the suite sits in.",
+  "sources": "Footprint cross-checked against 5 independent datasets: Harvard ArcGIS Facilities3D, Cambridge GIS BASEMAP_Buildings (highest fidelity, 52 vertices), MassGIS Building Structures 2-D (2011 roofprint), OpenStreetMap way 29824449, Microsoft GlobalMLBuildingFootprints. Heights and areas from Cambridge GIS and the Cambridge BEUDO energy-disclosure dataset. Earlier figures of 54 x 151 ft were both wrong: 54 was one facade edge, 151 was the rotation-inflated bounding box.",
+  "macris_id": "CAM.184",
+  "wall_material": "brick with light sandstone belts",
+  "roof_material": "slate",
+  "primary_source_1875": {
+   "citation": "The Harvard Book, Vaille & Clark eds., 1875, vol. 1, pp. 135-136",
+   "url": "https://archive.org/details/harvardbookserie01vail",
+   "extreme_dimensions_ft": [
+    143,
+    51
+   ],
+   "studies": 54,
+   "study_avg_ft": [
+    16,
+    17
+   ],
+   "single_bedroom_ft": [
+    7,
+    13
+   ],
+   "studies_with_single_bedroom": 22,
+   "stair_halls": 2,
+   "stair_hall_ft": [
+    15,
+    31
+   ],
+   "stair_halls_position": "central, top-lit by lanterns above the roof",
+   "main_entrance": "west front, two arches into a 21 x 25 ft marble-paved loggia",
+   "rear_entries": "east",
+   "service": "coal lift closet with a public sink off each stair hall on every story",
+   "daylighting": "all studies except the 16 in the central part, and all double bedrooms, have windows in two directions; NO ROOMS RECEIVE AN EXCLUSIVELY NORTH LIGHT",
+   "corroboration": "The Harvard Register vol III no 3, March 1881, pp 142-143: \"From each hall open twenty-seven studies\""
+  },
+  "renovations": {
+   "1962": "gut remodel of all five floors; new suite partitions, new toilet rooms, stair hall replaced, common room built; capacity 71 to 118; rooms completely renumbered (PIRC 1962-010)",
+   "1992-93": "second gut renovation; north stair, south stair with new hydraulic elevator, east entrance made accessible; capacity 150 (PIRC HRE 1991-003)"
+  },
+  "room_numbering": {
+   "pre_1962": "two vertical entries, one continuous 1-55 sequence, floor-independent. South entry 12-27, North 33-55 (Crimson, 12 Sept 1951)",
+   "post_1962": "INFERRED, tightly constrained: first digit = floor = entryway, second digit runs south to north along the corridor",
+   "weld_15": "fifth suite on the first floor, north half of the corridor; entryway Weld 1"
+  }
  },
  "rings": [
   [
