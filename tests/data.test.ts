@@ -52,11 +52,11 @@ describe("campus.json", () => {
   });
 
   it("has MIXED ring winding, which is why P1 must normalise before extruding", () => {
-    // Not a cosmetic detail. ArcGIS handed back 35 clockwise rings and 4
-    // counter-clockwise. Extruding without normalising gives those 4 buildings
-    // inverted normals, and they render black. This assertion locks the
-    // requirement in place: if the data is ever refetched clean, this fails and
-    // tells us the normaliser is no longer load-bearing.
+    // Not a cosmetic detail. After removing the three degenerate slivers, 35
+    // rings are clockwise and 1 is counter-clockwise. Extruding without
+    // normalising gives that building inverted normals and it renders black.
+    // This assertion locks the requirement in place: if the data is ever
+    // refetched clean, it fails and tells us the normaliser stopped mattering.
     const ccw = campus.buildings.filter((b) => signedArea(b.ring) > 0).length;
     const cw = campus.buildings.length - ccw;
     expect(ccw).toBe(1);
@@ -80,19 +80,23 @@ describe("weld.json", () => {
   });
 
   it("encloses roughly 7,780 sq ft", () => {
-    // 54 x 151 nominal is 8,154; the real ring has bays and jogs that take some out.
+    // Less than width x length would suggest, because the ends are narrower
+    // than the middle and the facades carry jogs.
     expect(Math.abs(signedArea(ring))).toBeCloseTo(7779.6, 0);
   });
 
-  it("has a bounding box matching a 54 x 151 ft building rotated 13.2 degrees", () => {
+  it("has the axis-aligned bounding box of a rotated building", () => {
     const { w, h } = bbox(ring);
-    // Rotation inflates the axis-aligned box: 54cos + 151sin across, 54sin + 151cos along.
+    // Inflated by the 13.2 deg rotation. The true dimensions only appear after
+    // rotating into the building frame; see tests/frames.test.ts.
     expect(w).toBeCloseTo(82.8, 0);
     expect(h).toBeCloseTo(150.9, 0);
   });
 
   it("records the metadata later phases depend on", () => {
     expect(weld.meta.height_ft).toBe(87.01);
+    expect(weld.meta.width_ft_gable_end).toBe(51.8);
+    expect(weld.meta.clear_width_gable_end_ft).toBe(48.8);
     expect(weld.meta.long_axis_deg_e_of_n).toBe(13.2);
     expect(weld.meta.facility_id).toBe("CA-03374");
   });

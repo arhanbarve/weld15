@@ -4,12 +4,16 @@
   "facility_number": 956,
   "address": "3 Harvard Yard",
   "height_ft": 87.01,
-  "width_ft": 54,
-  "length_ft": 151,
   "long_axis_deg_e_of_n": 13.2,
   "built": "1871-72",
   "architect": "Ware & Van Brunt",
-  "osm_way": 29824449
+  "osm_way": 29824449,
+  "width_ft_gable_end": 51.8,
+  "width_ft_max_at_wings": 62.3,
+  "length_ft": 142.9,
+  "narrow_end_zone_depth_ft": 23,
+  "width_note": "Weld is not a plain rectangle. The gable ends are 51.8 ft wide for roughly the first 23 ft, then step out to 62.3 ft across the projecting wings in the middle. An earlier 54 ft figure was estimated from an OpenStreetMap edge and was wrong; these come from slicing the Facilities3D ring in the building frame.",
+  "clear_width_gable_end_ft": 48.8
  },
  "rings": [
   [
