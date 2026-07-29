@@ -1,0 +1,137 @@
+/* Weld 15 design tokens. Source of truth: design-system/MASTER.md
+   Two stages, two palettes. The app crosses from a cyanotype scan of the campus
+   into a daylight room; each stage commits to its own palette and they are never blended. */
+
+:root {
+  /* --- stage: SCAN (globe, Cambridge, Yard, Weld exterior) --- */
+  --void: #06203f;
+  --void-deep: #041426;
+  --grid: #0c3260;
+  --line: #8fc4f2;
+  --line-hi: #ffffff;
+  --mass: rgba(150, 200, 245, 0.1);
+  --mark: #e4526f;
+  --ink-scan: #e4ebf6;
+
+  /* --- stage: DAYLIGHT (Weld 15 interior) --- */
+  --sky: #d9e2ec;
+  --plaster: #f0ede7;
+  --plaster-sh: #dfdad1;
+  --oak: #b5813f;
+  --oak-deep: #a5732f;
+  --crimson: #a41034;
+  --glass: #cfe4f2;
+  --edge: #8c8578;
+  --ink-day: #0a1626;
+
+  /* --- chrome, must read on both stages --- */
+  --chip-scan: rgba(4, 20, 38, 0.82);
+  --chip-day: rgba(255, 255, 255, 0.86);
+  --focus: #5ea6eb;
+
+  /* --- surfaces for the HUD --- */
+  --surface: #0a2547;
+  --raised: #0e2c52;
+  --rule: #1d4470;
+  --rule-soft: #143252;
+  --ink: var(--ink-scan);
+  --dim: #9db6d4;
+  --faint: #6c87ac;
+
+  /* --- provenance tags --- */
+  --given: #7fd1a6;
+  --derived: #8fc4f2;
+  --inferred: #e4a15e;
+
+  /* --- type --- */
+  --mono: var(--font-plex-mono), ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --serif: var(--font-baskerville), "Iowan Old Style", Palatino, Georgia, serif;
+
+  /* --- space --- */
+  --s1: 0.5rem;
+  --s2: 0.875rem;
+  --s3: 1.5rem;
+  --s4: 2.5rem;
+  --s5: 4rem;
+
+  /* --- z-index: semantic scale only, never arbitrary values --- */
+  --z-canvas: 0;
+  --z-hud: 10;
+  --z-panel: 20;
+  --z-scrubber: 30;
+  --z-backdrop: 40;
+  --z-modal: 50;
+  --z-toast: 60;
+  --z-tooltip: 70;
+
+  /* --- motion --- */
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-micro: 200ms;
+  --dur-stage: 1100ms;
+
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--void);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 1rem;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden; /* the canvas owns the viewport */
+}
+
+/* Interactive elements are recognisably interactive. */
+button,
+[role="button"] {
+  cursor: pointer;
+  font-family: var(--mono);
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Skip control must be reachable on the first tab, per the immersive-experience
+   requirement. Visible when focused, out of the way when not. */
+.skip {
+  position: fixed;
+  top: var(--s2);
+  left: var(--s2);
+  z-index: var(--z-toast);
+  transform: translateY(-200%);
+  transition: transform var(--dur-micro) var(--ease-out-quint);
+}
+.skip:focus-visible {
+  transform: translateY(0);
+}
+
+/* Digits that line up in columns line up. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

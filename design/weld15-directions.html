@@ -1,0 +1,1000 @@
+<title>Weld 15 &mdash; Direction Review</title>
+
+<style>
+  :root {
+    --ground: #071120;
+    --surface: #0B1A2B;
+    --raised: #102540;
+    --rule: #1D3A5C;
+    --rule-soft: #142C48;
+    --ink: #E4EBF6;
+    --dim: #94AAC6;
+    --faint: #63799A;
+    --cyano: #5EA6EB;
+    --crimson: #A41034;
+    --crimson-lift: #E4526F;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --s1: 0.5rem;
+    --s2: 0.875rem;
+    --s3: 1.5rem;
+    --s4: 2.5rem;
+    --s5: 4rem;
+    --s6: 6rem;
+    --prose: 64ch;
+    color-scheme: dark;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root {
+      --ground: #F7F8FA;
+      --surface: #FFFFFF;
+      --raised: #EFF3F8;
+      --rule: #C6D4E4;
+      --rule-soft: #DEE7F1;
+      --ink: #0A1626;
+      --dim: #46596F;
+      --faint: #6E819A;
+      --cyano: #1B5FA8;
+      --crimson: #A41034;
+      --crimson-lift: #8A0C2B;
+      color-scheme: light;
+    }
+  }
+
+  :root[data-theme="light"] {
+    --ground: #F7F8FA;
+    --surface: #FFFFFF;
+    --raised: #EFF3F8;
+    --rule: #C6D4E4;
+    --rule-soft: #DEE7F1;
+    --ink: #0A1626;
+    --dim: #46596F;
+    --faint: #6E819A;
+    --cyano: #1B5FA8;
+    --crimson: #A41034;
+    --crimson-lift: #8A0C2B;
+    color-scheme: light;
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #071120;
+    --surface: #0B1A2B;
+    --raised: #102540;
+    --rule: #1D3A5C;
+    --rule-soft: #142C48;
+    --ink: #E4EBF6;
+    --dim: #94AAC6;
+    --faint: #63799A;
+    --cyano: #5EA6EB;
+    --crimson: #A41034;
+    --crimson-lift: #E4526F;
+    color-scheme: dark;
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 1.0625rem;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 76rem;
+    margin: 0 auto;
+    padding: var(--s4) var(--s3) var(--s6);
+    display: flex;
+    flex-direction: column;
+    gap: var(--s6);
+  }
+
+  /* ---------- masthead ---------- */
+
+  .mast {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: var(--s3);
+  }
+
+  .stamp {
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--faint);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 1.25em;
+  }
+
+  .mast h1 {
+    font-family: var(--mono);
+    font-size: clamp(2rem, 7vw, 3.5rem);
+    font-weight: 500;
+    letter-spacing: -0.03em;
+    line-height: 1;
+    text-wrap: balance;
+  }
+
+  .mast h1 em {
+    font-style: normal;
+    color: var(--crimson-lift);
+  }
+
+  .lede {
+    max-width: var(--prose);
+    color: var(--dim);
+    font-size: 1.125rem;
+  }
+
+  /* ---------- generic section ---------- */
+
+  section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s3);
+  }
+
+  h2 {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--cyano);
+    font-weight: 500;
+  }
+
+  h3 {
+    font-family: var(--mono);
+    font-size: 1.0625rem;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+
+  p {
+    max-width: var(--prose);
+    text-wrap: pretty;
+  }
+
+  .sechead {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s1);
+    border-top: 1px solid var(--rule-soft);
+    padding-top: var(--s2);
+  }
+
+  .sechead .big {
+    font-family: var(--mono);
+    font-size: clamp(1.25rem, 3.2vw, 1.75rem);
+    font-weight: 500;
+    letter-spacing: -0.02em;
+  }
+
+  /* ---------- plan hero ---------- */
+
+  .planwrap {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
+    gap: var(--s3);
+    align-items: start;
+  }
+
+  @media (max-width: 60rem) {
+    .planwrap { grid-template-columns: 1fr; }
+  }
+
+  .frame {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .frame-head {
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--faint);
+    padding: 0.65rem 0.9rem;
+    border-bottom: 1px solid var(--rule-soft);
+    display: flex;
+    justify-content: space-between;
+    gap: 1em;
+  }
+
+  .frame-body { padding: var(--s2); }
+
+  .frame svg { display: block; width: 100%; height: auto; }
+
+  .aside {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+  }
+
+  .keyrow {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--dim);
+    padding-bottom: 0.4rem;
+    border-bottom: 1px dotted var(--rule-soft);
+  }
+
+  .swatch {
+    width: 0.75rem;
+    height: 0.75rem;
+    flex: none;
+    border: 1px solid rgba(127, 150, 180, 0.5);
+  }
+
+  .keyrow b {
+    color: var(--ink);
+    font-weight: 500;
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---------- derivation ---------- */
+
+  .chain {
+    font-family: var(--mono);
+    font-size: 0.8125rem;
+    color: var(--dim);
+    background: var(--raised);
+    border: 1px solid var(--rule-soft);
+    border-radius: 2px;
+    padding: var(--s2);
+    overflow-x: auto;
+    white-space: pre;
+    line-height: 1.75;
+  }
+
+  .chain b { color: var(--ink); font-weight: 500; }
+  .chain u { color: var(--crimson-lift); text-decoration: none; }
+
+  /* ---------- options ---------- */
+
+  .opts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+    gap: var(--s3);
+  }
+
+  .opt {
+    display: flex;
+    flex-direction: column;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+  }
+
+  .opt-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    padding: 0.8rem 0.9rem;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+
+  .tag {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--ground);
+    background: var(--cyano);
+    padding: 0.1rem 0.4rem;
+    border-radius: 1px;
+  }
+
+  .opt-head h3 { font-size: 1rem; }
+
+  .pair { display: grid; grid-template-columns: 1fr; }
+  .pair > div + div { border-top: 1px solid var(--rule-soft); }
+  .pair > div { position: relative; }
+  .pair svg { display: block; width: 100%; height: auto; }
+
+  .plabel {
+    position: absolute;
+    left: 0.5rem;
+    bottom: 0.4rem;
+    font-family: var(--mono);
+    font-size: 0.625rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.72);
+    mix-blend-mode: difference;
+  }
+
+  .opt-body {
+    padding: 0.9rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    font-size: 0.9375rem;
+  }
+
+  .opt-body p { max-width: none; color: var(--dim); }
+  .opt-body p strong { color: var(--ink); font-weight: 400; }
+
+  .risk {
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.04em;
+    color: var(--faint);
+    border-top: 1px dotted var(--rule-soft);
+    padding-top: 0.6rem;
+  }
+
+  /* ---------- orientation ---------- */
+
+  .flips {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    gap: var(--s3);
+  }
+
+  /* ---------- questions ---------- */
+
+  .qlist {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+    counter-reset: q;
+  }
+
+  .q {
+    display: grid;
+    grid-template-columns: 2.5rem minmax(0, 1fr);
+    gap: 0 var(--s2);
+    border-top: 1px solid var(--rule-soft);
+    padding-top: var(--s2);
+  }
+
+  .q::before {
+    counter-increment: q;
+    content: "Q" counter(q);
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--crimson-lift);
+    padding-top: 0.3rem;
+  }
+
+  .q h3 { font-family: var(--serif); font-size: 1.0625rem; font-weight: 600; }
+  .q p { color: var(--dim); font-size: 0.9375rem; }
+
+  /* ---------- footer ---------- */
+
+  footer {
+    border-top: 1px solid var(--rule);
+    padding-top: var(--s2);
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    line-height: 1.9;
+    color: var(--faint);
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  footer a { color: var(--dim); text-decoration: none; border-bottom: 1px solid var(--rule); }
+  footer a:hover, footer a:focus-visible { color: var(--ink); }
+
+  :focus-visible { outline: 2px solid var(--cyano); outline-offset: 2px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="mast">
+    <div class="stamp">
+      <span>3 Harvard Yard</span>
+      <span>Cambridge MA 02138</span>
+      <span>Facility CA-03374</span>
+      <span>Built 1871&ndash;72 &middot; Ware &amp; Van Brunt</span>
+    </div>
+    <h1>Weld 15 &mdash; <em>direction review</em></h1>
+    <p class="lede">
+      A reconstruction of your suite from the housing office's description, drawn to
+      scale inside Weld Hall's real footprint. Two decisions to make: how the thing should look, and
+      which way the suite faces. Everything geometric on this page comes from Harvard's own
+      public GIS, not a guess.
+    </p>
+  </header>
+
+  <section>
+    <div class="sechead">
+      <h2>The reconstruction</h2>
+      <div class="big">the resident's paragraph, turned into a floor plan</div>
+    </div>
+
+    <div class="planwrap">
+      <div class="frame">
+        <div class="frame-head">
+          <span>Weld 15 &middot; first floor, north end &middot; 1/8&#8243; = 1&#8242;</span>
+          <span id="planface">common room facing west</span>
+        </div>
+        <div class="frame-body"><svg id="plan" viewBox="0 0 720 400" role="img"
+          aria-label="Scaled floor plan of Weld 15 showing a common room, kitchen, hallway, two bedrooms and a bathroom"></svg></div>
+      </div>
+
+      <div class="aside">
+        <div class="frame">
+          <div class="frame-head"><span>Where it sits</span></div>
+          <div class="frame-body"><svg id="locator" viewBox="0 0 200 320" role="img"
+            aria-label="Weld Hall footprint with the suite highlighted at the north end"></svg></div>
+        </div>
+        <div id="key"></div>
+      </div>
+    </div>
+
+    <p>
+      The office gave you rooms and dimensions but no adjacency you could draw. The sentence that
+      unlocks it is <em>&#8220;immediately to your right will be the common room&#8221;</em> paired with
+      <em>&#8220;turn to the left&#8230; and go down the hallway.&#8221;</em> That makes the entry a T:
+      common room one way, hallway the other. Chain those pieces end to end and they come to about
+      51 feet &mdash; which is almost exactly Weld's clear interior width. The suite spans the building.
+    </p>
+
+    <div class="chain">
+<b>ACROSS THE BUILDING (east&ndash;west)</b>
+  common room <b>15</b> + entry + hallway <b>23</b> + far bedroom <b>10</b> + walls <b>3</b>  =  <b>51 ft</b>
+  Weld Hall exterior width  <b>54 ft</b>  &minus;  two 1.5 ft masonry walls  =  <b>51 ft clear</b>   <u>fits</u>
+
+<b>THROUGH THE BAND (north&ndash;south)</b>
+  hallway <b>4</b> + bedroom depth <b>16</b>  =  <b>20 ft</b>
+  kitchen <b>10 x 12</b> bumps south behind the common room &mdash; the one room with no window
+
+<b>WHAT DOESN'T CLOSE</b>
+  far bedroom reads <b>16 x 10</b>, but its slot in the band is <b>16 x 16</b>
+  <u>~96 sq ft unaccounted</u> &mdash; closets, a chimney breast, or the north wall steps here</div>
+
+    <p>
+      That last block is drawn as hatching, not invented rooms. The office warned you their numbers
+      could be off by a foot in either direction, so the model treats every dimension as a parameter
+      you can drag rather than a fact baked into geometry. In September you walk in with a tape
+      measure and the plan corrects itself.
+    </p>
+  </section>
+
+  <section>
+    <div class="sechead">
+      <h2>Decision one</h2>
+      <div class="big">Three ways to execute &#8220;hologram outside, clean inside&#8221;</div>
+    </div>
+    <p>
+      You already picked the structure: campus reads as a scan, the suite reads as a finished room,
+      and the switch between them is the payoff. These are three different executions of that, each
+      rendered below from the real building data &mdash; left panel is Harvard Yard around Weld, right
+      panel is your suite.
+    </p>
+
+    <div class="opts" id="dirs"></div>
+  </section>
+
+  <section>
+    <div class="sechead">
+      <h2>Decision two</h2>
+      <div class="big">Which way does the suite face?</div>
+    </div>
+    <p>
+      Weld 15 is first floor, north end &mdash; that part is documented. What nobody has told you is
+      whether the common room sits at the Old Yard end or the Widener end. It decides the view out
+      your windows and which rooms get morning light, so it is worth getting right. If you don't
+      know, pick the last option and it becomes a switch in the app.
+    </p>
+    <div class="flips" id="flips"></div>
+  </section>
+
+  <section>
+    <div class="sechead">
+      <h2>Still open</h2>
+      <div class="big">Answer these in the terminal</div>
+    </div>
+    <div class="qlist">
+      <div class="q">
+        <div>
+          <h3>What is &#8220;K&#8221;?</h3>
+          <p>
+            A 10 &#215; 12 room with no exterior wall, marked K on a 1995 blueprint. Harvard's own
+            dorm data says Weld's two common rooms each have a galley kitchen, so a kitchen in a
+            first-floor suite is more plausible than the resident assumed. Model it as a kitchen, a study, or
+            storage? It changes what gets built in there.
+          </p>
+        </div>
+      </div>
+      <div class="q">
+        <div>
+          <h3>How many of you?</h3>
+          <p>
+            Two bedrooms at 160 sq ft each reads as four people in two doubles. Weld 15 held seven
+            undergraduates in 1983 and the first-floor suites are the big ones. Bed count drives every
+            furniture decision.
+          </p>
+        </div>
+      </div>
+      <div class="q">
+        <div>
+          <h3>Is the JFK history in or out?</h3>
+          <p>
+            The Crimson traced Kennedy's freshman room &mdash; original Weld 32, first floor north &mdash; to
+            what renumbering in 1962 turned into Weld 15. Your room. This can be a quiet plaque you
+            find by clicking a window, a full 1936 layer you toggle against 2026, or left alone.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>Geometry: Harvard Planning &amp; Project Management public ArcGIS &mdash; Facilities3D footprints and heights, 46 buildings within 620 ft of Weld.</span>
+    <span>Footprint cross-checked against OpenStreetMap way 29824449. Weld Hall: 54 &#215; 151 ft, 87.01 ft tall, long axis 13&#176; east of north.</span>
+    <span>Room program: housing office email, 29 July 2026. Dorm amenities: Harvard first-year dorm layer. History: <a href="https://www.thecrimson.com/article/1983/11/22/which-weld-room-pbwbhere-john-f/">The Harvard Crimson, 22 Nov 1983</a>.</span>
+  </footer>
+</div>
+
+<script>
+  const CAMPUS = [{"n":"Widener Library","h":92.85,"r":[[103.3,24.7],[132.9,31.7],[134.4,25.4],[261.8,55.5],[260.3,61.8],[290.1,68.8],[288.6,75.1],[292.7,76.0],[298.7,77.5],[293.5,99.6],[288.3,121.7],[282.3,120.3],[278.2,119.3],[244.2,264.3],[248.3,265.3],[253.7,266.6],[248.6,288.5],[243.5,310.3],[238.0,309.1],[213.1,303.2],[211.4,310.4],[66.8,276.2],[68.5,269.0],[43.7,263.2],[37.9,261.8],[43.1,239.9],[48.2,218.0],[54.0,219.4],[57.5,220.2],[91.3,76.0],[87.8,75.2],[81.8,73.8],[87.1,51.1],[92.2,29.5],[98.2,30.9],[101.7,31.8],[103.3,24.7]]},{"n":"Memorial Church Appleton Chapel","h":63.0,"r":[[222.8,-417.5],[370.3,-382.8],[368.7,-375.7],[402.4,-367.7],[395.2,-336.8],[388.1,-306.5],[354.4,-314.5],[352.7,-307.2],[305.3,-318.3],[297.3,-284.2],[271.1,-290.3],[245.2,-296.4],[253.2,-330.6],[205.2,-341.9],[207.8,-353.2],[185.0,-358.6],[191.1,-384.8],[197.2,-410.8],[220.0,-405.4],[222.8,-417.5]]},{"n":"Hollis Hall","h":50.0,"r":[[-162.7,-451.9],[-170.1,-420.8],[-169.3,-420.6],[-174.5,-398.7],[-179.9,-376.1],[-180.7,-376.2],[-187.8,-346.1],[-234.4,-357.2],[-227.3,-387.4],[-228.1,-387.6],[-222.7,-410.2],[-217.5,-432.1],[-216.7,-431.9],[-209.3,-463.1],[-162.7,-451.9]]},{"n":"Wigglesworth Hall, Entries A,B,C+D","h":36.7,"r":[[161.0,352.2],[329.0,413.7],[323.2,429.8],[317.5,445.5],[300.4,439.2],[299.9,440.6],[287.5,436.1],[274.5,431.3],[275.0,429.9],[258.6,423.9],[256.8,423.2],[191.3,399.3],[190.8,400.6],[178.3,396.1],[165.1,391.2],[165.6,389.9],[149.5,384.0],[155.2,368.3],[161.0,352.2]]},{"n":"Straus Hall","h":45.0,"r":[[-376.0,-117.8],[-391.6,-35.5],[-395.8,-13.5],[-400.0,8.6],[-400.5,11.1],[-417.3,7.9],[-434.3,4.7],[-433.9,2.7],[-429.6,-19.9],[-425.5,-41.3],[-409.5,-125.4],[-405.5,-146.6],[-401.4,-168.1],[-400.9,-171.0],[-383.9,-167.8],[-367.1,-164.5],[-367.7,-161.6],[-371.8,-140.1],[-376.0,-117.8]]},{"n":"Linden Street Studios","h":46.0,"r":[[16.7,546.5],[121.6,582.4],[118.3,592.0],[108.3,621.5],[91.6,615.8],[91.0,617.5],[2.9,587.4],[0.6,594.0],[-9.1,590.7],[-29.0,649.6],[-61.6,638.5],[-38.5,570.3],[-17.2,577.6],[-10.4,557.4],[-31.6,550.1],[-24.6,529.3],[17.7,543.7],[16.7,546.5]]},{"n":"Smith Campus Center","h":112.0,"r":[[-485.5,509.0],[-485.0,509.2],[-479.5,511.4],[-517.0,496.0],[-485.5,509.0],[-520.2,494.8],[-506.8,462.1],[-473.0,378.9],[-449.6,388.5],[-446.8,381.7],[-441.7,369.2],[-444.4,368.1],[-444.4,368.1],[-465.1,359.6],[-444.4,368.0],[-444.4,368.0],[-465.1,359.6],[-464.4,359.2],[-463.2,356.1],[-463.6,355.9],[-469.6,353.4],[-469.4,353.0],[-454.1,315.1],[-449.9,316.8],[-449.2,315.0],[-449.0,315.0],[-441.2,295.2],[-405.6,310.9],[-343.3,336.8],[-350.0,353.4],[-326.6,296.7],[-326.5,296.7],[-325.9,297.0],[-249.5,325.2],[-247.3,326.1],[-268.6,374.3],[-280.9,369.5],[-280.9,369.5],[-285.1,380.0],[-286.4,383.7],[-281.1,385.8],[-280.5,386.1],[-280.4,386.1],[-280.5,386.4],[-280.6,386.6],[-296.1,424.4],[-302.1,422.0],[-303.4,424.9],[-303.7,425.6],[-370.7,398.2],[-371.6,397.8],[-321.7,418.6],[-329.5,437.4],[-329.7,437.6],[-329.7,437.6],[-338.6,434.1],[-306.0,447.8],[-305.8,447.9],[-305.6,447.9],[-355.3,562.3],[-376.2,553.7],[-384.0,573.2],[-366.4,580.4],[-367.9,583.9],[-361.9,586.4],[-362.1,586.8],[-377.5,624.7],[-383.4,622.3],[-384.9,625.1],[-384.7,625.2],[-384.9,625.8],[-446.4,600.7],[-446.4,600.8],[-465.3,593.0],[-465.2,593.0],[-506.1,576.3],[-506.2,576.2],[-506.2,576.2],[-545.7,560.1],[-545.7,560.0],[-545.8,560.0],[-545.8,560.0],[-545.8,560.0],[-546.4,559.8],[-545.0,556.2],[-551.0,553.7],[-535.4,515.4],[-529.4,517.8],[-529.4,517.8],[-527.9,514.3],[-503.9,524.1],[-496.1,504.7],[-486.6,508.5],[-485.5,509.0]]},{"n":"Smith Campus Center","h":112.0,"r":[[-384.5,446.0],[-393.1,442.5],[-399.2,457.7],[-399.3,457.7],[-403.9,455.8],[-416.9,488.6],[-413.4,490.0],[-419.0,503.7],[-409.5,507.6],[-384.5,446.0]]},{"n":"Smith Campus Center","h":112.0,"r":[[-394.1,429.3],[-393.3,427.3],[-394.1,429.2],[-394.2,429.3],[-394.1,429.3]]},{"n":"Smith Campus Center","h":112.0,"r":[[-324.1,416.5],[-303.6,424.8],[-324.1,416.4],[-324.1,416.4],[-324.1,416.5]]},{"n":"Smith Campus Center","h":112.0,"r":[[-306.1,371.5],[-345.0,355.6],[-345.0,355.7],[-306.2,371.6],[-306.1,371.5]]},{"n":"Weld Hall","h":87.01,"r":[[41.2,-64.5],[37.3,-47.5],[36.1,-42.6],[35.9,-41.4],[38.9,-40.7],[40.8,-40.2],[39.6,-34.8],[37.7,-26.7],[35.4,-17.0],[34.3,-12.4],[27.1,-14.1],[18.1,24.1],[25.4,25.9],[24.2,31.2],[22.3,39.0],[20.7,46.2],[19.3,52.1],[14.3,50.9],[14.0,52.1],[13.8,53.2],[8.8,74.6],[3.9,73.4],[-0.4,72.4],[-4.8,71.4],[-11.0,69.9],[-22.5,67.2],[-27.6,66.0],[-32.2,64.9],[-36.8,63.8],[-41.6,62.7],[-40.7,58.6],[-38.3,48.7],[-37.7,45.9],[-36.5,40.7],[-36.1,39.1],[-41.2,37.9],[-39.9,31.9],[-38.2,24.8],[-36.4,17.0],[-35.1,11.6],[-27.5,13.4],[-18.6,-24.8],[-26.2,-26.6],[-25.1,-31.2],[-22.9,-40.9],[-20.9,-49.1],[-19.7,-54.5],[-17.1,-53.9],[-14.5,-53.3],[-9.2,-76.3],[-4.4,-75.2],[0.3,-74.1],[4.8,-73.0],[9.0,-72.1],[23.4,-68.7],[27.6,-67.7],[32.0,-66.6],[36.4,-65.6],[41.2,-64.5]]},{"n":"Harvard Hall","h":46.0,"r":[[-237.1,-332.5],[-241.3,-315.1],[-242.0,-312.1],[-242.5,-312.3],[-246.1,-297.5],[-281.6,-306.2],[-281.4,-307.1],[-298.2,-311.2],[-315.4,-315.4],[-315.6,-314.6],[-350.8,-323.2],[-347.3,-337.8],[-348.3,-338.0],[-347.7,-340.6],[-343.4,-358.4],[-339.1,-376.1],[-338.3,-379.4],[-302.1,-370.5],[-284.9,-366.4],[-268.0,-362.3],[-232.0,-353.5],[-232.9,-350.0],[-237.1,-332.5]]},{"n":"Wigglesworth Hall, Entries J+K","h":37.9,"r":[[-163.5,248.3],[-169.2,264.3],[-241.0,238.3],[-235.2,222.3],[-229.1,205.4],[-157.4,231.4],[-163.5,248.3]]},{"n":"Grays Hall","h":58.0,"r":[[-219.2,64.6],[-204.3,68.2],[-203.6,65.4],[-197.7,66.9],[-188.3,69.2],[-182.5,70.6],[-178.4,71.6],[-174.8,72.5],[-166.0,74.6],[-159.7,76.2],[-160.1,78.1],[-159.2,78.3],[-159.2,78.3],[-149.4,80.7],[-149.4,80.7],[-145.4,81.7],[-138.5,83.4],[-134.5,84.4],[-124.8,86.7],[-117.8,88.4],[-121.0,101.9],[-126.2,123.2],[-129.5,136.7],[-145.4,132.8],[-145.7,132.7],[-149.6,131.7],[-156.6,130.0],[-171.8,126.3],[-172.4,128.5],[-187.5,124.8],[-191.1,123.9],[-197.8,122.3],[-209.8,119.4],[-210.4,119.2],[-216.3,117.8],[-216.0,116.4],[-230.1,112.9],[-237.1,111.2],[-258.1,106.1],[-254.8,92.7],[-249.7,71.4],[-246.4,57.9],[-226.0,62.9],[-219.2,64.6]]},{"n":"Stoughton Hall","h":50.0,"r":[[-131.9,-586.6],[-138.9,-556.0],[-138.3,-555.9],[-143.3,-534.0],[-148.5,-511.4],[-149.1,-511.6],[-156.0,-481.6],[-202.8,-492.4],[-195.9,-522.4],[-196.7,-522.6],[-191.5,-545.2],[-186.5,-567.0],[-185.7,-566.8],[-178.6,-597.4],[-131.9,-586.6]]},{"n":"Boylston Hall","h":73.8,"r":[[-97.6,168.6],[-63.0,176.7],[-62.6,174.6],[-47.1,178.3],[-42.0,179.5],[-36.7,180.8],[-21.2,184.4],[-21.7,186.5],[12.9,194.7],[-2.9,261.6],[-113.3,235.5],[-97.6,168.6]]},{"n":"Manter Hall","h":50.0,"r":[[-192.0,343.5],[-219.3,419.8],[-229.8,415.9],[-227.8,410.3],[-237.1,407.0],[-238.6,401.4],[-230.3,380.2],[-226.3,377.3],[-211.2,336.5],[-192.0,343.5]]},{"n":"Wigglesworth Hall, Entries E,F,G,H+I","h":38.3,"r":[[-110.3,252.0],[101.1,329.4],[95.2,345.7],[94.4,347.7],[103.4,351.0],[95.3,373.2],[84.6,369.3],[87.5,361.3],[72.7,355.8],[72.3,356.8],[59.9,352.2],[46.9,347.5],[47.3,346.5],[-78.8,300.3],[-79.2,301.3],[-92.3,296.5],[-106.0,291.5],[-105.7,290.5],[-122.1,284.5],[-116.3,268.3],[-110.3,252.0]]},{"n":"Lehman Hall","h":59.49,"r":[[-311.4,158.0],[-358.4,187.3],[-373.3,163.2],[-376.8,165.4],[-397.2,132.5],[-417.5,99.6],[-414.0,97.4],[-428.6,73.6],[-381.6,44.3],[-361.1,77.4],[-346.6,101.0],[-332.6,123.6],[-311.4,158.0]]},{"n":"University Hall","h":57.0,"r":[[54.8,-259.1],[21.8,-118.4],[-30.8,-130.8],[2.1,-271.5],[54.8,-259.1]]},{"n":"Hampden Hall","h":74.0,"r":[[224.9,500.6],[222.6,537.7],[222.6,537.7],[224.9,500.6],[288.2,537.6],[275.4,559.2],[261.7,575.4],[238.8,561.6],[233.6,570.3],[226.3,565.9],[231.5,557.2],[221.8,551.3],[222.2,543.8],[222.2,543.8],[222.3,543.7],[222.6,538.5],[222.5,538.6],[222.2,543.8],[221.8,551.3],[218.3,553.9],[208.5,583.8],[198.7,580.3],[197.8,583.0],[196.6,586.3],[174.4,578.3],[176.5,572.3],[166.6,568.7],[182.5,521.8],[179.4,520.8],[191.7,485.5],[226.1,497.0],[224.9,500.6]]},{"n":"Thayer Hall","h":74.3,"r":[[151.5,-505.0],[140.7,-458.1],[135.7,-459.2],[129.8,-433.2],[133.1,-432.5],[118.3,-368.3],[114.8,-369.1],[108.8,-343.2],[113.6,-342.1],[102.8,-295.3],[50.5,-307.4],[61.3,-354.2],[66.2,-353.0],[72.2,-379.0],[69.1,-379.7],[83.8,-443.9],[86.9,-443.1],[92.9,-469.1],[88.7,-470.1],[99.4,-517.1],[151.5,-505.0]]},{"n":"Holworthy Hall","h":51.6,"r":[[45.0,-586.3],[36.4,-549.5],[-101.7,-582.0],[-93.2,-618.8],[45.0,-586.3]]},{"n":"Canaday Hall, Entries E, F, G","h":55.3,"r":[[377.8,-449.0],[427.0,-437.7],[429.7,-449.2],[495.2,-434.1],[488.8,-406.1],[423.8,-421.1],[421.1,-409.3],[355.6,-424.4],[362.1,-452.7],[349.8,-455.5],[364.8,-520.9],[392.8,-514.5],[377.8,-449.0]]},{"n":"Houghton Library","h":51.2,"r":[[339.5,298.4],[331.6,332.2],[317.2,328.8],[315.7,328.4],[292.7,323.0],[278.1,319.6],[305.5,202.2],[319.9,205.6],[327.9,207.5],[359.0,214.8],[351.1,248.9],[352.3,251.5],[354.1,254.1],[355.9,258.2],[357.0,262.7],[357.2,266.2],[357.0,270.1],[356.6,273.8],[355.9,277.2],[354.2,281.5],[352.6,284.7],[350.0,288.5],[348.0,291.3],[345.7,294.0],[342.7,296.3],[339.5,298.4]]},{"n":"5-7 Linden Street","h":47.0,"r":[[-138.0,459.0],[-108.8,468.9],[-107.8,466.1],[-99.1,468.9],[-97.0,462.4],[-59.7,474.7],[-60.8,478.1],[-58.8,481.7],[-60.5,487.1],[-58.9,490.0],[-65.5,510.2],[-67.1,511.5],[-69.0,512.3],[-71.0,518.4],[-74.7,520.4],[-75.4,522.6],[-112.7,510.3],[-121.4,507.4],[-119.2,500.9],[-116.3,492.0],[-145.7,482.1],[-142.1,471.2],[-138.0,459.0]]},{"n":"Massachusetts Hall","h":47.0,"r":[[-269.7,-169.3],[-272.0,-159.2],[-369.9,-182.4],[-367.6,-192.5],[-365.0,-203.3],[-362.6,-213.6],[-360.0,-224.6],[-262.1,-201.4],[-264.6,-191.0],[-265.7,-186.3],[-267.1,-180.2],[-269.7,-169.3]]},{"n":"Farkas Hall","h":40.0,"r":[[-229.8,474.7],[-231.3,477.9],[-227.7,479.5],[-226.4,476.5],[-226.2,476.6],[-200.3,486.2],[-202.1,489.7],[-186.7,496.5],[-184.7,492.2],[-154.2,503.5],[-188.6,581.3],[-234.5,560.5],[-231.1,553.3],[-255.6,542.0],[-260.5,539.8],[-289.1,526.6],[-285.4,518.3],[-286.9,517.6],[-266.8,472.4],[-259.8,475.5],[-257.8,470.7],[-256.4,467.6],[-254.6,463.5],[-229.8,474.7]]},{"n":"Matthews Hall","h":68.0,"r":[[-236.1,-132.9],[-244.4,-96.9],[-246.2,-97.3],[-250.6,-78.2],[-247.5,-77.5],[-250.4,-65.2],[-253.0,-53.8],[-254.9,-54.3],[-257.3,-43.7],[-255.4,-43.2],[-258.1,-31.4],[-260.9,-19.5],[-263.9,-20.2],[-268.5,-0.4],[-266.6,-0.0],[-274.6,34.4],[-284.3,32.2],[-292.2,30.3],[-306.0,27.1],[-314.8,25.1],[-325.0,22.7],[-317.0,-11.7],[-314.8,-11.2],[-310.3,-31.0],[-313.7,-31.8],[-311.0,-43.6],[-308.2,-55.5],[-305.9,-54.9],[-303.4,-65.5],[-305.8,-66.1],[-303.2,-77.4],[-300.3,-89.8],[-296.9,-89.0],[-292.6,-108.0],[-294.8,-108.6],[-286.5,-144.6],[-276.2,-142.2],[-265.4,-139.8],[-255.3,-137.4],[-246.0,-135.3],[-236.1,-132.9]]},{"n":"Loeb House, 17 Quincy Street","h":51.0,"r":[[474.2,90.9],[501.7,97.5],[502.1,95.8],[538.2,104.4],[526.1,155.3],[514.4,152.5],[514.3,153.1],[516.9,153.7],[501.8,217.3],[453.1,205.7],[468.2,142.1],[470.1,142.5],[473.6,127.5],[465.9,125.7],[474.2,90.9]]},{"n":"Wadsworth House","h":32.0,"r":[[-233.7,147.2],[-240.5,165.9],[-241.1,165.7],[-243.5,172.1],[-253.4,199.3],[-237.7,205.1],[-237.8,205.1],[-229.8,207.2],[-230.0,207.9],[-235.0,221.7],[-240.4,236.7],[-241.0,238.3],[-239.1,239.0],[-241.6,245.4],[-251.3,242.2],[-251.8,243.6],[-269.7,237.0],[-270.4,239.1],[-274.7,237.6],[-278.9,236.0],[-278.1,233.9],[-295.2,227.6],[-295.0,226.9],[-304.3,223.5],[-290.7,186.2],[-285.9,187.9],[-275.7,160.2],[-275.1,160.4],[-272.7,154.0],[-273.4,153.8],[-266.5,135.1],[-233.7,147.2]]},{"n":"Lionel Hall","h":36.0,"r":[[-309.9,-481.9],[-333.9,-382.1],[-339.9,-383.5],[-347.6,-385.4],[-355.4,-387.3],[-361.5,-388.7],[-337.5,-488.6],[-331.4,-487.1],[-323.6,-485.2],[-315.9,-483.4],[-309.9,-481.9]]},{"n":"Canaday Hall, Entries A, B","h":59.95,"r":[[272.2,-473.9],[265.7,-445.8],[200.1,-461.0],[206.5,-489.0],[194.2,-491.9],[209.2,-557.2],[237.4,-550.7],[222.4,-485.4],[272.2,-473.9]]},{"n":"Sever Hall","h":80.3,"r":[[496.5,-241.1],[488.1,-205.6],[490.4,-203.7],[492.2,-201.7],[493.4,-198.9],[493.6,-196.3],[493.2,-193.7],[491.6,-191.1],[489.2,-188.9],[487.0,-188.2],[483.9,-188.0],[467.5,-118.8],[469.9,-117.5],[471.8,-114.5],[472.4,-112.2],[472.5,-108.9],[471.5,-106.2],[469.3,-103.9],[466.9,-102.3],[463.3,-101.2],[455.0,-66.1],[380.2,-84.0],[388.4,-119.0],[385.9,-120.9],[384.0,-123.6],[382.8,-127.1],[383.3,-130.2],[384.9,-134.0],[388.3,-136.3],[390.4,-136.7],[392.6,-136.5],[397.2,-155.9],[396.0,-156.2],[399.5,-171.3],[403.0,-185.9],[404.2,-185.6],[408.8,-205.0],[406.3,-207.2],[404.2,-209.4],[403.2,-212.8],[403.6,-216.2],[404.6,-218.8],[406.8,-221.2],[410.2,-222.8],[413.0,-222.7],[421.6,-259.0],[496.5,-241.1]]},{"n":"Fairfax Hall","h":64.0,"r":[[-23.3,408.4],[-35.5,442.2],[-44.3,466.7],[-64.1,459.5],[-81.9,453.0],[-86.0,451.5],[-85.5,449.9],[-99.3,445.0],[-95.6,434.5],[-119.1,425.9],[-125.3,443.0],[-132.0,440.5],[-135.8,451.2],[-142.1,448.9],[-142.6,450.3],[-167.1,441.1],[-154.7,406.5],[-154.4,405.7],[-153.3,402.7],[-151.4,397.5],[-150.3,394.4],[-142.6,373.1],[-142.2,371.9],[-140.0,365.9],[-138.7,362.2],[-21.9,404.7],[-23.3,408.4]]},{"n":"Lamont Library","h":54.0,"r":[[368.1,349.2],[463.1,371.7],[465.7,360.5],[508.7,370.7],[506.1,381.9],[535.3,388.8],[515.9,471.5],[499.6,467.7],[492.3,498.7],[360.3,467.5],[367.6,436.4],[348.7,432.0],[357.4,395.0],[346.8,392.8],[349.9,379.6],[360.4,382.2],[368.1,349.2]]},{"n":"Holden Chapel","h":35.0,"r":[[-246.7,-487.1],[-250.9,-468.8],[-301.8,-480.2],[-297.7,-498.6],[-293.7,-516.5],[-242.7,-505.1],[-246.7,-487.1]]},{"n":"Emerson Hall","h":67.9,"r":[[597.5,0.6],[580.2,73.7],[433.7,38.8],[451.0,-34.4],[597.5,0.6]]}];
+  const WELD = [[41.2,-64.5],[37.3,-47.5],[36.1,-42.6],[35.9,-41.4],[38.9,-40.7],[40.8,-40.2],[39.6,-34.8],[37.7,-26.7],[35.4,-17.0],[34.3,-12.4],[27.1,-14.1],[18.1,24.1],[25.4,25.9],[24.2,31.2],[22.3,39.0],[20.7,46.2],[19.3,52.1],[14.3,50.9],[14.0,52.1],[13.8,53.2],[8.8,74.6],[3.9,73.4],[-0.4,72.4],[-4.8,71.4],[-11.0,69.9],[-22.5,67.2],[-27.6,66.0],[-32.2,64.9],[-36.8,63.8],[-41.6,62.7],[-40.7,58.6],[-38.3,48.7],[-37.7,45.9],[-36.5,40.7],[-36.1,39.1],[-41.2,37.9],[-39.9,31.9],[-38.2,24.8],[-36.4,17.0],[-35.1,11.6],[-27.5,13.4],[-18.6,-24.8],[-26.2,-26.6],[-25.1,-31.2],[-22.9,-40.9],[-20.9,-49.1],[-19.7,-54.5],[-17.1,-53.9],[-14.5,-53.3],[-9.2,-76.3],[-4.4,-75.2],[0.3,-74.1],[4.8,-73.0],[9.0,-72.1],[23.4,-68.7],[27.6,-67.7],[32.0,-66.6],[36.4,-65.6],[41.2,-64.5]];
+
+  const SIN30 = 0.5, COS30 = 0.8660254;
+
+  function iso(x, y, z, s) {
+    return [(x - y) * COS30 * s, (x + y) * SIN30 * s - z * s];
+  }
+
+  function el(tag, attrs) {
+    const n = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const k in attrs) n.setAttribute(k, attrs[k]);
+    return n;
+  }
+
+  function pts(list) {
+    return list.map((p) => p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ");
+  }
+
+  /* ============================================================
+     ROOM PROGRAM \u2014 building-local feet.
+     x runs east across the building (0 = west wall, 51 = east wall)
+     y runs north into the band (0 = corridor wall, 20 = north gable)
+     ============================================================ */
+
+  const ROOMS = [
+    { id: "common", name: "Common", dim: "15 x 20", x: 0, y: 0, w: 15, d: 20, fill: "common" },
+    { id: "k", name: "K", dim: "10 x 12", x: 1, y: -10, w: 12, d: 10, fill: "service" },
+    { id: "hall", name: "Hall", dim: "4 ft wide", x: 15, y: 0, w: 36, d: 4, fill: "circ" },
+    { id: "bedA", name: "Bedroom A", dim: "10 x 16", x: 17, y: 4, w: 10, d: 16, fill: "bed" },
+    { id: "bath", name: "Bath", dim: "8 x 16", x: 27, y: 4, w: 8, d: 16, fill: "service" },
+    { id: "bedB", name: "Bedroom B", dim: "16 x 10", x: 35, y: 4, w: 16, d: 10, fill: "bed" },
+    { id: "gap", name: "unresolved", dim: "16 x 6", x: 35, y: 14, w: 16, d: 6, fill: "gap" }
+  ];
+
+  const FURNITURE = [
+    { r: "bedA", x: 17.5, y: 13.2, w: 3.3, d: 6.6, h: 2.0, t: "bed" },
+    { r: "bedA", x: 23.2, y: 13.2, w: 3.3, d: 6.6, h: 2.0, t: "bed" },
+    { r: "bedA", x: 17.5, y: 5.0, w: 4.0, d: 2.0, h: 2.4, t: "desk" },
+    { r: "bedA", x: 22.5, y: 5.0, w: 4.0, d: 2.0, h: 2.4, t: "desk" },
+    { r: "bedB", x: 36.0, y: 5.0, w: 6.6, d: 3.3, h: 2.0, t: "bed" },
+    { r: "bedB", x: 44.0, y: 5.0, w: 6.6, d: 3.3, h: 2.0, t: "bed" },
+    { r: "bedB", x: 36.5, y: 11.0, w: 4.0, d: 2.0, h: 2.4, t: "desk" },
+    { r: "bedB", x: 45.0, y: 11.0, w: 4.0, d: 2.0, h: 2.4, t: "desk" },
+    { r: "common", x: 1.2, y: 12.0, w: 6.5, d: 3.0, h: 2.4, t: "sofa" },
+    { r: "common", x: 9.5, y: 12.5, w: 3.0, d: 2.0, h: 3.6, t: "shelf" },
+    { r: "common", x: 4.0, y: 5.0, w: 5.0, d: 3.5, h: 2.4, t: "table" },
+    { r: "k", x: 1.5, y: -9.2, w: 10.5, d: 2.0, h: 3.0, t: "counter" },
+    { r: "bath", x: 27.6, y: 5.0, w: 3.0, d: 3.0, h: 6.8, t: "shower" },
+    { r: "bath", x: 31.5, y: 5.2, w: 2.0, d: 1.6, h: 2.4, t: "fixture" },
+    { r: "bath", x: 28.0, y: 12.0, w: 6.0, d: 1.8, h: 2.8, t: "fixture" }
+  ];
+
+  /* ---------- palettes: three executions of scan-outside / room-inside ---------- */
+
+  const DIRECTIONS = [
+    {
+      tag: "A",
+      name: "Cyanotype to daylight",
+      why:
+        "The campus renders as a cyanotype \u2014 white line work on Prussian blue, the exact process an 1872 architect would have used to draw Weld. Then the suite resolves into plaster, oak and real north light. <strong>The scan isn't sci-fi, it's the original drawing waking up.</strong>",
+      risk: "Risk: blueprint blue is a strong commitment. If you hate it you hate the whole outside.",
+      out: {
+        bg: "#06203F", grid: "#0C3260", wall: "rgba(150,200,245,0.10)",
+        edge: "#8FC4F2", roof: "rgba(150,200,245,0.14)",
+        hiEdge: "#FFFFFF", hiRoof: "rgba(255,255,255,0.16)", glow: "#E4526F"
+      },
+      in: {
+        bg: "#D9E2EC", floor: "#B5813F", floorAlt: "#A5732F", wall: "#F0EDE7",
+        wallSide: "#DFDAD1", edge: "#8C8578", accent: "#A41034", glass: "#CFE4F2"
+      }
+    },
+    {
+      tag: "B",
+      name: "Graphite to studio",
+      why:
+        "No hue at all outside: black void, cold white edges, the buildings reading as machined graphite. Inside is a photographic studio \u2014 neutral white walls, soft grey floor, one shadow. <strong>Restraint is the whole idea; nothing glows because nothing needs to.</strong>",
+      risk: "Risk: the safest of the three, and the least memorable. Elegant can read as empty.",
+      out: {
+        bg: "#0A0B0D", grid: "#17191C", wall: "rgba(205,215,225,0.06)",
+        edge: "#C6D0D9", roof: "rgba(205,215,225,0.12)",
+        hiEdge: "#FFFFFF", hiRoof: "rgba(255,255,255,0.20)", glow: "#FFFFFF"
+      },
+      in: {
+        bg: "#E7E9EC", floor: "#D6D3CE", floorAlt: "#C7C4BE", wall: "#FBFBFC",
+        wallSide: "#E9E9EB", edge: "#9AA0A6", accent: "#14171A", glass: "#DCE6EE"
+      }
+    },
+    {
+      tag: "C",
+      name: "Crimson scan to lamplight",
+      why:
+        "Skip cyan entirely. The campus scan is Harvard crimson on near-black, and the interior lands at 8pm in October \u2014 warm lamps, deep shadow, the window a cold blue rectangle against it. <strong>The only direction here that feels like it belongs to a school rather than a spec sheet.</strong>",
+      risk: "Risk: red edges on black is the hardest palette to keep legible. Needs careful contrast work.",
+      out: {
+        bg: "#150609", grid: "#2A0D14", wall: "rgba(228,90,120,0.07)",
+        edge: "#E4708C", roof: "rgba(228,90,120,0.13)",
+        hiEdge: "#FFD8E0", hiRoof: "rgba(255,205,215,0.18)", glow: "#FF9DB4"
+      },
+      in: {
+        bg: "#1E1510", floor: "#7A4E24", floorAlt: "#6A421D", wall: "#C0A079",
+        wallSide: "#9C8060", edge: "#4A3524", accent: "#FFCE8F", glass: "#2E4A63"
+      }
+    }
+  ];
+
+  /* ============================================================
+     campus render \u2014 real footprints, extruded to real heights
+     ============================================================ */
+
+  function renderCampus(svg, p) {
+    const W = 360, H = 260, s = 0.185;
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    svg.innerHTML = "";
+    svg.appendChild(el("rect", { x: 0, y: 0, width: W, height: H, fill: p.bg }));
+
+    const g = el("g", { transform: "translate(" + W / 2 + "," + (H * 0.62) + ")" });
+    svg.appendChild(g);
+
+    for (let i = -600; i <= 600; i += 150) {
+      const a = iso(i, -600, 0, s), b = iso(i, 600, 0, s);
+      const c = iso(-600, i, 0, s), d = iso(600, i, 0, s);
+      g.appendChild(el("line", { x1: a[0], y1: a[1], x2: b[0], y2: b[1], stroke: p.grid, "stroke-width": 0.6 }));
+      g.appendChild(el("line", { x1: c[0], y1: c[1], x2: d[0], y2: d[1], stroke: p.grid, "stroke-width": 0.6 }));
+    }
+
+    const items = CAMPUS.map((b) => {
+      const ring = b.r.map((q) => [q[0], -q[1]]);
+      let cx = 0, cy = 0;
+      ring.forEach((q) => { cx += q[0]; cy += q[1]; });
+      return { ring, cx: cx / ring.length, cy: cy / ring.length, h: b.h || 45, weld: b.n === "Weld Hall" };
+    });
+    items.sort((a, b) => a.cx + a.cy - (b.cx + b.cy));
+
+    items.forEach((b) => {
+      const edge = b.weld ? p.hiEdge : p.edge;
+      const roof = b.weld ? p.hiRoof : p.roof;
+      const lw = b.weld ? 1.1 : 0.55;
+      const walls = [];
+      for (let i = 0; i < b.ring.length - 1; i++) {
+        const a = b.ring[i], c = b.ring[i + 1];
+        walls.push({
+          d: Math.min(a[0] + a[1], c[0] + c[1]),
+          q: [iso(a[0], a[1], 0, s), iso(c[0], c[1], 0, s), iso(c[0], c[1], b.h, s), iso(a[0], a[1], b.h, s)]
+        });
+      }
+      walls.sort((m, n) => m.d - n.d);
+      walls.forEach((w) => {
+        g.appendChild(el("polygon", { points: pts(w.q), fill: p.wall, stroke: edge, "stroke-width": lw * 0.55, "stroke-opacity": 0.75 }));
+      });
+      g.appendChild(el("polygon", {
+        points: pts(b.ring.map((q) => iso(q[0], q[1], b.h, s))),
+        fill: roof, stroke: edge, "stroke-width": lw
+      }));
+      if (b.weld) {
+        const top = b.ring.map((q) => iso(q[0], q[1], b.h + 26, s));
+        g.appendChild(el("polygon", { points: pts(top), fill: "none", stroke: p.glow, "stroke-width": 0.9, "stroke-opacity": 0.55, "stroke-dasharray": "3 3" }));
+      }
+    });
+  }
+
+  /* ============================================================
+     interior render \u2014 dollhouse axonometric of the program above
+     ============================================================ */
+
+  function renderInterior(svg, p, mirror) {
+    const W = 360, H = 260, s = 4.15;
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    svg.innerHTML = "";
+    svg.appendChild(el("rect", { x: 0, y: 0, width: W, height: H, fill: p.bg }));
+    const g = el("g", { transform: "translate(" + W * 0.5 + "," + H * 0.34 + ")" });
+    svg.appendChild(g);
+
+    // world -> view: north (y=20) goes to the back; optional east/west mirror
+    const MX = mirror ? -1 : 1;
+    const P = (x, y, z) => iso(MX * (x - 25.5), 20 - y, z, s);
+
+    const slabs = ROOMS.map((r) => ({ r, d: Math.min(MX * (r.x - 25.5) + 20 - (r.y + r.d), MX * (r.x + r.w - 25.5) + 20 - (r.y + r.d)) }));
+    slabs.sort((a, b) => a.d - b.d);
+
+    const tone = { common: p.floor, bed: p.floor, service: p.floorAlt, circ: p.floorAlt, gap: "none" };
+
+    slabs.forEach(({ r }) => {
+      const c = [P(r.x, r.y, 0), P(r.x + r.w, r.y, 0), P(r.x + r.w, r.y + r.d, 0), P(r.x, r.y + r.d, 0)];
+      if (r.fill === "gap") {
+        g.appendChild(el("polygon", { points: pts(c), fill: "none", stroke: p.edge, "stroke-width": 0.7, "stroke-dasharray": "2.5 2.5", "stroke-opacity": 0.8 }));
+      } else {
+        g.appendChild(el("polygon", { points: pts(c), fill: tone[r.fill], stroke: p.edge, "stroke-width": 0.5, "stroke-opacity": 0.55 }));
+      }
+    });
+
+    // perimeter: full-height at the back (north + one side), stubs in front
+    const wallH = 9.5, stub = 2.6;
+    function wall(x1, y1, x2, y2, h, face) {
+      const q = [P(x1, y1, 0), P(x2, y2, 0), P(x2, y2, h), P(x1, y1, h)];
+      g.appendChild(el("polygon", { points: pts(q), fill: face, stroke: p.edge, "stroke-width": 0.5, "stroke-opacity": 0.7 }));
+    }
+
+    wall(0, 20, 51, 20, wallH, p.wall);                    // north gable, full height
+    if (!mirror) { wall(0, 0, 0, 20, wallH, p.wallSide); } else { wall(51, 0, 51, 20, wallH, p.wallSide); }
+    wall(13, 0, 51, 0, stub, p.wallSide);                  // corridor side, cut low
+    wall(1, -10, 13, -10, stub, p.wallSide);               // K south wall
+    wall(13, -10, 13, 0, stub, p.wallSide);                // K east wall
+    wall(1, -10, 1, 0, stub, p.wallSide);                  // K west wall
+    if (!mirror) { wall(51, 0, 51, 20, stub, p.wallSide); } else { wall(0, 0, 0, 20, stub, p.wallSide); }
+
+    // windows punched into the north gable
+    [[2, 13], [18, 26], [36, 49]].forEach(([a, b]) => {
+      const q = [P(a, 20, 2.6), P(b, 20, 2.6), P(b, 20, 7.8), P(a, 20, 7.8)];
+      g.appendChild(el("polygon", { points: pts(q), fill: p.glass, stroke: p.edge, "stroke-width": 0.5 }));
+    });
+
+    // interior partitions, knee height so the plan stays readable
+    [[15, 0, 15, 20], [17, 4, 27, 4], [27, 4, 27, 20], [35, 4, 35, 20], [13, 0, 13, -10]].forEach(([a, b, c, d]) => {
+      wall(a, b, c, d, stub, p.wallSide);
+    });
+
+    // furniture
+    const boxes = FURNITURE.map((f) => ({ f, d: MX * (f.x - 25.5) + 20 - (f.y + f.d) }));
+    boxes.sort((a, b) => a.d - b.d);
+    boxes.forEach(({ f }) => {
+      const col = f.t === "bed" || f.t === "sofa" ? p.accent : p.wallSide;
+      const op = f.t === "bed" || f.t === "sofa" ? 0.9 : 1;
+      const top = [P(f.x, f.y, f.h), P(f.x + f.w, f.y, f.h), P(f.x + f.w, f.y + f.d, f.h), P(f.x, f.y + f.d, f.h)];
+      const front = [P(f.x, f.y, 0), P(f.x + f.w, f.y, 0), P(f.x + f.w, f.y, f.h), P(f.x, f.y, f.h)];
+      const side = [P(f.x + f.w, f.y, 0), P(f.x + f.w, f.y + f.d, 0), P(f.x + f.w, f.y + f.d, f.h), P(f.x + f.w, f.y, f.h)];
+      [front, side].forEach((q) =>
+        g.appendChild(el("polygon", { points: pts(q), fill: p.floorAlt, stroke: p.edge, "stroke-width": 0.4, "stroke-opacity": 0.6 })));
+      g.appendChild(el("polygon", { points: pts(top), fill: col, "fill-opacity": op, stroke: p.edge, "stroke-width": 0.4, "stroke-opacity": 0.6 }));
+    });
+  }
+
+  /* ============================================================
+     the scaled plan drawing
+     ============================================================ */
+
+  function renderPlan(svg) {
+    const s = 12.2, ox = 46, oy = 54;
+    svg.setAttribute("viewBox", "0 0 720 442");
+    svg.innerHTML = "";
+    const X = (x) => ox + x * s;
+    const Y = (y) => oy + (20 - y) * s;
+
+    const fills = {
+      common: "rgba(94,166,235,0.16)", bed: "rgba(94,166,235,0.10)",
+      service: "rgba(148,170,198,0.10)", circ: "rgba(148,170,198,0.05)", gap: "none"
+    };
+
+    const hatch = el("pattern", { id: "hatch", width: 6, height: 6, patternTransform: "rotate(45)", patternUnits: "userSpaceOnUse" });
+    hatch.appendChild(el("line", { x1: 0, y1: 0, x2: 0, y2: 6, stroke: "var(--faint)", "stroke-width": 1 }));
+    const defs = el("defs", {});
+    defs.appendChild(hatch);
+    svg.appendChild(defs);
+
+    // masonry: real exterior walls solid, the cut into the rest of the floor dashed
+    const shell = [
+      [0, 20, 51, 20], [0, 0, 0, 20], [51, 0, 51, 20]
+    ];
+    shell.forEach(([a, b, c, d]) =>
+      svg.appendChild(el("line", { x1: X(a), y1: Y(b), x2: X(c), y2: Y(d), stroke: "var(--rule)", "stroke-width": 11, "stroke-linecap": "square" })));
+    svg.appendChild(el("line", {
+      x1: X(13), y1: Y(0), x2: X(51), y2: Y(0),
+      stroke: "var(--faint)", "stroke-width": 2, "stroke-dasharray": "8 5"
+    }));
+    const cut = el("text", { x: X(32), y: Y(0) + 20, "text-anchor": "middle", fill: "var(--faint)", "font-family": "var(--mono)", "font-size": 10 });
+    cut.textContent = "building corridor \u2014 you come in from here";
+    svg.appendChild(cut);
+
+    ROOMS.forEach((r) => {
+      const g = el("g", {});
+      g.appendChild(el("rect", {
+        x: X(r.x), y: Y(r.y + r.d), width: r.w * s, height: r.d * s,
+        fill: r.fill === "gap" ? "url(#hatch)" : fills[r.fill],
+        stroke: r.fill === "gap" ? "var(--faint)" : "var(--cyano)",
+        "stroke-width": r.fill === "gap" ? 1 : 1.4,
+        "stroke-dasharray": r.fill === "gap" ? "4 3" : "none",
+        "fill-opacity": r.fill === "gap" ? 0.35 : 1
+      }));
+      const cx = X(r.x + r.w / 2), cy = Y(r.y + r.d / 2);
+      const t1 = el("text", { x: cx, y: cy - 2, "text-anchor": "middle", fill: "var(--ink)", "font-family": "var(--mono)", "font-size": 12 });
+      t1.textContent = r.name;
+      const t2 = el("text", { x: cx, y: cy + 13, "text-anchor": "middle", fill: "var(--faint)", "font-family": "var(--mono)", "font-size": 10 });
+      t2.textContent = r.dim;
+      g.appendChild(t1);
+      g.appendChild(t2);
+      svg.appendChild(g);
+    });
+
+    // entry door + swing
+    const ex = X(16.2), ey = Y(0);
+    svg.appendChild(el("line", { x1: ex, y1: ey, x2: ex + 3.2 * s, y2: ey, stroke: "var(--crimson-lift)", "stroke-width": 4 }));
+    svg.appendChild(el("path", {
+      d: "M " + ex + " " + ey + " a " + 3.2 * s + " " + 3.2 * s + " 0 0 0 " + 3.2 * s + " " + -3.2 * s,
+      fill: "none", stroke: "var(--crimson-lift)", "stroke-width": 1, "stroke-dasharray": "3 2"
+    }));
+    const ent = el("text", { x: ex + 3.2 * s + 10, y: ey - 5, fill: "var(--crimson-lift)", "font-family": "var(--mono)", "font-size": 10 });
+    ent.textContent = "you enter here";
+    svg.appendChild(ent);
+
+    // dimension line across the building
+    const dy = Y(20) - 26;
+    svg.appendChild(el("line", { x1: X(0), y1: dy, x2: X(51), y2: dy, stroke: "var(--dim)", "stroke-width": 1 }));
+    [0, 51].forEach((x) =>
+      svg.appendChild(el("line", { x1: X(x), y1: dy - 5, x2: X(x), y2: dy + 5, stroke: "var(--dim)", "stroke-width": 1 })));
+    const dt = el("text", { x: X(25.5), y: dy - 9, "text-anchor": "middle", fill: "var(--dim)", "font-family": "var(--mono)", "font-size": 11 });
+    dt.textContent = "51 ft clear \u2014 the full width of Weld Hall";
+    svg.appendChild(dt);
+
+    // north arrow
+    const nx = X(51) + 26, ny = Y(14);
+    svg.appendChild(el("line", { x1: nx, y1: ny + 34, x2: nx, y2: ny, stroke: "var(--ink)", "stroke-width": 1.2 }));
+    svg.appendChild(el("polygon", { points: nx + "," + (ny - 7) + " " + (nx - 4) + "," + ny + " " + (nx + 4) + "," + ny, fill: "var(--ink)" }));
+    const nt = el("text", { x: nx, y: ny + 48, "text-anchor": "middle", fill: "var(--ink)", "font-family": "var(--mono)", "font-size": 11 });
+    nt.textContent = "N";
+    svg.appendChild(nt);
+  }
+
+  /* ---------- Weld footprint locator ---------- */
+
+  function renderLocator(svg) {
+    svg.innerHTML = "";
+    const ring = WELD.map((q) => [q[0], q[1]]);
+    let minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9;
+    ring.forEach((q) => {
+      minx = Math.min(minx, q[0]); maxx = Math.max(maxx, q[0]);
+      miny = Math.min(miny, q[1]); maxy = Math.max(maxy, q[1]);
+    });
+    const s = Math.min(146 / (maxx - minx), 258 / (maxy - miny));
+    const T = (q) => [(200 - (maxx - minx) * s) / 2 + (q[0] - minx) * s, 30 + (q[1] - miny) * s];
+    const screen = ring.map(T);
+
+    const defs = el("defs", {});
+    const clip = el("clipPath", { id: "weldclip" });
+    clip.appendChild(el("polygon", { points: pts(screen) }));
+    defs.appendChild(clip);
+    svg.appendChild(defs);
+
+    svg.appendChild(el("polygon", {
+      points: pts(screen), fill: "rgba(94,166,235,0.10)",
+      stroke: "var(--cyano)", "stroke-width": 1.4
+    }));
+
+    // the north ~30 ft of the plate, clipped to the footprint and squared to the building's 13 degree axis
+    const cx = screen.reduce((a, q) => a + q[0], 0) / screen.length;
+    const top = Math.min.apply(null, screen.map((q) => q[1]));
+    const g = el("g", { "clip-path": "url(#weldclip)", transform: "rotate(13 " + cx + " " + top + ")" });
+    g.appendChild(el("rect", {
+      x: cx - 120, y: top - 30, width: 240, height: 30 + 30 * s,
+      fill: "var(--crimson)", "fill-opacity": 0.5
+    }));
+    svg.appendChild(g);
+    svg.appendChild(el("polygon", { points: pts(screen), fill: "none", stroke: "var(--cyano)", "stroke-width": 1.4 }));
+
+    const lbl = el("text", { x: 100, y: 18, "text-anchor": "middle", fill: "var(--crimson-lift)", "font-family": "var(--mono)", "font-size": 10 });
+    lbl.textContent = "WELD 15 \u2014 north end";
+    svg.appendChild(lbl);
+
+    [["54 x 151 ft, 87 ft tall", 304], ["long axis 13 deg E of N", 316]].forEach(([t, y]) => {
+      const n = el("text", { x: 100, y: y, "text-anchor": "middle", fill: "var(--faint)", "font-family": "var(--mono)", "font-size": 8.5 });
+      n.textContent = t;
+      svg.appendChild(n);
+    });
+  }
+
+  /* ---------- orientation variants (plan thumbnails) ---------- */
+
+  const FLIPS = [
+    { tag: "1", name: "Common room west", sub: "Old Yard view", mirror: false,
+      body: "Your common room windows look into the Old Yard \u2014 Grays, Matthews, the elms, Commencement. Bedroom B takes the east end toward Widener. Common room gets afternoon light; you wake up facing the library." },
+    { tag: "2", name: "Common room east", sub: "Widener view", mirror: true,
+      body: "Mirror image. The common room faces Widener Library and the Sever quad, bedroom B takes the Old Yard end. Bedrooms get the better view, the common room gets morning sun." },
+    { tag: "3", name: "Don't know yet", sub: "make it a switch", mirror: false,
+      body: "Neither is documented anywhere I can reach \u2014 Harvard's indoor floor plans are behind a login. Ship option 1 as the default and put a mirror toggle in the UI, so one click flips the whole suite when you finally stand in it." }
+  ];
+
+  function renderFlip(svg, mirror) {
+    const s = 4.6, W = 260, H = 170;
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    svg.innerHTML = "";
+    const X = (x) => 14 + (mirror ? (51 - x) : x) * s;
+    const Y = (y) => 20 + (20 - y) * s;
+    const cols = { common: "var(--cyano)", bed: "var(--dim)", service: "var(--faint)", circ: "var(--rule)", gap: "none" };
+    ROOMS.forEach((r) => {
+      const x1 = Math.min(X(r.x), X(r.x + r.w));
+      svg.appendChild(el("rect", {
+        x: x1, y: Y(r.y + r.d), width: r.w * s, height: r.d * s,
+        fill: cols[r.fill], "fill-opacity": r.fill === "common" ? 0.5 : 0.18,
+        stroke: r.fill === "gap" ? "var(--faint)" : "var(--rule)", "stroke-width": 1,
+        "stroke-dasharray": r.fill === "gap" ? "3 2" : "none"
+      }));
+    });
+    const a = el("text", { x: 14, y: 162, fill: "var(--faint)", "font-family": "var(--mono)", "font-size": 9 });
+    a.textContent = mirror ? "WIDENER  <-- ... -->  OLD YARD" : "OLD YARD  <-- ... -->  WIDENER";
+    svg.appendChild(a);
+  }
+
+  /* ---------- build the page ---------- */
+
+  const KEY = [
+    ["rgba(94,166,235,0.55)", "Common room", "300 sq ft"],
+    ["rgba(94,166,235,0.30)", "Bedroom A", "160 sq ft"],
+    ["rgba(94,166,235,0.30)", "Bedroom B", "160 sq ft"],
+    ["rgba(148,170,198,0.35)", "Bath, en-suite", "128 sq ft"],
+    ["rgba(148,170,198,0.35)", "K \u2014 kitchen?", "120 sq ft"],
+    ["rgba(148,170,198,0.18)", "Hallway", "144 sq ft"],
+    ["transparent", "Unresolved", "96 sq ft"]
+  ];
+
+  const key = document.getElementById("key");
+  KEY.forEach(([c, n, v]) => {
+    const row = document.createElement("div");
+    row.className = "keyrow";
+    row.innerHTML = '<span class="swatch" style="background:' + c + '"></span><span>' + n + "</span><b>" + v + "</b>";
+    key.appendChild(row);
+  });
+  const total = document.createElement("div");
+  total.className = "keyrow";
+  total.innerHTML = "<span>Suite total</span><b>~1,108 sq ft</b>";
+  key.appendChild(total);
+
+  renderPlan(document.getElementById("plan"));
+  renderLocator(document.getElementById("locator"));
+
+  const dirs = document.getElementById("dirs");
+  DIRECTIONS.forEach((d) => {
+    const card = document.createElement("div");
+    card.className = "opt";
+    card.innerHTML =
+      '<div class="opt-head"><span class="tag">' + d.tag + '</span><h3>' + d.name + "</h3></div>" +
+      '<div class="pair">' +
+      '<div><svg role="img" aria-label="Harvard Yard rendered in the ' + d.name + ' direction"></svg><span class="plabel">campus</span></div>' +
+      '<div><svg role="img" aria-label="Weld 15 interior rendered in the ' + d.name + ' direction"></svg><span class="plabel">suite</span></div>' +
+      "</div>" +
+      '<div class="opt-body"><p>' + d.why + '</p><div class="risk">' + d.risk + "</div></div>";
+    dirs.appendChild(card);
+    const svgs = card.querySelectorAll("svg");
+    renderCampus(svgs[0], d.out);
+    renderInterior(svgs[1], d.in, false);
+  });
+
+  const flips = document.getElementById("flips");
+  FLIPS.forEach((f) => {
+    const card = document.createElement("div");
+    card.className = "opt";
+    card.innerHTML =
+      '<div class="opt-head"><span class="tag">' + f.tag + '</span><h3>' + f.name + "</h3></div>" +
+      '<div class="frame-body" style="padding:0"><svg role="img" aria-label="' + f.name + '"></svg></div>' +
+      '<div class="opt-body"><p><strong>' + f.sub + "</strong> \u2014 " + f.body + "</p></div>";
+    flips.appendChild(card);
+    renderFlip(card.querySelector("svg"), f.mirror);
+  });
+</script>

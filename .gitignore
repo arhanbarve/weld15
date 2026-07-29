@@ -1,0 +1,25 @@
+node_modules/
+.next/
+out/
+build/
+next-env.d.ts
+*.tsbuildinfo
+
+# test output
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# brainstorming companion scratch
+.superpowers/
+
+# python bytecode from the vendored ui-ux-pro-max skill
+__pycache__/
+*.pyc
+
+# local env
+.env*.local
+.vercel
+
+.DS_Store
