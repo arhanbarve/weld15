@@ -95,6 +95,8 @@ describe("weld.json", () => {
 
   it("records the metadata later phases depend on", () => {
     expect(weld.meta.height_ft).toBe(87.01);
+    expect(weld.meta.massing.eaves_ft).toBe(60.0);
+    expect(weld.meta.massing.ridge_ft).toBe(85.4);
     expect(weld.meta.width_ft_gable_end_north).toBe(52.0);
     expect(weld.meta.clear_width_gable_end_ft).toBe(49.0);
     expect(weld.meta.floors_above_grade).toBe(5);

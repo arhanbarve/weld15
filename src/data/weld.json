@@ -63,7 +63,34 @@
    "pre_1962": "two vertical entries, one continuous 1-55 sequence, floor-independent. South entry 12-27, North 33-55 (Crimson, 12 Sept 1951)",
    "post_1962": "INFERRED, tightly constrained: first digit = floor = entryway, second digit runs south to north along the corridor",
    "weld_15": "fifth suite on the first floor, north half of the corridor; entryway Weld 1"
-  }
+  },
+  "height_ft_note": "height_absolute 87.01 from Harvard Facilities3D is a BUILDING HEIGHT, not a sea-level elevation. Verified: Smith Campus Center 112.0 ft over 10 known floors = 11.2 ft per floor, normal; read as an elevation it would be 8.5 ft per floor, impossible. The near-match to Cambridge's ELEV_SL 87.1 is coincidence. 87.01 corresponds to the ridge.",
+  "massing": {
+   "eaves_ft": 60.0,
+   "ridge_ft": 85.4,
+   "note": "Model as a 60 ft mass with a pitched roof to 85.4 ft, not a flat 87 ft box. 5 floors x 12 ft = 60 ft matches Cambridge eaves exactly."
+  },
+  "furniture_specs": {
+   "mattress_in": [
+    38,
+    80
+   ],
+   "fridge_max_in": [
+    24,
+    24,
+    36
+   ],
+   "source": "Harvard College DSO what-to-bring guidance"
+  },
+  "plans_exist_but_restricted": {
+   "first_floor_1962": "PIRC 956_0056, First floor plan, 03/07/1962, sheet A2, scale 1/4 in = 1 ft",
+   "typical_suites_1962": "PIRC 956_0061, Typical suite plans and elevations, sheet A7, scale 3/8 in = 1 ft",
+   "egress_1960": "PIRC 956_0034 (floors 2-4), 956_0035 (floor 5). No first-floor egress plan.",
+   "renovation_1992": "PIRC HRE 1991-003, 109 sheets, Goody Clancy & Associates",
+   "architect_1962": "The Architects Collaborative",
+   "access": "Restricted to approved Harvard University staff, or by permission. Metadata public."
+  },
+  "harvard_policy": "Harvard College DSO: \"Floor plans and room dimensions are not provided to students.\""
  },
  "rings": [
   [
