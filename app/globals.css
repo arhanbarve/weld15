@@ -226,6 +226,47 @@ button,
   min-height: 44px;
 }
 
+/* ---------- stage 3 orbit keys ---------- */
+
+/* The row reuses .hud-scrub for its buttons, so the 44 x 44 target, the border and
+   the hover come from there rather than from a second set of rules that would drift
+   from the stage buttons sitting directly above it.
+   It wraps where the stage scrubber does not have to: six buttons plus a label plus
+   the readout is wider than the HUD at 375, and the HUD is capped at the viewport. */
+.hud-orbit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--dim);
+}
+
+/* Held at a fixed width because the readout changes on every press and every frame
+   of a drag, and a row that reflows as the digits change is the layout shift the
+   delivery checklist rules out. The widest reading is "az -180° pol 88° 345 ft". */
+.hud-orbit-read {
+  min-width: 10.5rem;
+  color: var(--ink);
+}
+
+/* Spoken, not seen. The visible readout above carries the same value for anyone
+   who can see the frame; this exists because the canvas cannot be read.
+   Not display: none, and not visibility: hidden -- both remove the element from the
+   accessibility tree, and an announcement nobody hears is the whole failure mode. */
+.hud-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* ---------- P3 cyanotype chrome ---------- */
 
 /* A radial vignette in the DOM rather than a post-processing pass: same look,

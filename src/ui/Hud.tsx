@@ -1,14 +1,212 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import { STAGES, useStore, type StageId } from "@/state/store";
+import { STAGE3_CLAMP, clampOrbit, orbitOf, type Orbit } from "@/scene/orbit";
+import { keyframes } from "@/scene/stages";
 
 /**
- * Stage scrubber, stage name, and the skip control.
+ * Stage scrubber, stage name, the daylight controls, the stage-3 orbit keys, and
+ * the skip control.
  *
  * The skip button is FIRST in tab order and first in the DOM. The immersive
  * pattern the design system adopted requires an escape from the intro sequence,
  * and a skip you have to tab past six stage buttons to reach is not one.
+ *
+ * The orbit keys live HERE rather than on the canvas, and that placement is the
+ * whole reason this file gained them. MASTER.md wants a keyboard equivalent for
+ * every canvas interaction, and the obvious reading of that -- tabIndex on the
+ * canvas plus an onKeyDown -- breaks a different gate in the same checklist: the
+ * canvas is mounted before the HUD, so a focusable canvas takes the first Tab and
+ * the skip control stops being reachable first. The HUD comes after skip in the
+ * DOM, so a control group here needs nothing said about tab order at all.
  */
+
+/**
+ * MASTER.md's 44 x 44 px minimum, applied on the element.
+ *
+ * It is needed: `.hud-t input` sets a width and no height, so a native date field
+ * and a range track both come out around 20 px tall, and the height of the box IS
+ * the hit area for a range thumb.
+ *
+ * Inline for a reason that has since expired -- globals.css belonged to another
+ * phase when this was written -- so it would sit better as a rule beside
+ * `.hud-t input`. Left where it is because moving it edits the two sun controls,
+ * which is not what the orbit keys below are for.
+ */
+const TAP = { minHeight: 44 } as const;
+
+/** ISO civil date, exactly. */
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Decimal hours as a wall clock. 9.25 is 09:15; 24 is midnight ending the day. */
+function clock(hour: number): string {
+  const h = Math.floor(hour);
+  const m = Math.round((hour - h) * 60);
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+/**
+ * Degrees of azimuth or polar per press, and the arithmetic behind the 5.
+ *
+ * STAGE3_CLAMP allows 15 to 88 degrees of polar, a span of 73, which 5 crosses in
+ * 15 presses -- end to end in under a second of key repeat, and no press large
+ * enough to lose track of where the building went. Azimuth wraps, so its span is
+ * 360: 72 presses for a full turn, 18 from one facade to the next.
+ *
+ * It is also the same size as a small drag. CameraRig turns the orbit one full
+ * turn per viewport height, which at 1000 px is 0.36 deg/px, so 5 deg is 14 px of
+ * mouse -- a nudge either way does the same thing.
+ */
+const STEP_DEG = 5;
+
+/**
+ * Radius multiplier per press: STAGE3_CLAMP's whole 3x span in 15 presses.
+ *
+ * Derived from the clamp rather than written out as 1.076, so the press count is
+ * what stays fixed if the radii move -- and they can, both are computed from
+ * Weld's ring and ridge. It lands within a hair of CameraRig's 1.08 per wheel
+ * notch, so a press and a notch zoom by the same amount without either number
+ * being a copy of the other.
+ */
+const ZOOM_PRESSES = 15;
+const ZOOM_PER_PRESS = (STAGE3_CLAMP.maxRadius / STAGE3_CLAMP.minRadius) ** (1 / ZOOM_PRESSES);
+
+/**
+ * How long the orbit must sit still before it is announced, ms.
+ *
+ * A live region tied straight to the orbit would speak on every pointermove and
+ * every key repeat, which is louder than no announcement and less informative.
+ * 400 ms is longer than any key repeat interval at default settings (macOS
+ * repeats every 30-90 ms once it starts), so holding a key announces once, at the
+ * value you actually stopped on.
+ */
+const ANNOUNCE_MS = 400;
+
+/** One press worth of orbit. Defaults are the identity nudge. */
+type Nudge = { az?: number; polar?: number; zoom?: number };
+
+type OrbitControl = {
+  /** data-testid suffix, and the React key. */
+  id: string;
+  /**
+   * Button face. A typographic arrow in the HUD's mono face, not an icon: the
+   * project ships no icon set, and MASTER.md's ban is on emoji, which these are
+   * not. Same register as the numbered stage buttons next to them.
+   */
+  glyph: string;
+  label: string;
+  /** KeyboardEvent.key values, all of which do exactly what the button does. */
+  keys: string[];
+  nudge: Nudge;
+};
+
+/**
+ * The six directions, driving both the buttons and the key map.
+ *
+ * SIGNS follow CameraRig's drag exactly: right increases azimuth, up increases
+ * polar. That is the choice, not an inevitability -- the other reading, where the
+ * arrow moves the camera rather than the scene, inverts both axes. Two things
+ * decided it. The drag is the established gesture and two paths into one piece of
+ * state that disagree about direction are worse than either direction. And the
+ * glyphs have to agree with what is seen: polar is measured from straight up, so
+ * a rising polar brings the camera down from a plan toward eye level and the view
+ * tilts UP toward the horizon, which is what an up arrow should do.
+ *
+ * `=` and `_` are in the map because on a US layout `+` and `-` share keys with
+ * them and an unshifted press reports the unshifted character. Without `=` the
+ * plus key only zooms while shift is held, which reads as a broken key.
+ */
+const ORBIT_CONTROLS: OrbitControl[] = [
+  { id: "left", glyph: "←", label: "Orbit left", keys: ["ArrowLeft"], nudge: { az: -STEP_DEG } },
+  { id: "right", glyph: "→", label: "Orbit right", keys: ["ArrowRight"], nudge: { az: STEP_DEG } },
+  {
+    id: "up",
+    glyph: "↑",
+    label: "Tilt up toward eye level",
+    keys: ["ArrowUp"],
+    nudge: { polar: STEP_DEG },
+  },
+  {
+    id: "down",
+    glyph: "↓",
+    label: "Tilt down toward a plan",
+    keys: ["ArrowDown"],
+    nudge: { polar: -STEP_DEG },
+  },
+  {
+    id: "in",
+    glyph: "+",
+    label: "Closer to the building",
+    keys: ["PageUp", "+", "="],
+    nudge: { zoom: 1 / ZOOM_PER_PRESS },
+  },
+  {
+    id: "out",
+    glyph: "−",
+    label: "Further from the building",
+    keys: ["PageDown", "-", "_"],
+    nudge: { zoom: ZOOM_PER_PRESS },
+  },
+];
+
+const NUDGE_BY_KEY: Record<string, Nudge> = Object.fromEntries(
+  ORBIT_CONTROLS.flatMap((c) => c.keys.map((k) => [k, c.nudge] as const)),
+);
+
+/**
+ * Apply one press to the orbit.
+ *
+ * The orbit is read from the store HERE rather than taken from a render, for the
+ * reason CameraRig's drag reads it here: key repeat delivers events faster than
+ * React re-renders, and a closure over the rendered orbit would apply every press
+ * in the burst to the same starting angle -- a held arrow key that moves 5 degrees
+ * and then sticks. `seed` may be closed over, because it depends only on params.
+ *
+ * The null is the store's "camera is still on the stage keyframe", so the first
+ * press has to seed from that keyframe. Reading null as zero would swing the
+ * camera from azimuth 141.7 to 0 before it moved its 5 degrees.
+ *
+ * clampOrbit does the limiting, and nothing here knows what the limits are. They
+ * are derived from the ring and the ridge in orbit.ts and brute-force verified
+ * there; a second opinion about them in the HUD is a second thing to keep in step.
+ */
+function nudgeOrbit(n: Nudge, seed: Orbit, setOrbit: (o: Orbit) => void): void {
+  const o = useStore.getState().orbit ?? seed;
+  setOrbit(
+    clampOrbit({
+      azimuthDeg: o.azimuthDeg + (n.az ?? 0),
+      polarDeg: o.polarDeg + (n.polar ?? 0),
+      radius: o.radius * (n.zoom ?? 1),
+    }),
+  );
+}
+
+/** Where the camera is, compactly, for the row itself. */
+function readOrbit(o: Orbit): string {
+  return `az ${o.azimuthDeg.toFixed(0)}° pol ${o.polarDeg.toFixed(0)}° ${o.radius.toFixed(0)} ft`;
+}
+
+/**
+ * The same reading in words, for a reader that cannot see the frame.
+ *
+ * Spelled out rather than reusing readOrbit because "az" and "°" are read as
+ * letters and a symbol, and this is the only description of the camera a screen
+ * reader gets -- the canvas is opaque to it.
+ *
+ * Azimuth is the stored bearing, degrees east of north wrapped to (-180, 180], so
+ * it can come out negative. Left that way on purpose: rewriting it as 0 to 360
+ * here would put a second convention on the same number, and frames.ts, solar.ts
+ * and orbit.ts all use this one.
+ */
+function sayOrbit(o: Orbit): string {
+  return (
+    `Azimuth ${o.azimuthDeg.toFixed(0)} degrees, ` +
+    `polar ${o.polarDeg.toFixed(0)} degrees, ` +
+    `${o.radius.toFixed(0)} feet out.`
+  );
+}
+
 export function Hud() {
   const stage = useStore((s) => s.stage);
   const t = useStore((s) => s.t);
@@ -16,6 +214,41 @@ export function Hud() {
   const setT = useStore((s) => s.setT);
   const skip = useStore((s) => s.skipToSuite);
   const reduced = useStore((s) => s.reducedMotion);
+  const date = useStore((s) => s.date);
+  const hour = useStore((s) => s.hour);
+  const setDate = useStore((s) => s.setDate);
+  const setHour = useStore((s) => s.setHour);
+  const cutaway = useStore((s) => s.cutaway);
+  const setCutaway = useStore((s) => s.setCutaway);
+  const params = useStore((s) => s.params);
+  const orbit = useStore((s) => s.orbit);
+  const setOrbit = useStore((s) => s.setOrbit);
+
+  /** The orbit stage 3 opens on: the keyframe stages.ts chose, read back as angles. */
+  const seed = useMemo(() => orbitOf(keyframes(params)[3]), [params]);
+  const here = orbit ?? seed;
+
+  /**
+   * What the live region currently holds.
+   *
+   * Initialised to the opening reading rather than to "" so a reader browsing the
+   * group has the camera's position before touching anything. Some readers speak a
+   * live region that arrives with content already in it and some do not; either is
+   * fine here, because the sentence is the value of the control that just appeared.
+   */
+  const [said, setSaid] = useState(() => sayOrbit(seed));
+
+  useEffect(() => {
+    // Null means the camera is still on the keyframe, so there is nothing to
+    // report yet: announcing on arrival at stage 3 would be an interruption
+    // nobody asked for.
+    if (stage !== 3 || orbit === null) return;
+    const id = window.setTimeout(() => setSaid(sayOrbit(orbit)), ANNOUNCE_MS);
+    // The cleanup is the throttle. Every further change cancels the pending
+    // announcement, so a held key or a pointer drag speaks once, at the end,
+    // rather than sixty times a second on the way there.
+    return () => window.clearTimeout(id);
+  }, [stage, orbit]);
 
   return (
     <>
@@ -61,6 +294,110 @@ export function Hud() {
             <span className="tabular">{t.toFixed(2)}</span>
           </label>
         ) : null}
+
+        {/* The free orbit's keyboard half, stage 3 only -- and stage-3-only by
+            MOUNT, not by a branch inside the handler. Every other stage is a fixed
+            shot, and a control that is present but declines to work is a control a
+            keyboard user has to press to discover is dead. CameraRig gates the
+            pointer listeners the same way, by attaching them with the stage.
+
+            The buttons carry the whole interaction twice over: click for a pointer,
+            and the keys the group listens for. Real buttons rather than a focusable
+            div, so Tab, Enter and Space come from the platform and .hud-scrub's
+            44 x 44 applies without a second rule. */}
+        {stage === 3 ? (
+          <div
+            className="hud-orbit"
+            role="group"
+            aria-label="Orbit the camera around Weld"
+            onKeyDown={(e) => {
+              const n = NUDGE_BY_KEY[e.key];
+              if (!n) return;
+              // Ours now. Enter and Space are deliberately not in the map: they
+              // already activate the focused button, and claiming them here would
+              // apply the nudge twice.
+              e.preventDefault();
+              nudgeOrbit(n, seed, setOrbit);
+            }}
+            data-testid="orbit-keys"
+          >
+            <span aria-hidden="true">orbit</span>
+            <div className="hud-scrub">
+              {ORBIT_CONTROLS.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => nudgeOrbit(c.nudge, seed, setOrbit)}
+                  aria-label={c.label}
+                  aria-keyshortcuts={c.keys[0]}
+                  data-testid={`orbit-${c.id}`}
+                >
+                  {c.glyph}
+                </button>
+              ))}
+            </div>
+            {/* Hidden from a reader because the live region says the same thing in
+                words, and this row changes on every frame of a pointer drag. */}
+            <span className="tabular hud-orbit-read" data-testid="orbit-readout" aria-hidden="true">
+              {readOrbit(here)}
+            </span>
+            <span className="hud-sr" aria-live="polite" aria-atomic="true" data-testid="orbit-live">
+              {said}
+            </span>
+          </div>
+        ) : null}
+
+        {/* The sun. Two fields because a season and an hour are two things: the
+            north gable takes 399 minutes of sun in June and none in December, and
+            neither the date nor the hour alone can show that. */}
+        <label className="hud-t">
+          date
+          <input
+            type="date"
+            value={date}
+            // Guarded, because a date field reports "" and partial values while it
+            // is being typed into, and an empty date makes the sun NaN.
+            onChange={(e) => ISO_DATE.test(e.target.value) && setDate(e.target.value)}
+            data-testid="sun-date"
+            aria-label="Date the sun is computed for"
+            style={TAP}
+          />
+        </label>
+
+        <label className="hud-t">
+          hour
+          <input
+            type="range"
+            min={0}
+            max={24}
+            step={0.25}
+            value={hour}
+            onChange={(e) => setHour(Number(e.target.value))}
+            data-testid="sun-hour"
+            aria-label="Hour of the day in Cambridge"
+            // Without this a screen reader announces "9.25" rather than a time.
+            aria-valuetext={clock(hour)}
+            style={TAP}
+          />
+          <span className="tabular" data-testid="sun-time">
+            {clock(hour)}
+          </span>
+        </label>
+
+        {/* Roof off. Three signals, none of them colour on its own: the label says
+            which state it is in, aria-pressed says so to a screen reader, and the
+            `on` class carries a border and a weight as well as a hue. */}
+        <div className="hud-scrub" role="group" aria-label="Cutaway">
+          <button
+            type="button"
+            onClick={() => setCutaway(!cutaway)}
+            aria-pressed={cutaway}
+            data-testid="roof-off"
+            className={cutaway ? "on" : ""}
+          >
+            {cutaway ? "roof off" : "roof on"}
+          </button>
+        </div>
       </div>
     </>
   );

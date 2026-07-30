@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { DEFAULT_PARAMS } from "@/geo/rooms";
-import { keyframes, blend, thresholdOpacity, visibility } from "@/scene/stages";
+import {
+  keyframes,
+  blend,
+  thresholdOpacity,
+  visibility,
+  cameraKeyframe,
+  REDUCED_CUT,
+} from "@/scene/stages";
 import { pointInPolygon } from "@/geo/collide";
 import { fromThree } from "@/geo/frames";
 import weld from "@/data/weld.json";
@@ -133,6 +140,70 @@ describe("threshold opacity", () => {
     }
     expect(thresholdOpacity(4, 1).shell).toBeCloseTo(0, 6);
     expect(thresholdOpacity(4, 1).interior).toBeCloseTo(1, 6);
+  });
+});
+
+describe("reduced motion", () => {
+  const STAGE_POSITIONS = ([0, 1, 2, 3, 4, 5] as StageId[]).map((s) => kf[s].position);
+  const isAKeyframe = (p: readonly number[]) =>
+    STAGE_POSITIONS.some((q) => dist(p, q) < 1e-9);
+
+  it("visits no position that is not a keyframe, anywhere in the crossing", () => {
+    // The gate in docs/phases/P4-P5.md, as a property of the pure function the
+    // camera reads. Sampled at every hundredth of the slider's travel, which is
+    // its own step, so this is every value stage 4 can actually be asked for.
+    const seen: string[] = [];
+    for (let t = 0; t <= 1.0001; t += 0.01) {
+      const got = cameraKeyframe(kf, 4, t, true);
+      expect(isAKeyframe(got.position), `t=${t.toFixed(2)} is an interpolated position`).toBe(
+        true,
+      );
+      seen.push(got.position.join(","));
+    }
+    // And only two of them: outside the gable, then inside bedroom B.
+    expect(new Set(seen).size).toBe(2);
+  });
+
+  it("cuts at the same point the shell does", () => {
+    // Camera and wall on one frame. Either order apart is a frame with the camera
+    // inside a wall that is still standing, or a wall gone with the camera still
+    // outside it -- both read as a glitch rather than as a cut.
+    const before = REDUCED_CUT - 0.01;
+    const after = REDUCED_CUT + 0.01;
+    expect(cameraKeyframe(kf, 4, before, true).position).toEqual(kf[4].position);
+    expect(cameraKeyframe(kf, 4, after, true).position).toEqual(kf[5].position);
+    expect(thresholdOpacity(4, before, true)).toEqual({ shell: 1, interior: 0 });
+    expect(thresholdOpacity(4, after, true)).toEqual({ shell: 0, interior: 1 });
+  });
+
+  it("still interpolates when motion is allowed", () => {
+    // The guard against fixing the reduced path by breaking the normal one.
+    const mid = cameraKeyframe(kf, 4, 0.5, false);
+    expect(isAKeyframe(mid.position)).toBe(false);
+    for (let i = 0; i < 3; i++) {
+      expect(mid.position[i]).toBeCloseTo((kf[4].position[i]! + kf[5].position[i]!) / 2, 6);
+    }
+  });
+
+  it("leaves every other stage exactly where it was", () => {
+    // Reduced motion is about the crossing. Stages 0-3 and 5 are single places, and
+    // the flag must not move any of them.
+    for (const s of [0, 1, 2, 3, 5] as StageId[]) {
+      for (const r of [false, true]) {
+        for (const t of [0, 0.5, 1]) {
+          expect(cameraKeyframe(kf, s, t, r), `stage ${s} reduced=${r} t=${t}`).toEqual(kf[s]);
+        }
+      }
+    }
+  });
+
+  it("never leaves a frame showing neither shell nor interior", () => {
+    // Same requirement as the ramped path, and the reason the cut is a single
+    // exchange rather than a fade out followed by a fade in.
+    for (let t = 0; t <= 1.0001; t += 0.01) {
+      const { shell, interior } = thresholdOpacity(4, t, true);
+      expect(shell + interior, `at t=${t.toFixed(2)}`).toBe(1);
+    }
   });
 });
 

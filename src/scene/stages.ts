@@ -11,7 +11,7 @@
  */
 
 import { buildSuite } from "@/geo/rooms";
-import { suiteToThree, floorLevel } from "@/geo/place";
+import { suiteToThree, floorLevel, WELD } from "@/geo/place";
 import type { SuiteParams } from "@/geo/rooms";
 import type { Vec3 } from "@/geo/frames";
 import type { StageId } from "@/state/store";
@@ -19,6 +19,22 @@ import type { StageId } from "@/state/store";
 export type Keyframe = { position: Vec3; target: Vec3; fov: number };
 
 const EYE = 5 + 10 / 12; // 5 ft 10 in
+
+/**
+ * Vertical field of view for the approach to the gable, degrees.
+ *
+ * Named because the stand-off distance is derived from it. The two were independent
+ * numbers once and the distance quietly stopped framing the building.
+ */
+const GABLE_FOV = 50;
+
+/**
+ * How much taller than the ridge the frame must be, as a multiple.
+ *
+ * 1.35 leaves the roof clear of the top edge and some ground at the bottom, so the
+ * gable reads as a building end rather than as a crop of one.
+ */
+const GABLE_FRAMING = 1.35;
 
 /**
  * Where the camera sits and looks for each stage.
@@ -31,18 +47,34 @@ export function keyframes(params: SuiteParams): Record<StageId, Keyframe> {
   const bedB = suite.rooms.find((r) => r.id === "bedB")!;
   const floor = floorLevel(1);
 
-  // A point just outside the gable, level with bedroom B's window.
+  // Outside the gable, far enough back that Weld reads as a building.
+  //
+  // This used to sit 40 ft out at eye height, and that was a wall rather than a
+  // shot. At the 50 degree vertical fov below, 40 ft frames 0.93 * 40 = 37 ft of a
+  // building 85.4 ft to the ridge, centred on a 17.8 ft eye -- so the frame held a
+  // slice of brick from the ground to about 36 ft, no roof, no sky, no silhouette.
+  // The journey gate caught it as "stage 4 is a flat wash", 3 distinct tones, and
+  // the gate was right: a featureless wall lit by a sun with shadows off IS a
+  // smooth gradient. The bug was the framing, not the render.
+  //
+  // So the distance is derived from what has to fit rather than chosen: the ridge
+  // height plus headroom, divided by the tangent of the half fov. Written as a
+  // function of GABLE_FOV so the two cannot drift apart, which is how the 40
+  // survived a change of fov in the first place.
+  const gableBack =
+    (WELD.ridge * GABLE_FRAMING) / (2 * Math.tan(((GABLE_FOV / 2) * Math.PI) / 180));
   const gableOutside = suiteToThree(
     bedB.u + bedB.du / 2,
-    params.sectionLength + 40,
-    floor + EYE,
+    params.sectionLength + gableBack,
+    floor + WELD.ridge / 2,
     params,
   );
-  // Just inside bedroom B.
+  // Into bedroom B, but aimed high enough that the approach looks at the building
+  // and not at the ground in front of it. The blend to stage 5 brings the eye down.
   const insideBedB = suiteToThree(
     bedB.u + bedB.du / 2,
     bedB.v + bedB.dv - 4,
-    floor + EYE,
+    floor + WELD.ridge / 4,
     params,
   );
   // Stage 5 stands just inside bedroom B, back to the gable, looking south down
@@ -73,7 +105,7 @@ export function keyframes(params: SuiteParams): Record<StageId, Keyframe> {
     1: { position: [1500, 2600, 2600], target: [0, 40, 0], fov: 45 },
     2: { position: [420, 620, 620], target: [0, 30, 0], fov: 45 },
     3: { position: [150, 110, 190], target: [0, 42, 0], fov: 45 },
-    4: { position: gableOutside, target: insideBedB, fov: 50 },
+    4: { position: gableOutside, target: insideBedB, fov: GABLE_FOV },
     5: { position: inBedB, target: bedBTarget, fov: 62 },
   };
 }
@@ -94,21 +126,79 @@ export function blend(a: Keyframe, b: Keyframe, t: number): Keyframe {
 }
 
 /**
+ * Where the crossing cuts under reduced motion.
+ *
+ * Halfway, so the camera and the shell change on the SAME frame: any other value
+ * gives a frame with the camera already inside and the wall still there, or the
+ * wall gone and the camera still outside, and both read as a glitch rather than as
+ * a cut.
+ *
+ * Exported because Threshold.tsx cuts its scanline sweep at the same instant and
+ * currently declares its own HARD_CUT = 0.5 to do it. Two constants at one value is
+ * one too many: the sweep and the camera have to cut together or the wall's
+ * dissolve and the step through it disagree by a frame. Threshold.tsx should import
+ * this, and until it does the two have to be moved together.
+ */
+export const REDUCED_CUT = 0.5;
+
+/**
  * Opacity of Weld's exterior shell and of the interior, across the threshold.
  *
  * The windows overlap on purpose: the exterior is gone by t = 0.7 and the
  * interior is fully up by 0.9, but the interior starts at 0.4, so no frame shows
  * neither. A gap there is what a viewer reads as a flicker.
+ *
+ * `reduced` replaces both ramps with one hard cut. It is a third argument with a
+ * default rather than a rewrite of the signature because every existing caller and
+ * every assertion in tests/stages.test.ts is about the full-motion ramps, and those
+ * are the ones that must not move.
  */
-export function thresholdOpacity(stage: StageId, t: number): { shell: number; interior: number } {
+export function thresholdOpacity(
+  stage: StageId,
+  t: number,
+  reduced = false,
+): { shell: number; interior: number } {
   if (stage < 4) return { shell: 1, interior: 0 };
   if (stage > 4) return { shell: 0, interior: 1 };
+  // No crossfade at all, not a fast one. MASTER.md allows a 120 ms crossfade at a
+  // stage change, but a dissolve is what the threshold IS -- fading it quickly is
+  // still the effect the guideline exists to switch off.
+  if (reduced) {
+    return t < REDUCED_CUT ? { shell: 1, interior: 0 } : { shell: 0, interior: 1 };
+  }
   const ramp = (x: number, lo: number, hi: number) =>
     Math.min(1, Math.max(0, (x - lo) / (hi - lo)));
   return {
     shell: 1 - ramp(t, 0.2, 0.7),
     interior: ramp(t, 0.4, 0.9),
   };
+}
+
+/**
+ * The keyframe the camera should hold, for a stage and its progress.
+ *
+ * Stage 4 is the only stage with a path rather than a place -- it runs from outside
+ * the gable to inside bedroom B -- so it is the only stage this does anything to.
+ *
+ * REDUCED MOTION IS A JUMP CUT, and this is where that is true. The crossing is not
+ * walked more quickly; it is not walked. The return value is kf[4] before the cut
+ * and kf[5] after it, so the only camera positions that occur anywhere in the
+ * stage-4 sequence are two of the six keyframes and nothing between them ever
+ * exists to be rendered. Snapping in CameraRig would not be enough on its own: the
+ * camera would still visit every interpolated position, one per slider event, and
+ * an interpolated position arrived at instantly is still an interpolated position.
+ *
+ * Observable from outside via window.__cam.path -- see CameraRig.
+ */
+export function cameraKeyframe(
+  kf: Record<StageId, Keyframe>,
+  stage: StageId,
+  t: number,
+  reduced = false,
+): Keyframe {
+  if (stage !== 4) return kf[stage];
+  if (reduced) return t < REDUCED_CUT ? kf[4] : kf[5];
+  return blend(kf[4], kf[5], t);
 }
 
 /** Which stages need the campus, Weld's shell, and the interior mounted. */
