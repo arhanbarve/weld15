@@ -51,6 +51,35 @@ export function UrlSync() {
   }, []);
 
   useEffect(() => {
+    let lastQ = "";
+
+    /**
+     * The editable state, observable from outside.
+     *
+     * Same device as window.__cam, window.__perf and DragLayer's window.__drag, and for
+     * the same reason: the model is a WebGL canvas, so a gate that wants to know
+     * whether a slider moved a wall has no DOM to read.
+     *
+     * Published on EVERY store change and not only when the URL is rewritten, because
+     * two of the fields a gate needs -- `selected` and `notice` -- are deliberately not
+     * carried by a link, so they never trigger a write. `q` is whatever the last write
+     * produced, which is what makes it comparable against the address bar rather than a
+     * second opinion about it.
+     */
+    const publish = () => {
+      const s = useStore.getState();
+      (window as unknown as { __weld?: unknown }).__weld = {
+        q: lastQ,
+        stage: s.stage,
+        params: s.params,
+        cutaway: s.cutaway,
+        occupancy: s.occupancy,
+        pieces: s.pieces.length,
+        selected: s.selected,
+        notice: s.notice,
+      };
+    };
+
     /**
      * Rewrite the address bar from the store.
      *
@@ -75,6 +104,9 @@ export function UrlSync() {
         orbit: s.orbit,
       };
       const q = encode(snap);
+      lastQ = q;
+      publish();
+
       const url = new URL(window.location.href);
       if (q) url.searchParams.set(SNAPSHOT_PARAM, q);
       else url.searchParams.delete(SNAPSHOT_PARAM);
@@ -119,6 +151,7 @@ export function UrlSync() {
 
     write();
     const stop = useStore.subscribe(() => {
+      publish();
       const now = key();
       if (now.every((x, i) => x === last[i])) return;
       last = now;

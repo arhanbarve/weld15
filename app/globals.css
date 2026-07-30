@@ -159,6 +159,23 @@ button,
   align-items: center;
 }
 
+/* In the room, the HUD moves to the top.
+   MEASURED, not a preference. At stage 5 the camera stands in bedroom B and looks
+   diagonally down, so the floor -- and every piece of furniture standing on it --
+   projects into the bottom of the frame: the fit-out's 29 anchors land between y 589
+   and y 716 on a 1280 x 720 viewport, and the bottom-centred HUD occupied y 467 to
+   706. Every draggable thing in the suite was behind it. Not "hard to hit": on the
+   far side of an opaque panel, so a press reached an <input> and the pointer never
+   got to the canvas at all.
+   The top is empty at this stage for the same reason the bottom is full -- it holds
+   wall and ceiling, which nothing stands on. So this is not a compromise between the
+   two: it is the only half of the frame the HUD can sit in without covering the
+   thing the stage exists to let you touch. */
+.hud.hud-room {
+  bottom: auto;
+  top: var(--s2);
+}
+
 .hud-stage {
   display: flex;
   align-items: baseline;

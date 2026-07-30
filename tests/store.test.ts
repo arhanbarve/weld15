@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { buildSuite, DEFAULT_PARAMS } from "@/geo/rooms";
-import { layout, pieceBox } from "@/geo/furniture";
+import { doorLandings, layout, pieceBox } from "@/geo/furniture";
 import { containedBy } from "@/geo/collide";
+import { tryMove } from "@/geo/drag";
+import { buildWalls } from "@/geo/walls";
 import { CUTAWAY_MODES } from "@/scene/cutaway";
 import { OCCUPANCY_RANGE, DEFAULT_OCCUPANCY, pieceLabel, useStore } from "@/state/store";
 import { DEFAULT_SNAPSHOT, decode, encode } from "@/state/url";
@@ -205,6 +207,63 @@ describe("moving one piece", () => {
     // `against` is non-empty, and a message with no subject in it would mean the
     // wording dropped what the geometry knew.
     expect(refused).toMatch(/Bedroom A|bed|door/);
+  });
+
+  it("words a blocked doorway as a sentence about circulation", () => {
+    /*
+     * The wording gate for the one refusal that is about the suite rather than about a
+     * piece. drag.ts returns `["d1", "hall", "bath"]` -- the door, then the two rooms it
+     * joins -- precisely so that this can read as "would block the door between the hall
+     * and the bathroom" rather than as an id, and this is where that promise is kept.
+     *
+     * It lives here rather than in tests/e2e/edit.spec.ts, where docs/phases/P6.md's
+     * fourth gate originally put it, because a doorway landing sits at the edge of a room
+     * and the stage-5 camera does not show the edges: reaching one through the UI takes up
+     * to 120 nudge presses against a 62 ms frame. The rule itself is pinned in
+     * drag.test.ts, the chain from pointer to visible text is pinned in the e2e refusal
+     * gate, and what is left -- the sentence -- is pinned here in a millisecond.
+     *
+     * Searched rather than aimed: doorLandings() is layout()'s business and moves.
+     */
+    const suite = buildSuite();
+    const landings = doorLandings(suite);
+    expect(landings.length, "the suite has doorways").toBeGreaterThan(0);
+
+    let notice: string | null = null;
+    outer: for (const p of useStore.getState().pieces) {
+      for (const landing of landings) {
+        // Aim the piece's anchor at the middle of a landing. tryMove snaps, so this is a
+        // request rather than a placement, which is exactly what a drag is.
+        useStore.getState().resetAll();
+        useStore.setState({ notice: null });
+        const before = useStore.getState().pieces.find((q) => q.id === p.id)!;
+        useStore.getState().commit(
+          p.id,
+          tryMove(
+            before,
+            { u: landing.u + landing.du / 2, v: landing.v + landing.dv / 2 },
+            {
+              suite,
+              pieces: useStore.getState().pieces,
+              openings: buildWalls(suite).openings,
+            },
+          ),
+        );
+        const n = useStore.getState().notice;
+        if (n && /block the door/.test(n)) {
+          notice = n;
+          break outer;
+        }
+      }
+    }
+
+    expect(notice, "some piece can be asked to stand in some doorway").not.toBeNull();
+    // The shape of the sentence, not one particular door: which door a given piece can be
+    // pushed into depends on the fit-out.
+    expect(notice).toMatch(/would block the door between .+ and .+ \(d\d+\)\.$/);
+    // And it names ROOMS, not ids: "hall" would mean the label lookup silently fell
+    // through to the id, which is the failure this assertion exists for.
+    expect(notice).not.toMatch(/between (hall|bath|bedA|bedB|common1|k) /);
   });
 
   it("does nothing at all for an id that is not in the suite", () => {

@@ -1,6 +1,7 @@
 "use client";
 
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useThree } from "@react-three/fiber";
+import { useEffect } from "react";
 import { LAST_STAGE, useStore } from "@/state/store";
 import { visibility, thresholdOpacity } from "./stages";
 import { CameraRig } from "./CameraRig";
@@ -44,6 +45,30 @@ const CUTAWAY_ALT: Record<CutawayMode, string> = {
   section: "The model is cut on the hall's centreline and the near half removed.",
 };
 
+/**
+ * Put the accessible name on the CANVAS, which is the one place it works.
+ *
+ * `aria-label` passed to <Canvas> does not land on the canvas element. R3F spreads
+ * unrecognised props onto its own container div, and the element a screen reader
+ * actually meets -- the one with role of img by way of being a graphic -- is the canvas
+ * inside it. Measured: the attribute was absent from both the canvas and its parent, so
+ * the whole descent had no accessible name at all until this component existed. It was
+ * found by an e2e gate asserting the label, not by reading the code, which is the third
+ * time in this project that an accessibility property has been written somewhere it has
+ * no effect.
+ *
+ * role="img" goes with it: without a role, a labelled canvas is still an unlabelled
+ * graphic to several readers.
+ */
+function CanvasLabel({ text }: { text: string }) {
+  const el = useThree((s) => s.gl.domElement);
+  useEffect(() => {
+    el.setAttribute("role", "img");
+    el.setAttribute("aria-label", text);
+  }, [el, text]);
+  return null;
+}
+
 export default function Experience() {
   const stage = useStore((s) => s.stage);
   const t = useStore((s) => s.t);
@@ -75,8 +100,9 @@ export default function Experience() {
           dpr={[1, 2]}
           shadows="soft"
           gl={{ antialias: true, preserveDrawingBuffer: true }}
-          aria-label={canvasLabel}
         >
+          <CanvasLabel text={canvasLabel} />
+
           {/* Lighting attaches the scene background as well as the lights: what is
               beyond the glass is a daylight decision, and it is the same threshold
               ramp that drives the dissolve. */}
@@ -95,12 +121,26 @@ export default function Experience() {
             pieces={pieces}
             cutaway={cutaway}
             // Editing at the last stage only. The interior is mounted a stage early so
-            // its geometry is warm, and it is visible through the threshold at stage 4
-            // -- but at both of those the camera is outside or moving, and a pointer
-            // down on a floor plane 40 ft away picks a piece the viewer cannot see. The
+            // its geometry is warm and it is visible through the threshold at stage 4,
+            // but at both of those the camera is outside or moving, and a pointer down
+            // on a floor plane 40 ft away picks a piece the viewer cannot see. The
             // dimension sliders are not gated this way: correcting a number is
             // meaningful from anywhere, and it is only the pointer pick that needs the
             // camera to be in the room.
+            //
+            // WHAT THIS COSTS, MEASURED RATHER THAN GUESSED. Stage 5 stands inside
+            // bedroom B, so the pointer can only reach bedroom B's furniture: projecting
+            // bedA-bed-0's corner puts it at (1574, -57) on a 1280 x 720 viewport, which
+            // is off the top-right of the screen and behind a wall besides. The keyboard
+            // and the panel's nudge buttons reach whatever is selected, but nothing
+            // selects a piece in another room.
+            //
+            // The fix is the dollhouse view -- edit from stage 3 with a cutaway on --
+            // and it is blocked on something real: hiddenWalls() takes down the
+            // interior's own walls, and WeldExterior does not read `cutaway` at all, so
+            // from outside you are looking at an opaque 1872 brick shell. Editing from
+            // there would be dragging pieces you cannot see. Recorded here and in
+            // docs/phases/P6.md rather than half-built.
             edit={stage === LAST_STAGE}
             selected={selected}
             onSelect={select}

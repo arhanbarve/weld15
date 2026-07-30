@@ -553,19 +553,44 @@ function useHiddenWalls(
 ): ReadonlySet<string> {
   const [hidden, setHidden] = useState<ReadonlySet<string>>(NO_WALLS);
   const live = useRef<ReadonlySet<string>>(NO_WALLS);
+  const at = useRef<[number, number, number]>([NaN, NaN, NaN]);
 
   useFrame(({ camera }) => {
-    const next = hiddenWalls(
-      walls,
-      mode,
-      [camera.position.x, camera.position.y, camera.position.z],
-      params,
-      live.current,
-    );
+    // Nothing at all while the mode is off. hiddenWalls() returns an empty set for
+    // "none" and "roofOff" in one comparison, but getting there still costs a call and a
+    // set allocation per frame for the two modes that are the common case.
+    if (mode === "none" || mode === "roofOff") {
+      if (live.current.size > 0) {
+        live.current = NO_WALLS;
+        setHidden(NO_WALLS);
+      }
+      return;
+    }
+
+    // A quarter of a foot of camera movement before recomputing. hiddenWalls()'s
+    // wallsDown branch calls buildSuite() and then walks every band, and doing that on
+    // every frame of a stationary camera is pure waste -- measured as a real stall in the
+    // e2e run, where SwiftShader is already at a 65 ms frame and a mode change stopped
+    // responding to input. A quarter foot is half the drag grid, so no crossing that
+    // matters can be skipped, and the hysteresis in cutaway.ts is what handles the case
+    // of a camera creeping across a wall plane a hair at a time.
+    const p = camera.position;
+    const [x, y, z] = at.current;
+    if (Math.abs(p.x - x) < 0.25 && Math.abs(p.y - y) < 0.25 && Math.abs(p.z - z) < 0.25) return;
+    at.current = [p.x, p.y, p.z];
+
+    const next = hiddenWalls(walls, mode, [p.x, p.y, p.z], params, live.current);
     if (sameWalls(next, live.current)) return;
     live.current = next;
     setHidden(next);
   });
+
+  // A mode change has to recompute even if the camera has not moved an inch, so the
+  // remembered position is dropped when the mode does change. Without this, switching
+  // from wallsDown to section while parked shows the previous mode's walls.
+  useEffect(() => {
+    at.current = [NaN, NaN, NaN];
+  }, [mode, walls, params]);
 
   return hidden;
 }

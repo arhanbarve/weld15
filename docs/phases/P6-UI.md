@@ -70,11 +70,23 @@ export type PanelProps = {
   params: SuiteParams;
   onParam: (patch: Partial<SuiteParams>) => void;
 
-  beds: number;                                  // beds per bedroom, 1..3
-  onBeds: (n: number) => void;
+  // CORRECTED after measurement. This was written as `beds: number // 1..3 per bedroom`,
+  // which the geometry cannot express: layout(suite, { beds }) takes the whole suite's
+  // OCCUPANCY and splits it across the two bedrooms itself, and it saturates at 4 because
+  // bedroomSlots() holds a two-to-a-bedroom limit. Measured: 1 -> 1 bed, 2 -> 2, 3 -> 3,
+  // 4 -> 4, 5 -> 4, 6 -> 4. So the control is occupancy 1..4, and its note has to say the
+  // cap belongs to the recipes rather than to Weld -- the building is documented as having
+  // housed quints and sextuplets, which this model cannot draw.
+  occupancy: number;
+  onOccupancy: (n: number) => void;
 
   cutaway: CutawayMode;
   onCutaway: (m: CutawayMode) => void;
+  // Added after the fact. The modes can only change anything once the interior is
+  // mounted, which visibility() puts at stage 3; before that the group is disabled and
+  // says why. Hud.tsx had already found this wart once with a roof-off toggle that was
+  // live at all six stages and changed the frame at one.
+  cutawayEnabled: boolean;
 
   /** id of the selected piece, or null */
   selected: string | null;
@@ -181,3 +193,30 @@ cutaway adds:
 
 Every new assertion gets mutated and seen to fail. Restore from an explicit `.bak`; these files are
 untracked and `git checkout` on them is a silent no-op.
+
+## What the gates found, recorded because the plan above did not predict any of it
+
+- **The canvas had no accessible name at all.** `aria-label` on `<Canvas>` lands on R3F's container
+  div, not on the canvas element, and it was absent from both. Fixed by a `CanvasLabel` component
+  inside the canvas that sets `role` and `aria-label` on `gl.domElement`. Found by a gate asserting
+  the attribute, not by reading the code.
+- **The HUD covered every draggable thing in the suite.** At stage 5 the camera looks diagonally down,
+  so the floor projects into the bottom of the frame: the fit-out's anchors land at y 589 to 716 on a
+  1280 x 720 viewport and the bottom-centred HUD occupied 467 to 706. A press reached an `<input>` and
+  never got to the canvas. The HUD moves to the top of the frame at that stage now.
+- **`hiddenWalls()` in a `useFrame` was a real stall.** Its `wallsDown` branch calls `buildSuite()` and
+  then walks every band, and doing that per frame made a cutaway mode change stop responding to input
+  for longer than a 30 s test would wait. Now recomputed only when the camera has moved a quarter foot,
+  which is half the drag grid.
+- **The pointer can only reach the room the camera stands in.** Bedroom A's furniture projects off
+  screen, so editing at stage 5 covers bedroom B. The dollhouse fix is blocked on `WeldExterior` not
+  reading `cutaway`; see `Experience.tsx`.
+- **Gate 4 moved rather than being dropped.** Reaching a doorway landing through the UI is up to 120
+  nudge presses at a 62 ms frame, because landings sit at the room edges the camera does not show. The
+  door rule stays pinned in `tests/drag.test.ts` and its wording in `tests/store.test.ts`; the e2e
+  refusal gate covers the chain from pointer to visible text. `tests/e2e/edit.spec.ts` says all of this
+  where the gate used to be.
+- **A stale flags-byte offset.** `tests/url.test.ts`'s "unused flag bits are refused" check was
+  mutating byte 3 on the assumption that version, stage, t and flags are one byte each, but the
+  fixture's `t` is 1 -- a two-byte varint -- so it was corrupting `t` and being refused for that
+  instead. The offset is now derived from the encoder.

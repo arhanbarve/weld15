@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { LAST_STAGE, STAGES, useStore, type StageId } from "@/state/store";
+import { LAST_STAGE, STAGES, pieceLabel, useStore, type StageId } from "@/state/store";
+import { buildSuite } from "@/geo/rooms";
+import { footprintArea } from "@/geo/walls";
+import { Panel } from "./Panel";
 import { STAGE3_CLAMP, clampOrbit, orbitOf, type Orbit } from "@/scene/orbit";
-import { keyframes } from "@/scene/stages";
+import { keyframes, visibility } from "@/scene/stages";
 import type { NudgeDir } from "@/geo/drag";
 import { UrlSync } from "./UrlSync";
 
@@ -246,6 +249,63 @@ export function Hud() {
   const params = useStore((s) => s.params);
   const orbit = useStore((s) => s.orbit);
   const setOrbit = useStore((s) => s.setOrbit);
+  const cutaway = useStore((s) => s.cutaway);
+  const setCutaway = useStore((s) => s.setCutaway);
+  const occupancy = useStore((s) => s.occupancy);
+  const setOccupancy = useStore((s) => s.setOccupancy);
+  const setParams = useStore((s) => s.setParams);
+  const notice = useStore((s) => s.notice);
+  const select = useStore((s) => s.select);
+  const setNotice = useStore((s) => s.setNotice);
+  const rotate = useStore((s) => s.rotate);
+  const nudgePiece = useStore((s) => s.nudge);
+  const refit = useStore((s) => s.refit);
+  const resetAll = useStore((s) => s.resetAll);
+
+  const [panelOpen, setPanelOpen] = useState(false);
+
+  /**
+   * The suite and its floor area, for the panel's header and for gate 5.
+   *
+   * buildSuite() and footprintArea() are pure and cheap -- seven rects and a sum -- and
+   * this is the one place the HUD needs them: the area is the readout that makes a
+   * dimension slider legible as a change to the ROOM rather than to a number, which is
+   * what docs/phases/P6.md's fifth gate asks for. Memoised on params so it is not
+   * recomputed per keystroke of an unrelated control.
+   */
+  const suite = useMemo(() => buildSuite(params), [params]);
+  const area = useMemo(() => footprintArea(suite), [suite]);
+
+  /**
+   * The selected piece's name, in words.
+   *
+   * Panel takes a label rather than an id because "bedA-bed-0" is a key, not a name, and
+   * the panel is the one place a person reads it. pieceLabel() lives in the store beside
+   * the refusal wording for the same reason: one spelling, so the button and the notice
+   * that follows it agree.
+   */
+  const selectedLabel = selected ? pieceLabel(suite, selected) : null;
+
+  /**
+   * Put the current link on the clipboard, and say what happened either way.
+   *
+   * The address bar already holds it -- UrlSync rewrites it on every change -- so this
+   * button is a convenience over selecting the URL by hand, not the mechanism. Which is
+   * why the failure path matters more than the success one: the Clipboard API is
+   * permission-gated and refuses outright in some browsers and over plain http, and a
+   * button that silently does nothing reads as a broken app. On refusal it says so and
+   * points at the address bar, which is still correct.
+   */
+  const copyLink = () => {
+    const url = window.location.href;
+    const ok = () => setNotice("Link copied. It reopens exactly this suite.");
+    const no = () => setNotice("Could not reach the clipboard. The address bar holds the link.");
+    if (!navigator.clipboard?.writeText) {
+      no();
+      return;
+    }
+    navigator.clipboard.writeText(url).then(ok, no);
+  };
 
   /** The orbit stage 3 opens on: the keyframe stages.ts chose, read back as angles. */
   const seed = useMemo(() => orbitOf(keyframes(params)[3]), [params]);
@@ -316,7 +376,7 @@ export function Hud() {
         Skip to the room
       </button>
 
-      <div className="hud" data-testid="hud">
+      <div className={stage === LAST_STAGE ? "hud hud-room" : "hud"} data-testid="hud">
         <div className="hud-stage" data-testid="stage-name">
           <span className="hud-num">{stage}</span>
           {STAGES[stage].name}
@@ -455,7 +515,40 @@ export function Hud() {
             of `cutaway` in this file: two controls over one field is how they come to
             disagree. The measurement is kept because it is the reason Panel's group is
             disabled before the interior exists rather than merely inert. */}
+
+        {/* The floor area, which is gate 5's readout and the answer to "did that slider
+            do anything to the ROOM". It lives here rather than in Panel because Panel is
+            presentational and takes no suite: buildSuite() is the one import it
+            deliberately does not have. */}
+        <div className="hud-t" data-testid="area-readout">
+          <span>floor area</span>
+          <span className="tabular">{area.toFixed(0)} sq ft</span>
+        </div>
       </div>
+
+      <Panel
+        open={panelOpen}
+        onToggle={() => setPanelOpen((v) => !v)}
+        params={params}
+        onParam={setParams}
+        occupancy={occupancy}
+        onOccupancy={setOccupancy}
+        cutaway={cutaway}
+        onCutaway={setCutaway}
+        // visibility() mounts the interior at stage 3, and that is the first stage from
+        // which a cutaway can change anything. Read from the same predicate the scene
+        // uses rather than written out as `stage >= 3`, so the two cannot drift.
+        cutawayEnabled={visibility(stage).interior}
+        selected={selected}
+        selectedLabel={selectedLabel}
+        onRotate={() => selected && rotate(selected)}
+        onNudge={(dir) => selected && nudgePiece(selected, dir)}
+        onDeselect={() => select(null)}
+        notice={notice}
+        onRefit={refit}
+        onCopyLink={copyLink}
+        onReset={resetAll}
+      />
     </>
   );
 }

@@ -1,0 +1,388 @@
+/*
+ * The correction panel's chrome. A CSS module rather than rules in
+ * app/globals.css, because globals.css belongs to another owner this window --
+ * see docs/phases/P6-UI.md's ownership table. Nothing here needs to be global:
+ * only Panel.tsx, Slider.tsx and Provenance.tsx use it.
+ *
+ * The tokens are globals.css's. Not one colour is written out as a literal here
+ * except in the comments that record what was measured, for the reason
+ * docs/DIMENSION-AUDIT.md section 1 is a list of: a value copied into a second
+ * file drifts from the first and nobody notices.
+ *
+ * THE GROUND, AND WHY IT IS OPAQUE
+ * The panel is over the near-black scan at stages 0-3 and over the daylit
+ * interior at stage 5, and MASTER.md wants body text at 4.5:1 on both. A
+ * translucent chip has a different effective ground on each, so the ratio would
+ * be two numbers and the worse of them is the one over plaster.
+ *
+ * So the panel carries its own opaque ground, --void-deep. That is not a new
+ * colour and not a departure from the HUD's look: --chip-scan is
+ * rgba(4, 20, 38, 0.82) and --void-deep is #041426 = rgb(4, 20, 38), the same
+ * three channels, so the HUD's chip composited over the vignette ground IS
+ * --void-deep, exactly. Making it opaque changes nothing about how it reads and
+ * removes the stage from the contrast question entirely.
+ *
+ * MEASURED on rgb(4, 20, 38), by WCAG 2.1 relative luminance (L = 0.006657):
+ *   --ink-scan  #E4EBF6   15.46 : 1   labels, readouts, values
+ *   --dim       #9DB6D4    8.89 : 1   legends, button faces
+ *   --faint     #6C87AC    5.03 : 1   the smallest text here, the source lines
+ *   --given     #7FD1A6   10.22 : 1   chip word
+ *   --derived   #8FC4F2   10.01 : 1   chip word
+ *   --inferred  #E4A15E    8.44 : 1   chip word
+ *   --mark      #E4526F    5.06 : 1   accents; on --void it is only 4.0, which
+ *                                     is why MASTER.md's ledger bars it from
+ *                                     body text there. It is used for borders
+ *                                     and the active-mode marker, not prose.
+ * Every one of those clears 4.5:1, and clears it on both stages because the
+ * ground does not depend on the stage.
+ */
+
+/*
+ * A fixed dock at the top right. pointer-events are off on the dock and on
+ * again on each child, so the empty column the dock occupies while the panel is
+ * shut does not eat drags meant for the room behind it.
+ */
+.dock {
+  position: fixed;
+  top: var(--s2);
+  right: var(--s2);
+  z-index: var(--z-panel);
+  width: min(23rem, calc(100vw - 2 * var(--s2)));
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.4rem;
+  font-family: var(--mono);
+  pointer-events: none;
+}
+
+.dock > * {
+  pointer-events: auto;
+}
+
+.toggle {
+  background: var(--void-deep);
+  color: var(--ink);
+  border: 1px solid var(--mark);
+  border-radius: 2px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem;
+  min-height: 44px;
+  text-align: left;
+  transition: color var(--dur-micro) var(--ease-out-quint),
+    border-color var(--dur-micro) var(--ease-out-quint);
+}
+
+.toggle:hover {
+  color: var(--line-hi);
+}
+
+/*
+ * Refusals and drops. Always in the DOM and never display: none, because a live
+ * region has to be in the accessibility tree BEFORE its text arrives or the
+ * announcement is a new node rather than a change -- the same reason globals.css
+ * gives for .hud-sr not using visibility: hidden.
+ *
+ * It also sits OUTSIDE the collapsible form on purpose: a drag can be refused
+ * while the panel is shut, and a notice inside a hidden container is a refusal
+ * nobody hears. :empty carries the chrome instead, so an empty region costs no
+ * height and no border.
+ */
+.notice {
+  margin: 0;
+  border: 0;
+  padding: 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+.notice:not(:empty) {
+  background: var(--void-deep);
+  border: 1px solid var(--mark);
+  border-radius: 2px;
+  padding: 0.5rem 0.7rem;
+}
+
+/*
+ * The form itself. hidden={!open} rather than a conditional mount, so every
+ * control keeps a stable identity across opens -- and the explicit [hidden] rule
+ * is needed because `display: flex` here would otherwise beat the attribute's
+ * own display: none.
+ *
+ * max-height leaves ~10rem at the bottom of the viewport for the HUD, which is
+ * centred there, and the panel scrolls inside itself: body is overflow: hidden
+ * for the canvas's sake, so anything past the fold would be clipped rather than
+ * scrolled. The same trap .gate hit at 375 x 500.
+ */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  max-height: calc(100dvh - 10rem);
+  overflow-y: auto;
+  padding: 0.8rem 0.9rem;
+  background: var(--void-deep);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  color: var(--ink);
+}
+
+.panel[hidden] {
+  display: none;
+}
+
+.title {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 1rem;
+  line-height: 1.3;
+  color: var(--line-hi);
+}
+
+.lede {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--dim);
+}
+
+/* fieldset's default border and padding are not wanted; the legend is. */
+.group {
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--rule-soft);
+  padding: var(--s1) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.legend {
+  padding: 0;
+  font-size: 0.6875rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.hint {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--faint);
+}
+
+/* ---------- buttons ---------- */
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+/*
+ * One face for every button in the panel, sized to MASTER.md's 44 x 44 on the
+ * element rather than through padding, which is what Hud.tsx's TAP does and for
+ * the same reason: padding on a control whose intrinsic height is 20px does not
+ * reliably get there.
+ */
+.btn {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 0.6rem;
+  background: transparent;
+  color: var(--dim);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  transition: color var(--dur-micro) var(--ease-out-quint),
+    border-color var(--dur-micro) var(--ease-out-quint);
+}
+
+.btn:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+/*
+ * Disabled means there is nothing selected to move. Kept in the DOM rather than
+ * unmounted so the ids the e2e gates are written against are always present, and
+ * dashed so that "cannot be pressed" is a shape as well as a dimming.
+ */
+.btn:disabled {
+  color: var(--faint);
+  border-style: dashed;
+  cursor: not-allowed;
+}
+
+/*
+ * Selected, in three signals: colour, border and weight. MASTER.md's "colour is
+ * never the sole indicator", and cutaway.ts's header asks for the same thing
+ * again for the modes specifically.
+ */
+.segOn {
+  color: var(--ink);
+  border-color: var(--mark);
+  font-weight: 600;
+}
+
+.seg {
+  composes: btn;
+  flex: 1 1 auto;
+}
+
+/* A glyph face: square, and the character carries no meaning on its own, so
+   every one of these has an aria-label beside it in the markup. */
+.glyph {
+  composes: btn;
+  min-width: 44px;
+  padding: 0;
+  font-size: 1rem;
+}
+
+/* ---------- a slider ---------- */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.fieldTop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.fieldLabel {
+  font-size: 0.8125rem;
+  color: var(--ink);
+}
+
+/*
+ * Held at a fixed width, because the readout changes on every frame of a drag
+ * and a row that reflows as the digits change is the layout shift the delivery
+ * checklist rules out. .hud-orbit-read makes the same move. Widest reading is
+ * "10.75 ft".
+ */
+.readout {
+  flex: 0 0 auto;
+  min-width: 4.75rem;
+  text-align: right;
+  font-size: 0.8125rem;
+  color: var(--ink);
+}
+
+.trackWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.track {
+  flex: 1 1 auto;
+  width: 100%;
+  /* The height of the box IS the hit area for a range thumb, which is the
+     defect Hud.tsx's TAP comment records. */
+  min-height: 44px;
+  margin: 0;
+  accent-color: var(--mark);
+}
+
+/*
+ * Where the shipped default sits on the track, so "back to the source" is
+ * findable without reading the note. Decorative and aria-hidden: the value it
+ * marks is in .deflt as words, and a screen reader gets aria-valuetext.
+ *
+ * The 0.5rem inset is half a nominal thumb, so the mark lines up with the thumb
+ * centre rather than with the track's outer edge.
+ */
+.tick {
+  position: absolute;
+  top: 50%;
+  width: 1px;
+  height: 14px;
+  margin-top: -7px;
+  background: var(--line);
+  pointer-events: none;
+}
+
+.deflt {
+  margin: 0;
+  font-size: 0.6875rem;
+  color: var(--faint);
+}
+
+/* ---------- the provenance chip ---------- */
+
+/*
+ * The WORD first, always, then the one-line source as visible text. Colour is
+ * the third signal here, not the first: docs/phases/P6-UI.md calls this the case
+ * MASTER.md's rule was written for, because the difference between a number the
+ * housing office stated and a number this project guessed is the honesty of the
+ * whole model.
+ */
+.chip {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.chipWord {
+  flex: 0 0 auto;
+  font-size: 0.625rem;
+  letter-spacing: 0.1em;
+  border: 1px solid currentColor;
+  border-radius: 1px;
+  padding: 0.05rem 0.3rem;
+  white-space: nowrap;
+}
+
+.chipSource {
+  flex: 1 1 12rem;
+  min-width: 0;
+  font-family: var(--serif);
+  color: var(--faint);
+}
+
+.provGiven {
+  color: var(--given);
+}
+
+.provDerived {
+  color: var(--derived);
+}
+
+.provInferred {
+  color: var(--inferred);
+}
+
+/* ---------- spoken, not seen ---------- */
+
+/*
+ * Copied in shape from globals.css's .hud-sr rather than reusing that class,
+ * which is named for another owner's component. Not display: none and not
+ * visibility: hidden -- both take the element out of the accessibility tree, and
+ * an announcement nobody hears is the whole failure mode.
+ */
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

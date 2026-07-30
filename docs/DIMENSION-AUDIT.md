@@ -405,9 +405,16 @@ So something occupies a 5.2 × 22 ft slab of Weld on the far side of the common 
 `params.wingStep` implements the stepped reading and is **off**, and off is the claim rather than a
 default. It is kept rather than deleted because the measurement behind it is real and worth keeping
 addressable: if a 1962 or 1992 floor plan ever turns up showing a deeper common room, this is one
-flag rather than a rebuild. It is not offered as a UI control, because it is not an open question.
-Renders of both readings are in `design/renders/wing-common-straight.png` and
-`wing-common-stepped.png`.
+flag rather than a rebuild. Renders of both readings are in
+`design/renders/wing-common-straight.png` and `wing-common-stepped.png`.
+
+**It is now offered as a UI control**, and this paragraph used to say it would not be. The reversal is
+about what a control means here, not about the answer: P6's panel exists so that a viewer can move any
+number the project inferred rather than sourced, and 5.2 ft of the common room's depth is the largest
+such disagreement in the whole model. Hiding the switch would not make the claim stronger, it would
+only make it unfalsifiable by anyone but us. Straight remains the default and the claim, the panel's
+note says so, and the note also carries the two ways the stepped mode is unfinished (below) so nobody
+reads the toggle as an equal alternative.
 
 Two things the stepped mode does NOT do, recorded so nobody mistakes it for finished: `walls.ts`
 still lays the facade masonry straight, so with the step on the new floor has no outer wall and no

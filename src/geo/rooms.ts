@@ -123,8 +123,16 @@ export type SuiteParams = {
    * Kept as a parameter rather than deleted because the measurement behind it is
    * real and worth keeping addressable: facadeStep() in place.ts measures the step
    * off the ring, the tests pin both modes, and if a floor plan ever turns up
-   * showing a deeper common room this is one flag rather than a rebuild. It is not
-   * a control the UI offers, because it is not an open question.
+   * showing a deeper common room this is one flag rather than a rebuild.
+   *
+   * It IS a control the UI offers, and that sentence used to say the opposite. What
+   * changed is not the argument -- straight is still the claim, for the three reasons
+   * above -- but what a control is FOR in this project: P6's panel exists to make every
+   * number a viewer might disagree with addressable, and this is the largest single
+   * disagreement in the model, 5.2 ft of the common room's depth. Offering it is not
+   * hedging on the answer, it is refusing to hide the question. Panel.tsx's note says
+   * which mode is the claim, and that the stepped mode is deliberately incomplete: it
+   * moves the room and does not give it an outer wall or a ceiling.
    *
    * See stepOntoTheWing() for what it does and what it does not do.
    */
