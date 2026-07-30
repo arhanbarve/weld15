@@ -503,14 +503,30 @@ describe("palette", () => {
   it("makes glazing read as glass rather than a blue plane", () => {
     const m = materials();
     expect(m.glazing).toBeInstanceOf(THREE.MeshPhysicalMaterial);
-    expect(m.glazing.transmission).toBeGreaterThan(0.8);
+    // What carries the glass now that transmission is off: a tight specular lobe,
+    // the Fresnel falloff that ior drives, and partial opacity.
     expect(m.glazing.roughness).toBeLessThan(0.15);
-    // Zero thickness keeps three out of the refraction path entirely.
-    expect(m.glazing.thickness).toBeGreaterThan(0);
     expect(m.glazing.ior).toBeCloseTo(1.52, 2);
+    expect(m.glazing.transparent).toBe(true);
+    expect(m.glazing.opacity).toBeGreaterThan(0);
+    expect(m.glazing.opacity).toBeLessThan(0.6);
     // Seen from the Yard at stage 4 and from inside the room at stage 5.
     expect(m.glazing.side).toBe(THREE.DoubleSide);
     expect(m.glazing.roughness).toBeLessThan(m.slate.roughness);
+  });
+
+  it("keeps transmission off, because it costs a whole extra scene render", () => {
+    // Not a style assertion. A non-zero transmission makes three render the scene a
+    // second time into a transmission target, so every visible mesh is drawn twice.
+    // Measured at stage 5: 37 draw calls with it against 27 without, and the
+    // doubling scales with what the camera sees -- the roof-off cutaway sees the
+    // whole suite and would breach the 25-call scene budget in
+    // docs/IMPLEMENTATION-PLAN.md section 9.
+    //
+    // This test exists because the cost is invisible in the material's own
+    // appearance: someone tuning the glass would reasonably turn transmission up and
+    // have no way to see what it bought them.
+    expect(materials().glazing.transmission).toBe(0);
   });
 
   it("makes slate dark, cool and slightly glossy", () => {

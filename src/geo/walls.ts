@@ -412,11 +412,16 @@ function buildOpenings(suite: Suite, walls: Wall[]): Opening[] {
       (w) => w.perimeter === true && w.between.includes("hall") && w.dv > w.du,
     );
     if (inner) {
+      // Offset from the HALL's south end, not the band's. The band runs from
+      // v = 12.5, past the K bump, while the hall itself only starts at v = 15.5,
+      // so a flat offset of 1 put two thirds of a 3.2 ft door outside the hall --
+      // it rendered as a shallow niche rather than a hole, because the bands behind
+      // it backed it up, which is why it read as fine.
       out.push({
         id: `d${n++}`,
         wallId: inner.id,
         kind: "door",
-        offset: 1,
+        offset: hall.v - inner.v + 1,
         width: 3.2,
         connects: ["hall", "outside"],
         note: "suite entry, from the stair hall",
@@ -424,17 +429,37 @@ function buildOpenings(suite: Suite, walls: Wall[]): Opening[] {
     }
   }
 
+  // A window is centred on the ROOM it lights, not on the band it sits in.
+  //
+  // This used to measure `along` over the whole band, which for the facade is the
+  // suite's full 44 ft. Every room then produced width min(44 * 0.55, 8) = 8 at
+  // offset (44 - 8) / 2 = 18, so all four facade windows came back as the identical
+  // opening at v 18 to 26 -- four windows stacked in one hole in front of bedroom A,
+  // and no glass at all in the common room, bedroom B's facade, or the strip. It
+  // survived because nothing downstream compared two windows to each other, and
+  // because one of the four does land in its own room, which is enough to make a
+  // screenshot look right.
+  //
+  // The same list feeds bayRects() in weldGeometry.ts, so this was also putting the
+  // exterior's window bays in the wrong place, on the same wall, by the same amount.
+  // Fixing it here fixes both, which is the reason the exterior reads its openings
+  // from this function rather than computing its own.
   for (const room of suite.rooms) {
     for (const face of room.windows) {
       const w = wallOnFace(walls, room, face);
       if (!w) continue;
-      const along = w.du > w.dv ? w.du : w.dv;
-      const width = Math.min(along * 0.55, 8);
+      // The band's long axis is the one the room's run is measured along: the facade
+      // band runs in v, the gable band in u.
+      const alongV = w.dv > w.du;
+      const run = alongV ? room.dv : room.du;
+      const roomStart = alongV ? room.v : room.u;
+      const bandStart = alongV ? w.v : w.u;
+      const width = Math.min(run * 0.55, 8);
       out.push({
         id: `n${n++}`,
         wallId: w.id,
         kind: "window",
-        offset: (along - width) / 2,
+        offset: roomStart - bandStart + (run - width) / 2,
         width,
         connects: [room.id],
         note: face,

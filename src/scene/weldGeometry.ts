@@ -1,6 +1,6 @@
 /**
- * Weld Hall's exterior masses: the shell, a real gabled roof, the towers the data
- * will not support, and the window bays.
+ * Weld Hall's exterior masses: the shell, a real gabled roof, two roof features
+ * whose identity is unsettled, and the window bays.
  *
  * WHY THIS REPLACES roofGeometry()
  * geometry.ts's roofGeometry() fans every eaves vertex to one apex point. On a
@@ -40,6 +40,60 @@
  * which the same edge-fan emits with no special case. Every number in the roof is
  * read from weld.json or measured off the ring; none is chosen.
  *
+ * WHY THE ROOF FEATURES SHIP WITH THREE DIFFERENT TAGS
+ * An earlier revision emitted an empty geometry here and said so, on the ground that
+ * extruding the ring's two slivers needs a plan width and a height above the ridge
+ * and neither is in any source. That was right about the size and wrong to throw
+ * away the position. But a later revision then over-corrected and called these the
+ * 1875 staircase lanterns, which the evidence does not support:
+ *
+ *   sliver position  DERIVED. weld.rings[1] and [2] are two sub-foot slivers whose
+ *                    centroids land at building u -9.87 and +9.09, symmetric about
+ *                    the ridge to within 0.2 ft. That symmetry is real, it is the
+ *                    only positional evidence in any of the five datasets, and
+ *                    refusing to draw anything discarded it.
+ *   identity         INFERRED AND CONTESTED. The 1875 text describes two CENTRAL
+ *                    staircase halls with lanterns, and its own
+ *                    143 = 44 + 15 + 25 + 15 + 44 chain puts those at v 12.3 to
+ *                    27.3. These slivers sit at v +40.2 and -37.8, inside the 44 ft
+ *                    end sections, 13 to 28 ft off that band and not central by any
+ *                    reading -- so the position argues AGAINST the lantern reading
+ *                    rather than for it. MACRIS names clustered chimney shafts in
+ *                    the same sentence as the towers, and two symmetric near-ridge
+ *                    features in the wing bays fit that at least as well. An earlier
+ *                    draft of this comment claimed the ridge-straddle "is what two
+ *                    central staircase halls means across a 62 ft building"; that
+ *                    was a rationalisation and it is withdrawn. weld.json's
+ *                    meta.towers.identification carries the full argument, and
+ *                    TOWER_CONTROLS.name is "Roof feature" so the UI states the
+ *                    measurement rather than the guess.
+ *   size             INFERRED, and it stays inferred. The slivers are 0.31 and
+ *                    0.22 ft wide -- the same class of degenerate ArcGIS part as the
+ *                    three that took the campus count from 39 to 36 (audit sec 1
+ *                    row 11) -- so their u extent is digitisation noise, not a wall
+ *                    line.
+ *
+ * Neither feature falls inside Weld 15's own footprint: the north one is across the
+ * ridge in the neighbouring suite's half and the south one is in the far end
+ * section, so nothing in the suite's geometry depends on any of this.
+ *
+ * The project's answer to an inferred dimension is not to refuse it; it is to ship
+ * it as a control carrying an INFERRED chip. That is what happened to the ceiling
+ * height and to the bathroom's depth, and it is what P6 exists for. So the two
+ * guesses live in weld.json under meta.towers with their basis written out, are
+ * re-exported here as TOWER_CONTROLS for a slider to render, and are PARAMETERS of
+ * towerGeometry() rather than constants inside it. Being wrong then costs a drag.
+ * What is not acceptable is a guessed number presented as measured, so neither
+ * number appears in this file as a literal.
+ *
+ * WHY sectionLength HAS A CEILING AND WHERE IT COMES FROM
+ * place.ts hangs the suite off the north gable and anchors it on a 49 ft clear
+ * width, and Weld's waist is 46.9 ft across, so past a certain section length the
+ * suite is wider than the building it is in. maxSectionLength() measures where that
+ * happens -- 50.25 ft south of the anchor -- and that is the number P6's
+ * sectionLength slider has to clamp to. The function carries the arithmetic and the
+ * argument for clamping rather than letting it ride.
+ *
  * WHY THE BAY REVEALS SIT AT THE MASONRY MID-PLANE
  * place.ts anchors the suite on a 49 ft clear width centred on u = 0, so its
  * exterior masonry face lands at u = 26.0 while this ring's east wall is at
@@ -61,7 +115,7 @@ import {
 } from "@/geo/frames";
 import { buildSuite, DEFAULT_PARAMS, type SuiteParams } from "@/geo/rooms";
 import { buildWalls } from "@/geo/walls";
-import { WELD, floorLevel, suiteToBuilding } from "@/geo/place";
+import { WELD, CLEAR_HALF_U, GABLE_INNER_V, floorLevel, suiteToBuilding } from "@/geo/place";
 import { extrudedGeometry } from "./geometry";
 
 export type WeldMasses = {
@@ -69,7 +123,7 @@ export type WeldMasses = {
   walls: THREE.BufferGeometry;
   /** gabled, ridge along the 13.2 deg long axis, 85.4 ft */
   roof: THREE.BufferGeometry;
-  /** the ring's two narrow slivers, carried above the eaves */
+  /** the two roof features, seated on the roof and capped above the ridge */
   towers: THREE.BufferGeometry;
   /** window reveals, one box per opening of kind "window" */
   bays: THREE.BufferGeometry;
@@ -145,13 +199,20 @@ function midU(pts: Building[]): number {
  * Weld's exterior, as four geometries.
  *
  * `params` only reaches the bays: the shell and the roof come from the GIS ring
- * and are the same whatever the suite sliders do.
+ * and are the same whatever the suite sliders do. `towers` is a second argument
+ * rather than a field of SuiteParams because it describes the building, not the
+ * suite, and because SuiteParams is a fixed interface three other modules build
+ * against. Both are defaulted, so buildWeld() and buildWeld(params) still mean
+ * what they meant.
  */
-export function buildWeld(params: SuiteParams = DEFAULT_PARAMS): WeldMasses {
+export function buildWeld(
+  params: SuiteParams = DEFAULT_PARAMS,
+  towers: TowerParams = TOWER_DEFAULTS,
+): WeldMasses {
   return {
     walls: extrudedGeometry(weld.rings[0] as number[][], WELD.eaves),
     roof: gableRoof(),
-    towers: towerGeometry(),
+    towers: towerGeometry(towers),
     bays: bayGeometry(params),
   };
 }
@@ -254,12 +315,113 @@ function spansAt(v: number): [number, number][] {
 }
 
 /**
+ * How far a station's footprint reaches either side of the suite's centreline, ft.
+ *
+ * Not width / 2. place.ts anchors the suite on u = 0, the published centroid, while
+ * this ring's own mid-line is RIDGE_U, 0.47 ft west of it -- so half the width
+ * overstates what is available on the east by that much. It changes no verdict at
+ * the waist (23.44 ft by width against 23.15 measured) but it is most of the margin
+ * at the north end, where the measured reach is 25.46 ft against the suite's 24.5.
+ *
+ * A station with a lobe has more than one span, and only the span containing the
+ * centreline can hold the suite; a station with no span there holds nothing.
+ */
+function centrelineHalfWidth(s: Station): number {
+  const span = s.spans.find(([lo, hi]) => lo <= 0 && hi >= 0);
+  return span ? Math.min(-span[0], span[1]) : 0;
+}
+
+/**
+ * The longest end section the ring will take, ft. THE CLAMP FOR P6's sectionLength.
+ *
+ * place.ts hangs the suite off the north gable's interior face, so it occupies v
+ * from GABLE_INNER_V - sectionLength to GABLE_INNER_V and needs CLEAR_HALF_U of
+ * footprint either side of u = 0 over that whole run. Weld is a dumbbell, so that is
+ * not available everywhere. Measured off this ring by ringStations(), going south
+ * from the anchor:
+ *
+ *   v 48.5 .. 72.1   reach 25.88   the end zone the anchor is in    suite fits
+ *   v 19.9 .. 48.5   reach 31.07   the wings                       suite fits
+ *   v -19.4 .. 19.9  reach 23.15   the waist        NARROWER THAN THE SUITE IS WIDE
+ *
+ * so the answer is the distance from the anchor to the waist's north face,
+ * 70.15 - 19.90 = 50.25 ft. This is a fact about Weld and not about the model: a
+ * 60 ft end section would put the suite's south end where the building is 46.9 ft
+ * across, and the facade wall -- with the window bays in it -- would be outside the
+ * shell.
+ *
+ * WHY A SLIDER MUST CLAMP TO THIS RATHER THAN LET IT RIDE
+ * Nothing inside the suite notices. The rooms still tile, the areas still add up,
+ * walls.ts still emits the same bands and the same openings; the only symptom is
+ * masonry drawn outside a shell the camera usually stands inside. It took a
+ * randomised sweep to find it at all, and it found it 6 ft past the limit rather
+ * than at it, because the southmost window is centred on a 15 ft common room and so
+ * sits 3.5 ft north of the suite's own south wall. A slider that walks the suite out
+ * of the building silently is worse than one that stops, because a viewer cannot
+ * tell that case from a correct model.
+ *
+ * HOW EXACT IT IS
+ * The station boundary is the LOWEST v of a merged cluster (see STATION_EPS), and
+ * this ring's four vertices at the waist-to-wing transition spread over v 19.897 to
+ * 19.916. So the figure is 0.017 ft generous -- a fifth of an inch, against
+ * coordinates published to a tenth of a foot -- and clamped exactly here the suite's
+ * south corner lands on the waist's face rather than inside it. That is why the test
+ * brackets this bound at the ring's own 0.1 ft resolution instead of asserting a
+ * knife edge at the number itself.
+ */
+export function maxSectionLength(): number {
+  const stations = ringStations();
+  const tooNarrow = stations
+    .filter((s) => s.v0 < GABLE_INNER_V && centrelineHalfWidth(s) < CLEAR_HALF_U)
+    // nearest the anchor first: the first one the suite would reach going south
+    .sort((a, b) => b.v1 - a.v1);
+  const first = tooNarrow[0];
+  // No station too narrow -- a building with no waist -- and the whole ring south of
+  // the anchor is available.
+  return first
+    ? GABLE_INNER_V - first.v1
+    : GABLE_INNER_V - Math.min(...stations.map((s) => s.v0));
+}
+
+/** The same number, for a slider that has to clamp to it without recomputing it. */
+export const MAX_SECTION_LENGTH = maxSectionLength();
+
+/**
+ * The height of the roof surface over a point in the building frame.
+ *
+ * The same interpolation gableRoof() draws, read the other way round: on the line
+ * v = const the roof runs straight from the eaves at the footprint's boundary up
+ * to the ridge, so the height is linear in the distance from RIDGE_U as a fraction
+ * of that side's own run. The run is measured per v, which is what makes this
+ * correct on a dumbbell -- over the wings it is 31.1 ft and over the waist 23.4,
+ * and a single averaged pitch would sit feet off in both places.
+ *
+ * Throws outside the footprint rather than clamping. A tower whose plan corner has
+ * left the building has no roof under it, and returning the eaves height there
+ * would seat it on thin air while every height assertion still passed.
+ */
+export function roofHeightAt(u: number, v: number): number {
+  const span = spansAt(v).find(([lo, hi]) => u >= lo && u <= hi);
+  if (!span) {
+    throw new Error(`weldGeometry: u ${u.toFixed(2)} v ${v.toFixed(2)} is outside the footprint`);
+  }
+  // The eaves edge on this point's own side of the ridge.
+  const bound = u < RIDGE_U ? span[0] : span[1];
+  const run = Math.abs(RIDGE_U - bound);
+  const t = Math.min(Math.abs(u - RIDGE_U) / run, 1);
+  return WELD.ridge - (WELD.ridge - WELD.eaves) * t;
+}
+
+/**
  * The ring's narrow lobes: candidate staircase towers, measured not indexed.
  *
  * A tower carried above the eaves would show up either as a station narrower than
  * LOBE_MAX_WIDTH or as a second span inside a station. This ring has neither: its
  * five stations are 51.8 / 62.2 / 46.9 / 62.2 / 51.8 ft, each one piece. So this
- * returns [] on the real data, and towerGeometry() returns nothing.
+ * returns [] on the real data, and the towers come from weld.rings[1] and [2]
+ * instead -- see towerCentres(). Kept, and kept tested, as the positive control:
+ * "the towers are not in ring[0]" is worth nothing unless the thing that looked
+ * for them can find the wings that ARE there.
  */
 export function narrowLobes(): Station[] {
   return ringStations().filter(
@@ -267,31 +429,155 @@ export function narrowLobes(): Station[] {
   );
 }
 
+/** The two dimensions of a staircase lantern that no source gives. Feet. */
+export type TowerParams = {
+  /** plan width, square in the building frame */
+  width: number;
+  /** how far the cap clears WELD.ridge */
+  heightAboveRidge: number;
+};
+
 /**
- * The two staircase towers, which are not in the data.
+ * What a P6 slider needs to render one of these without a second copy of the
+ * number: the value, a range, the tag, and the basis in one line.
  *
- * The 1875 specification is explicit that Weld has "two central staircase halls
- * ... lighted and ventilated each by a lantern or louvre which rises above the
- * roof", and MACRIS CAM.184 describes a skyline broken by two staircase towers. So
- * the towers are real. They are not measurable here:
- *
- *   - weld.rings[0] yields no lobe under 14 ft (narrowLobes() is empty)
- *   - weld.rings[1] and [2] ARE two narrow slivers, and they sit where the two
- *     central stair halls should be -- building v 34.6 to 43.0 and -40.3 to -32.8,
- *     one either side of the ridge -- but they measure 0.31 and 0.22 ft wide and
- *     1.23 and 0.81 sq ft. That is the same class of degenerate ArcGIS sliver as
- *     the three that took the campus count from 39 to 36 (audit sec 1 row 11).
- *
- * Extruding a 0.3 ft sliver needs a plan width and a height above the ridge, and
- * neither exists in weld.json, in the 1875 text, or anywhere else in this project.
- * Inventing them is the failure mode the dimension audit exists to prevent, so
- * this stays empty and the gap is reported instead.
+ * The values come from weld.json, the bases are abridged from the same block, and
+ * the two upper bounds are SOURCED numbers rather than picked ones -- the 1875
+ * stair hall's short dimension for the width, since a lantern cannot be wider than
+ * the well it lights, and Cambridge's 12.0 ft floor-to-floor for the height, since
+ * a roof feature that reaches a full storey is a storey. The lower bounds are the
+ * degenerate cases: the sliver's own measured u extent, 0.31 ft, which is what the
+ * data literally contains, and a rise of zero, which is the no-lantern case that
+ * the 1875 wording -- "rises above the roof" -- is the only thing to rule out. Both
+ * ends of both sliders are therefore somebody's claim rather than a round number.
  */
-function towerGeometry(): THREE.BufferGeometry {
-  const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(0), 3));
-  g.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(0), 3));
-  return g;
+export const TOWER_CONTROLS = {
+  provenance: "INFERRED",
+  /**
+   * What the UI must call them, and why it is not "staircase tower".
+   *
+   * The 1875 text does describe two stair-hall lanterns, and it is tempting to
+   * label these as those. The positions say otherwise: that text calls the halls
+   * CENTRAL and its own 143 ft chain puts them at v 12.3 to 27.3, while these two
+   * features sit at v +40.2 and -37.8, inside the end sections. Symmetric about the
+   * ridge, certainly -- which is why they are modelled -- but not central, and
+   * MACRIS mentions clustered chimney shafts in the same sentence as the towers,
+   * which fits two near-ridge features in the wing bays at least as well.
+   *
+   * So the label states the measurement and not the guess. weld.json's
+   * `towers.identification` carries the full argument.
+   */
+  name: "Roof feature",
+  identification: weld.meta.towers.identification,
+  width: {
+    value: weld.meta.towers.plan_width_ft_estimate,
+    min: weld.meta.towers.positions[0]!.sliver_u_extent_ft,
+    max: weld.meta.primary_source_1875.stair_hall_ft[0]!,
+    unit: "ft",
+    label: "Roof feature plan width",
+    basis: weld.meta.towers.plan_width_basis,
+  },
+  heightAboveRidge: {
+    value: weld.meta.towers.height_above_ridge_ft_estimate,
+    min: 0,
+    max: weld.meta.floor_to_floor_ft,
+    unit: "ft",
+    label: "Roof feature rise above the ridge",
+    basis: weld.meta.towers.height_above_ridge_basis,
+  },
+} as const;
+
+/** The inferred defaults, read from weld.json so the guess is stated in one place. */
+export const TOWER_DEFAULTS: TowerParams = {
+  width: TOWER_CONTROLS.width.value,
+  heightAboveRidge: TOWER_CONTROLS.heightAboveRidge.value,
+};
+
+/** One staircase lantern's plan centre, measured off its own sliver. */
+export type TowerCentre = {
+  /** which end of the building the sliver sits toward */
+  id: "north" | "south";
+  /** which weld.rings entry it was measured from */
+  ring: number;
+} & Building;
+
+/**
+ * Where the two lanterns are: the centroid of each sliver, in the building frame.
+ *
+ * DERIVED, not indexed and not typed in. weld.json's meta.towers.positions records
+ * the answer and the test asserts the record still matches, but this is the
+ * computation and the record is downstream of it.
+ *
+ * The centroid is the mean of the sliver's distinct vertices. Both slivers are
+ * TRIANGLES, so that mean IS the area centroid exactly, and it gets there without
+ * dividing by their 1.23 and 0.81 sq ft. The test comes at the same two points by
+ * the shoelace route instead, which agrees to a thousandth of a foot today and
+ * would part company the moment either ring gained a fourth vertex -- at which
+ * point the vertex mean stops being the centroid and this function is wrong.
+ *
+ * Recorded because it will look like an error later: in u the two land either side
+ * of the ridge, as "two central staircase halls" requires, but in v they land at
+ * +40.2 and -37.8, out in the projecting wing zones rather than in the stair-hall
+ * band that the 1875 chain 143 = 44 + 15 + 25 + 15 + 44 puts at v 12.4 to 27.4 and
+ * place.ts builds the suite against. The slivers are still the only positional
+ * evidence in any of the five datasets, and MACRIS puts gabled projections on both
+ * facades at just these stations, so they are used as they are. Do not quietly
+ * move the towers onto the chain and call it a correction.
+ */
+export function towerCentres(): TowerCentre[] {
+  return [1, 2].map((i) => {
+    const ring = weld.rings[i] as number[][];
+    // Drop the repeated closing vertex; what is left is the triangle itself.
+    const pts = ring.slice(0, -1).map((p) => siteToBuilding({ x: p[0]!, y: p[1]! }));
+    const u = pts.reduce((a, p) => a + p.u, 0) / pts.length;
+    const v = pts.reduce((a, p) => a + p.v, 0) / pts.length;
+    return { id: v > 0 ? "north" : "south", ring: i, u, v };
+  });
+}
+
+/**
+ * The two roof features: a mass per sliver, seated on the slate and capped above
+ * the ridge.
+ *
+ * Sliver position DERIVED, identity INFERRED AND CONTESTED, size INFERRED -- see the
+ * module header for all three and for why the lantern reading is a candidate rather
+ * than the answer, and weld.json meta.towers for the basis of each number.
+ *
+ * WHERE THE BASE SITS, AND WHY IT IS NOT THE EAVES
+ * The features stand out on the slope, 9.4 and 9.6 ft off the ridge, where the roof
+ * has already fallen ~7.7 ft below it. Seating them at the eaves would bury 15 ft
+ * of each one inside the roof; seating them at the roof height under their CENTRE
+ * would leave a wedge of daylight under the downhill wall, because the slate falls
+ * 6.5 ft across a 7.9 ft plan at this pitch. So the base is the roof height at the
+ * LOWEST of the four plan corners: the downhill wall meets the slate exactly and
+ * the other three are buried, which is the way round that cannot show a gap.
+ *
+ * Built with Builder.box() rather than by hand, for the reason its own docblock
+ * gives: it winds every face against an outward reference in the building frame, so
+ * the lanterns cannot disagree with the shell about which way is out. The bottom
+ * cap is emitted too -- it is invisible under the slate, and it is what makes the
+ * mass closed for the same divergence-theorem volume check extrude.ts relies on.
+ */
+function towerGeometry(p: TowerParams = TOWER_DEFAULTS): THREE.BufferGeometry {
+  const b = new Builder();
+  const top = WELD.ridge + p.heightAboveRidge;
+  for (const c of towerCentres()) {
+    b.box({ u: c.u, v: c.v }, p.width, p.width, towerBase(c, p.width), top);
+  }
+  return b.build();
+}
+
+/** The roof height under a lantern's lowest plan corner. */
+function towerBase(c: Building, width: number): number {
+  const signs: [number, number][] = [
+    [-1, -1],
+    [1, -1],
+    [1, 1],
+    [-1, 1],
+  ];
+  return Math.min(
+    ...signs.map(([su, sv]) => roofHeightAt(c.u + (su * width) / 2, c.v + (sv * width) / 2)),
+  );
 }
 
 /**

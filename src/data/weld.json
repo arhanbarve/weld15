@@ -70,6 +70,46 @@
    "ridge_ft": 85.4,
    "note": "Model as a 60 ft mass with a pitched roof to 85.4 ft, not a flat 87 ft box. 5 floors x 12 ft = 60 ft matches Cambridge eaves exactly."
   },
+  "towers": {
+   "count": 2,
+   "provenance": "SLIVER POSITION derived from the data; IDENTITY inferred and contested; SIZE inferred. Three different tags in one block on purpose -- see identification, position_derivation and size_is_not_sourced.",
+   "identification": "What these two roof features ARE is not established, and the wording elsewhere in this block should not be read as settling it. What is measured: two slivers in the GIS data, symmetric about the ridge (u -9.87 and +9.09, so 9.4 and 9.6 ft off it on opposite sides), one in each wing zone. That symmetry is real and is why they are modelled at all. What is NOT established: that they are the 1875 staircase lanterns. The 1875 text calls those halls CENTRAL, and the same text's 143 = 44 + 15 + 25 + 15 + 44 chain puts them at v 12.3 to 27.3, while these slivers sit at v +40.2 and -37.8 -- inside the 44 ft end sections, 13 to 28 ft away from the stair-hall band, and not central by any reading. So the position evidence argues AGAINST the identification rather than for it. Clustered chimney shafts, which MACRIS mentions in the same breath as the towers, fit two symmetric near-ridge features in the wing bays at least as well. Modelled as unidentified roof features at measured positions; the lantern reading is the leading candidate, not the answer.",
+   "existence_source": {
+    "citation": "The Harvard Book, Vaille & Clark eds., 1875, vol. 1, pp. 135-136",
+    "url": "https://archive.org/details/harvardbookserie01vail",
+    "quotation": "The building has two central staircase halls, fifteen feet by thirty-one feet, lighted and ventilated each by a lantern or louvre which rises above the roof.",
+    "corroboration": "MACRIS CAM.184 describes a skyline broken by the two staircase towers and clustered chimney shafts. Harvard's own first-year dorm layer adds an observatory at the top of the south tower, and architectural history records the tower clerestory stairs being enclosed for fire in 1962 -- three independent descriptions of a thing that rises above the roof.",
+    "status": "verified that they exist"
+   },
+   "position_derivation": "Building-frame centroid of weld.rings[1] and weld.rings[2] -- the mean of each sliver's three distinct vertices after siteToBuilding(). Both slivers are triangles, so the vertex mean IS the area centroid exactly and needs no division by their 1.23 and 0.81 sq ft. Recomputed at run time by towerCentres() in src/scene/weldGeometry.ts; u_ft and v_ft below are a RECORD of that computation, not an input to it, and tests/weldGeometry.test.ts asserts the two agree.",
+   "positions": [
+    {
+     "id": "north",
+     "ring": 1,
+     "u_ft": -9.868,
+     "v_ft": 40.1748,
+     "sliver_u_extent_ft": 0.3148,
+     "sliver_v_extent_ft": 8.4172,
+     "sliver_area_sqft": 1.23
+    },
+    {
+     "id": "south",
+     "ring": 2,
+     "u_ft": 9.0948,
+     "v_ft": -37.754,
+     "sliver_u_extent_ft": 0.2176,
+     "sliver_v_extent_ft": 7.4497,
+     "sliver_area_sqft": 0.81
+    }
+   ],
+   "position_note": "One either side of the ridge in u (-9.9 west, +9.1 east). An earlier draft of this note claimed that straddle was 'what two central staircase halls means across a 62 ft building' -- that was a rationalisation and it is withdrawn: being central across the WIDTH is not what the 1875 sentence is about, and in v these land at +40.2 and -37.8, in the projecting wing zones, NOT in the stair-hall band the chain puts at v 12.3 to 27.3. See identification above; the mismatch is evidence against the lantern reading, not a detail to explain away. Positions are recorded rather than reconciled because the slivers are the only positional evidence in any of the five datasets: do not later move these features onto the 1875 chain and call it a correction, and do not delete them because the identification is unsettled. Note they fall outside Weld 15's own footprint -- the north one is across the ridge in the neighbouring suite's half, the south one is in the far end section -- so nothing in the suite's geometry depends on this.",
+   "size_is_not_sourced": "NO source gives the lanterns' plan size or how far they rise above the ridge. The 1875 text names them and says they rise; MACRIS says they break the skyline; neither gives a dimension. plan_width_ft_estimate and height_above_ridge_ft_estimate are this project's own numbers, tagged INFERRED, exposed as controls so that being wrong costs a drag rather than a rebuild. Do not cite either as a measurement.",
+   "plan_width_ft_estimate": 7.9,
+   "plan_width_basis": "The mean of the two slivers' own measured extents along v, 8.4172 and 7.4497 ft (mean 7.9334), rounded to the tenth of a foot the ring is given to. That is the only plan dimension any dataset carries at these two positions. Bounded above by 15 ft, the stair hall's short dimension in the 1875 text: a lantern lighting a 15 x 31 ft well cannot be wider than the well. Square in the building frame because only the v extent is measured -- the slivers' u extents, 0.31 and 0.22 ft, are digitisation noise, and giving the plan the hall's 15:31 aspect would be a second guess stacked on the first.",
+   "height_above_ridge_ft_estimate": 6.5,
+   "height_above_ridge_basis": "The fall of the slate across the lantern's own plan: 7.9 ft of run at the 39.2 deg pitch the roof has over the wing zones, where both towers sit, is 6.46 ft, rounded to the half foot. Below that the lantern reads as a wedge half-buried in the roof. It also keeps the mass above the highest slate on its own footprint at 10.95 ft, under the sourced 12.0 ft storey, so it stays a lantern rather than becoming a sixth floor.",
+   "not_constrained_by": "The two independent height figures say nothing about this. Cambridge's 85.4 ft and Harvard's 87.01 ft are both RIDGE figures -- see height_ft_note -- so neither dataset saw the lanterns and their 1.6 ft disagreement is a source disagreement, not a feature height. The geometry gives no lower bound either: the roof has already fallen 4.45 ft below the ridge at the lantern's uphill edge, so even a height_above_ridge of 0 would leave a mass standing clear of the slate. Only the 1875 wording, which rises above the roof, forces the value above zero."
+  },
   "furniture_specs": {
    "mattress_in": [
     38,

@@ -36,13 +36,13 @@
 <rect x="244.0" y="107.5" width="6.5" height="39.0" fill="#8FC4F2" opacity="0.9"/>
 <rect x="192.0" y="517.0" width="6.5" height="39.0" fill="#0A2547"/>
 <rect x="192.0" y="517.0" width="6.5" height="39.0" fill="#8FC4F2" opacity="0.9"/>
-<rect x="179.0" y="416.9" width="6.5" height="41.6" fill="#0A2547"/>
-<rect x="179.0" y="416.9" width="6.5" height="41.6" fill="#E4526F" opacity="0.9"/>
-<rect x="458.5" y="296.0" width="19.5" height="104.0" fill="#8FC4F2" opacity="0.45"/>
-<rect x="458.5" y="296.0" width="19.5" height="104.0" fill="#8FC4F2" opacity="0.45"/>
-<rect x="458.5" y="296.0" width="19.5" height="104.0" fill="#8FC4F2" opacity="0.45"/>
-<rect x="458.5" y="296.0" width="19.5" height="104.0" fill="#8FC4F2" opacity="0.45"/>
-<rect x="270.0" y="42.5" width="104.0" height="19.5" fill="#8FC4F2" opacity="0.45"/>
+<rect x="179.0" y="377.9" width="6.5" height="41.6" fill="#0A2547"/>
+<rect x="179.0" y="377.9" width="6.5" height="41.6" fill="#E4526F" opacity="0.9"/>
+<rect x="458.5" y="484.5" width="19.5" height="104.0" fill="#8FC4F2" opacity="0.45"/>
+<rect x="458.5" y="331.8" width="19.5" height="71.5" fill="#8FC4F2" opacity="0.45"/>
+<rect x="458.5" y="220.4" width="19.5" height="53.6" fill="#8FC4F2" opacity="0.45"/>
+<rect x="458.5" y="91.3" width="19.5" height="71.5" fill="#8FC4F2" opacity="0.45"/>
+<rect x="302.5" y="42.5" width="104.0" height="19.5" fill="#8FC4F2" opacity="0.45"/>
 <rect x="62.0" y="62.0" width="123.5" height="416.0" fill="none" stroke="#6C87AC" stroke-width="1" stroke-dasharray="5 4" opacity="0.5"/>
 <text class="note" x="123.8" y="270.0" text-anchor="middle" opacity="0.75">not part of</text>
 <text class="note" x="123.8" y="284.0" text-anchor="middle" opacity="0.75">the suite</text>

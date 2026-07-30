@@ -96,6 +96,66 @@ describe("classification", () => {
   });
 });
 
+describe("openings land inside the room they belong to", () => {
+  // The bug these exist for: every face window was centred on its BAND rather than
+  // on its room, so all four facade windows came back as the identical opening at
+  // v 18 to 26 -- stacked in one hole in front of bedroom A, with no glass at all in
+  // the common room, bedroom B's facade, or the strip. Nothing compared two windows
+  // to each other, so nothing caught it, and one of the four does land correctly,
+  // which is enough to make a screenshot look right.
+
+  /** An opening's span in the band's own long axis, as absolute suite coordinates. */
+  const span = (o: (typeof openings)[number]) => {
+    const w = walls.find((x) => x.id === o.wallId)!;
+    const alongV = w.dv > w.du;
+    const start = (alongV ? w.v : w.u) + o.offset;
+    return { alongV, start, end: start + o.width };
+  };
+
+  it("gives every window a distinct position", () => {
+    const keys = openings
+      .filter((o) => o.kind === "window")
+      .map((o) => {
+        const s = span(o);
+        return `${o.wallId}:${s.start.toFixed(3)}:${s.end.toFixed(3)}`;
+      });
+    expect(new Set(keys).size, `coincident windows: ${keys.join(" | ")}`).toBe(keys.length);
+  });
+
+  it("puts each window inside the run of the room it lights", () => {
+    for (const o of openings.filter((x) => x.kind === "window")) {
+      const room = suite.rooms.find((r) => r.id === o.connects[0])!;
+      const s = span(o);
+      const lo = s.alongV ? room.v : room.u;
+      const hi = lo + (s.alongV ? room.dv : room.du);
+      expect(s.start, `${o.id} (${room.id}) starts before the room`).toBeGreaterThanOrEqual(lo - 1e-9);
+      expect(s.end, `${o.id} (${room.id}) ends past the room`).toBeLessThanOrEqual(hi + 1e-9);
+    }
+  });
+
+  it("gives every room that declares a window an actual window", () => {
+    for (const room of suite.rooms) {
+      for (const face of room.windows) {
+        const mine = openings.filter(
+          (o) => o.kind === "window" && o.connects.includes(room.id) && o.note === face,
+        );
+        expect(mine, `${room.id} declares a ${face} window and has none`).toHaveLength(1);
+      }
+    }
+  });
+
+  it("puts the suite entry door inside the hall, not in the band beyond it", () => {
+    // The band runs from v = 12.5, past the K bump; the hall starts at v = 15.5. A
+    // flat offset left two thirds of the door outside the hall, backed by the bands
+    // behind it, so it read as a shallow niche instead of a hole.
+    const entry = openings.find((o) => o.connects.includes("outside"))!;
+    const hall = suite.rooms.find((r) => r.id === "hall")!;
+    const s = span(entry);
+    expect(s.start).toBeGreaterThanOrEqual(hall.v - 1e-9);
+    expect(s.end).toBeLessThanOrEqual(hall.v + hall.dv + 1e-9);
+  });
+});
+
 describe("openings", () => {
   it("places every opening wholly within exactly one wall band", () => {
     for (const o of openings) {

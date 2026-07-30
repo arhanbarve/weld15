@@ -362,13 +362,16 @@ export function materials(): Palette {
   });
 
   /**
-   * Glazing has to read as glass rather than as a blue plane, which takes four
-   * things together: transmission so the room beyond shows through, a smooth
-   * surface so it holds a highlight, the ior of soda-lime float glass, and a
-   * non-zero thickness so three routes it through the refraction path at all.
+   * Glazing has to read as glass rather than as a blue plane, which here takes
+   * three things: a smooth surface so it holds a highlight, the ior of soda-lime
+   * float glass so it brightens at grazing angles, and partial opacity so the room
+   * beyond shows through.
    *
-   * thickness is in world units, i.e. feet here: 0.02 ft is a nominal quarter-inch
-   * single pane. No source in the project gives a glazing thickness; flagged.
+   * Transmission is the obvious fourth and it is deliberately off -- see the note on
+   * the property itself, which records what it measured. An earlier version used
+   * transmission 0.92 with a 0.02 ft thickness for a nominal quarter-inch pane;
+   * both are gone, because thickness only matters on the refraction path and there
+   * is no refraction path now.
    *
    * DoubleSide because every window is seen from both sides -- from the Yard at
    * stage 4 and from inside the room at stage 5 and in first person.
@@ -377,9 +380,26 @@ export function materials(): Palette {
     color: DAY.glass,
     roughness: 0.05,
     metalness: 0,
-    transmission: 0.92,
-    thickness: 0.02,
+    // transmission is deliberately 0, and this is a performance decision with a
+    // measured basis rather than a preference.
+    //
+    // A non-zero transmission makes three render the scene a SECOND time into a
+    // transmission render target, so every visible mesh is drawn twice. Measured at
+    // stage 5: 37 draw calls with transmission against 27 without, and the doubling
+    // scales with what the camera can see -- the roof-off cutaway sees the whole
+    // suite, which would put it over the 25-call scene budget in
+    // docs/IMPLEMENTATION-PLAN.md section 9. A full extra scene render is a lot to
+    // pay for refraction through a quarter-inch pane seen at room distance, where
+    // there is nothing behind the glass close enough to visibly bend.
+    //
+    // What carries the glass instead: a low roughness for the specular highlight,
+    // an ior that still drives the Fresnel falloff so it brightens at grazing
+    // angles, and opacity. If it ever needs to look wetter, an envMap is the cheap
+    // next step, not transmission.
+    transmission: 0,
     ior: 1.52,
+    transparent: true,
+    opacity: 0.28,
     side: THREE.DoubleSide,
   });
 
