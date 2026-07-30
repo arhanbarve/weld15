@@ -1,0 +1,193 @@
+import { describe, it, expect } from "vitest";
+import { buildSuite, DEFAULT_PARAMS, type SuiteParams } from "@/geo/rooms";
+import {
+  buildWalls,
+  footprintArea,
+  suiteFootprint,
+  wallBetween,
+  type Wall,
+} from "@/geo/walls";
+
+const suite = buildSuite();
+const { walls, openings } = buildWalls(suite);
+
+const area = (r: { du: number; dv: number }) => r.du * r.dv;
+const overlap = (a: Wall, b: Wall) => {
+  const eps = 1e-9;
+  const sep =
+    a.u + a.du <= b.u + eps ||
+    b.u + b.du <= a.u + eps ||
+    a.v + a.dv <= b.v + eps ||
+    b.v + b.dv <= a.v + eps;
+  return !sep;
+};
+
+describe("area conservation", () => {
+  it("tiles the suite footprint: rooms plus walls, nothing lost or double-counted", () => {
+    // The strongest correctness check available. It is what catches the
+    // doubled-wall class of bug that muddied the SVG prototype: a wall counted
+    // twice shows up here as excess area.
+    const roomArea = suite.rooms.reduce((a, r) => a + area(r), 0);
+    const interior = walls.filter((w) => !w.perimeter);
+    const wallArea = interior.reduce((a, w) => a + area(w), 0);
+    expect(roomArea + wallArea).toBeCloseTo(footprintArea(suite), 2);
+    // and the perimeter is real, not an empty list
+    expect(walls.filter((w) => w.perimeter).length).toBeGreaterThan(3);
+  });
+
+  it("has a footprint matching the L: main leg plus the K bump", () => {
+    const p = DEFAULT_PARAMS;
+    const k = suite.rooms.find((r) => r.id === "k")!;
+    const expected = p.legDepth * p.sectionLength + (k.u + k.du - p.legDepth) * k.dv;
+    expect(footprintArea(suite)).toBeCloseTo(expected, 6);
+    expect(suiteFootprint(suite)).toHaveLength(2);
+  });
+
+  it("emits every wall exactly once, so no two bands overlap", () => {
+    const bad: string[] = [];
+    for (let i = 0; i < walls.length; i++) {
+      for (let j = i + 1; j < walls.length; j++) {
+        if (overlap(walls[i]!, walls[j]!)) bad.push(`${walls[i]!.id}/${walls[j]!.id}`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it("never puts a wall band inside a room", () => {
+    const bad: string[] = [];
+    for (const w of walls) {
+      for (const r of suite.rooms) {
+        const eps = 1e-9;
+        const sep =
+          w.u + w.du <= r.u + eps ||
+          r.u + r.du <= w.u + eps ||
+          w.v + w.dv <= r.v + eps ||
+          r.v + r.dv <= w.v + eps;
+        if (!sep) bad.push(`${w.id} in ${r.id}`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it("produces walls at all, so the checks above are not vacuous", () => {
+    expect(walls.filter((w) => !w.perimeter).length).toBeGreaterThan(4);
+    expect(walls.reduce((a, w) => a + area(w), 0)).toBeGreaterThan(30);
+  });
+});
+
+describe("classification", () => {
+  it("marks exterior only on the facade or the north gable", () => {
+    const p = DEFAULT_PARAMS;
+    for (const w of walls.filter((x) => x.kind === "exterior")) {
+      const onFacade = w.u < 1e-9;
+      const onGable = w.v + 1e-9 >= p.sectionLength;
+      expect(onFacade || onGable, `${w.id} is exterior but on neither face`).toBe(true);
+    }
+  });
+
+  it("finds both an exterior and a partition band", () => {
+    expect(walls.some((w) => w.kind === "exterior")).toBe(true);
+    expect(walls.some((w) => w.kind === "partition")).toBe(true);
+  });
+});
+
+describe("openings", () => {
+  it("places every opening wholly within exactly one wall band", () => {
+    for (const o of openings) {
+      const w = walls.find((x) => x.id === o.wallId);
+      expect(w, `${o.id} references a missing wall`).toBeDefined();
+      const along = w!.du > w!.dv ? w!.du : w!.dv;
+      expect(o.offset, `${o.id} starts before its wall`).toBeGreaterThanOrEqual(-1e-9);
+      expect(o.offset + o.width, `${o.id} runs past its wall`).toBeLessThanOrEqual(along + 1e-9);
+      expect(o.width).toBeGreaterThan(0);
+    }
+  });
+
+  it("puts the bathroom door on a wall the bathroom actually touches", () => {
+    // Revision 2 of the drawing had the bath's door opening into a closet,
+    // because closets sat between the hall and the bath. Assert it cannot recur.
+    const w = wallBetween(walls, "hall", "bath");
+    expect(w, "no wall separates the hall from the bathroom").toBeDefined();
+    expect(w!.between).toContain("bath");
+    expect(w!.between).toContain("hall");
+    const door = openings.find((o) => o.kind === "door" && o.connects.includes("bath"));
+    expect(door).toBeDefined();
+    expect(door!.wallId).toBe(w!.id);
+  });
+
+  it("opens the three hall doors the resident describes, plus K off the common room", () => {
+    const doors = openings.filter((o) => o.kind === "door");
+    const pair = (a: string, b: string) =>
+      doors.some((d) => d.connects.includes(a) && d.connects.includes(b));
+    expect(pair("hall", "bedA")).toBe(true);
+    expect(pair("hall", "bath")).toBe(true);
+    expect(pair("hall", "bedB")).toBe(true);
+    // "attached to the common room" -- K is reached through it, not off the hall
+    expect(pair("common1", "k")).toBe(true);
+    expect(pair("hall", "k")).toBe(false);
+  });
+
+  it("has a suite entry door in the hall's inner wall", () => {
+    const entry = openings.find((o) => o.connects.includes("outside"));
+    expect(entry).toBeDefined();
+    const w = walls.find((x) => x.id === entry!.wallId)!;
+    expect(w.kind).toBe("partition");
+    expect(w.between).toContain("hall");
+  });
+
+  it("glazes every room that rooms.ts says has a window", () => {
+    for (const r of suite.rooms) {
+      for (const face of r.windows) {
+        const win = openings.find(
+          (o) => o.kind === "window" && o.connects.includes(r.id) && o.note === face,
+        );
+        expect(win, `${r.label} has no ${face} window`).toBeDefined();
+      }
+    }
+  });
+
+  it("gives K no window, because whether it has one is unknown", () => {
+    expect(openings.some((o) => o.kind === "window" && o.connects.includes("k"))).toBe(false);
+  });
+});
+
+describe("robustness across the sliders", () => {
+  it("conserves area over 200 randomised parameter sets", () => {
+    let seed = 4242;
+    const rnd = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed / 0x7fffffff;
+    };
+    const jitter = (b: number, s: number) => b + (rnd() * 2 - 1) * s;
+
+    for (let i = 0; i < 200; i++) {
+      const p: SuiteParams = {
+        ...DEFAULT_PARAMS,
+        sectionLength: jitter(44, 3),
+        hallWidth: jitter(4.5, 0.8),
+        bedDepth: jitter(16, 1),
+        commonAlong: jitter(15, 1),
+        commonDeep: jitter(20, 1.5),
+        bedAAlong: jitter(10, 1),
+        bathAlong: jitter(7.5, 1.5),
+        bathDeep: jitter(8, 1),
+        kDeep: jitter(10, 1),
+        kAlong: jitter(12, 1),
+      };
+      p.legDepth = p.hallWidth + p.partition + p.bedDepth;
+      const s = buildSuite(p);
+      const { walls: w, openings: o } = buildWalls(s);
+      const total =
+        s.rooms.reduce((a, r) => a + area(r), 0) +
+        w.filter((x) => !x.perimeter).reduce((a, x) => a + area(x), 0);
+      expect(total, `iteration ${i} area`).toBeCloseTo(footprintArea(s), 2);
+      for (const op of o) {
+        const wall = w.find((x) => x.id === op.wallId)!;
+        const along = wall.du > wall.dv ? wall.du : wall.dv;
+        expect(op.offset + op.width, `iteration ${i} opening ${op.id}`).toBeLessThanOrEqual(
+          along + 1e-9,
+        );
+      }
+    }
+  });
+});
