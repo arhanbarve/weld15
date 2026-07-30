@@ -370,6 +370,51 @@ Topology, which is firmer than the dimensions because it is described rather tha
    caveat permits.
 4. **Which end is the common room.** Undetermined. Depends on which wall the suite door is in.
 
+### Settled: what is in the 5.2 ft outside the common room
+
+Not a contradiction any more, but it was one, and the resolution is worth keeping because the losing
+argument was mine.
+
+Weld is a dumbbell — about 62 ft across the two wing zones, about 52 ft at the gable ends. The
+suite's 44 ft section runs from building v 26.15 to 70.15 and therefore **crosses the step at
+v 48.45**. The bedrooms, bathroom and unknown strip sit in the narrow end zone, where the suite's
+facade line misses the ring's real wall by 0.19 ft. The common room and K sit in the wide zone, where
+it misses by **5.36 ft**. Measured by `facadeStep()` in `place.ts`: the projection is 5.165 ft on the
+east facade and 5.298 ft on the west.
+
+So something occupies a 5.2 × 22 ft slab of Weld on the far side of the common room's window wall.
+**It is masonry and a chimney breast, not floor.** Three reasons:
+
+1. the resident gives the common room as 15 × 15–20 ft. The straight facade already puts it at the top of
+   that range, 20 ft deep. Stepping the facade takes it to 25.17 ft and 377 sq ft, which contradicts
+   the only dimension given for that room. Nothing else in this project overrides a GIVEN figure on
+   the strength of a DERIVED one.
+2. MACRIS CAM.184 describes the skyline as broken by the staircase towers **and clustered chimney
+   shafts**, and the two roof features measured off `weld.rings[1]` and `[2]` sit at building
+   v +40.2 and −37.8 — inside the two wing zones. A masonry projection with a stack rising directly
+   above it explains the wall bulge and the roof lumps with one mechanism and contradicts no source.
+   The measured asymmetry supports it: 5.165 ft against 5.298 ft is what a survey of masonry looks
+   like, not a room somebody set out.
+3. **The argument that first pointed the other way does not survive testing, and it was mine.** It
+   ran: measured inward from each zone's own wall, a 20 ft common room reaches u 10.6 and a 16 ft
+   bedroom reaches u 9.4, nearly the same line — so the inner wall is straight and the facade steps.
+   But holding the depth at 20 and shifting the room bodily outward, which is what that argument
+   predicts, detaches the common room from K: `unreachableRooms()` returns `["k"]`. Measured, not
+   assumed. The variant that does close instead *grows* the room to 25.17 ft, which is reason 1.
+
+`params.wingStep` implements the stepped reading and is **off**, and off is the claim rather than a
+default. It is kept rather than deleted because the measurement behind it is real and worth keeping
+addressable: if a 1962 or 1992 floor plan ever turns up showing a deeper common room, this is one
+flag rather than a rebuild. It is not offered as a UI control, because it is not an open question.
+Renders of both readings are in `design/renders/wing-common-straight.png` and
+`wing-common-stepped.png`.
+
+Two things the stepped mode does NOT do, recorded so nobody mistakes it for finished: `walls.ts`
+still lays the facade masonry straight, so with the step on the new floor has no outer wall and no
+ceiling; and bedroom A straddles v 48.45 with 6.80 ft in the wing zone and 3.20 ft in the end zone,
+so a faithful stepped bedroom A has an L-shaped outer wall that a `Rect` cannot hold. It is left
+straight rather than half-stepped.
+
 ---
 
 ## 7. Being researched

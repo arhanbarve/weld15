@@ -7,6 +7,10 @@ import {
   touches,
   type SuiteParams,
 } from "@/geo/rooms";
+// Not only for facadeStep's value. Importing place.ts is what registers the ring
+// measurement with rooms.ts -- see provideFacadeStep -- so a stepped suite cannot
+// be built without it, deliberately and loudly.
+import { facadeStep } from "@/geo/place";
 
 const suite = buildSuite();
 const byId = (id: string) => {
@@ -125,6 +129,164 @@ describe("a rectangular suite is impossible, which is why it is L-shaped", () =>
       p.commonAlong + p.kAlong + p.bedAAlong + p.bathAlong + p.bedBAlong + 4 * p.partition;
     expect(withK).toBeGreaterThan(p.sectionLength);
     expect(withK - p.sectionLength).toBeGreaterThan(9); // over by ~12.5 ft
+  });
+});
+
+/**
+ * params.wingStep, both ways round.
+ *
+ * The half of this that matters most is the OFF half. wingStep is a new field on an
+ * interface four other modules build against, and the claim attached to it is that
+ * nothing whatever changes until somebody turns it on -- so the straight layout is
+ * pinned against a table written out by hand rather than against buildSuite()'s own
+ * output, which would agree with itself however it drifted.
+ */
+describe("the wing step, off", () => {
+  /**
+   * Every room at the defaults, as of the commit that added wingStep. Frozen, and
+   * literal on purpose: this is the layout in docs/FINAL-LAYOUT.md, in
+   * design/weld15-plan.svg and in every render in design/renders.
+   */
+  const TODAY: [string, number, number, number, number][] = [
+    ["common1", 0, 0, 20, 15],
+    ["k", 20.5, 0, 10, 12],
+    ["hall", 16.5, 15.5, 4.5, 28.5],
+    ["bedA", 0, 15.5, 16, 10],
+    ["unknown", 0, 26, 7.5, 7.5],
+    ["bath", 8, 26, 8, 7.5],
+    ["bedB", 0, 34, 16, 10],
+  ];
+
+  it("is off by default", () => {
+    expect(DEFAULT_PARAMS.wingStep).toBe(false);
+  });
+
+  it("leaves the default layout exactly where it was", () => {
+    expect(suite.rooms.map((r) => r.id)).toEqual(TODAY.map(([id]) => id));
+    for (const [id, u, v, du, dv] of TODAY) {
+      const r = byId(id);
+      expect([r.u, r.v, r.du, r.dv], id).toEqual([u, v, du, dv]);
+    }
+    expect(suite.netArea).toBeCloseTo(984.5, 9);
+    expect(suite.roomArea).toBeCloseTo(800, 9);
+    expect(suite.maxDepth).toBeCloseTo(30.5, 9);
+  });
+
+  it("reads the flag rather than the shape", () => {
+    // Both halves are needed. The first says an explicit false is the default; the
+    // second says the flag does something, which is what stops "nothing changed"
+    // from being satisfied by a step that never fires.
+    const off = buildSuite({ ...DEFAULT_PARAMS, wingStep: false });
+    expect(JSON.stringify(off.rooms)).toBe(JSON.stringify(suite.rooms));
+    const on = buildSuite({ ...DEFAULT_PARAMS, wingStep: true });
+    expect(JSON.stringify(on.rooms)).not.toBe(JSON.stringify(suite.rooms));
+  });
+});
+
+describe("the wing step, on", () => {
+  const params: SuiteParams = { ...DEFAULT_PARAMS, wingStep: true };
+  const stepped = buildSuite(params);
+  const step = facadeStep(params);
+  const at = (s: ReturnType<typeof buildSuite>, id: string) => {
+    const r = s.rooms.find((x) => x.id === id);
+    if (!r) throw new Error(`no room ${id}`);
+    return r;
+  };
+
+  it("moves the common room's outer face out by the projection the ring measures", () => {
+    // 5.165 ft east. The value is asserted against the ring in tests/place.test.ts;
+    // here the only claim is that the room moved by it and by nothing else.
+    expect(step.projection).toBeGreaterThan(5);
+    expect(at(stepped, "common1").u).toBeCloseTo(-step.projection, 9);
+  });
+
+  it("holds the common room's inner face, which K and the hall are hung off", () => {
+    const c = at(stepped, "common1");
+    expect(c.du).toBeCloseTo(DEFAULT_PARAMS.commonDeep + step.projection, 9);
+    // The face the partition to K sits on. Moving it is what makes K landlocked.
+    expect(c.u + c.du).toBeCloseTo(DEFAULT_PARAMS.commonDeep, 9);
+    expect(c.dv).toBe(DEFAULT_PARAMS.commonAlong);
+    expect(stepped.maxDepth).toBeCloseTo(suite.maxDepth, 9);
+  });
+
+  it("leaves every other room alone, including bedroom A, which straddles the step", () => {
+    for (const r of suite.rooms) {
+      if (r.id === "common1") continue;
+      expect(JSON.stringify(at(stepped, r.id)), r.id).toBe(JSON.stringify(r));
+    }
+    // The straddle itself, so that "left straight" is recorded as a choice rather
+    // than as a room that happened not to qualify: bedroom A starts south of the
+    // step and ends north of it, 6.8 ft in the wing zone and 3.2 in the end zone.
+    const bedA = at(stepped, "bedA");
+    expect(bedA.v).toBeLessThan(step.v);
+    expect(bedA.v + bedA.dv).toBeGreaterThan(step.v);
+    expect(step.v - bedA.v).toBeCloseTo(6.8046, 3);
+    expect(bedA.v + bedA.dv - step.v).toBeCloseTo(3.1954, 3);
+  });
+
+  it("adds 77.48 sq ft, all of it in the common room", () => {
+    // projection 5.1651 ft across the common room's 15 ft. Nothing else changes, so
+    // the same figure has to show up in both totals.
+    const expected = step.projection * DEFAULT_PARAMS.commonAlong;
+    expect(expected).toBeCloseTo(77.4763, 4);
+    expect(stepped.netArea - suite.netArea).toBeCloseTo(expected, 9);
+    expect(stepped.roomArea - suite.roomArea).toBeCloseTo(expected, 9);
+  });
+
+  it("still closes on the residuals the layout was derived from", () => {
+    // Both residuals are arithmetic on the params, so the step must not touch them.
+    // If it ever does, the step has changed the suite's derivation and not its shape.
+    expect(stepped.residuals).toEqual(suite.residuals);
+  });
+
+  it("keeps the plan legal: no overlaps, nothing landlocked, K still on the common room", () => {
+    expect(findOverlaps(stepped.rooms)).toEqual([]);
+    expect(unreachableRooms(stepped)).toEqual([]);
+    expect(touches(at(stepped, "k"), at(stepped, "common1"), params.partition)).toBe(true);
+  });
+
+  it("steps the west facade too, by its own measured amount", () => {
+    // The west wing projects 5.298 ft against the east's 5.165 -- the ring is not
+    // symmetric, and a step that used one number for both facades would be a guess
+    // dressed as a measurement on whichever side it was not measured from.
+    const west: SuiteParams = { ...params, facade: "west" };
+    const w = buildSuite(west);
+    const wStep = facadeStep(west);
+    expect(wStep.projection).not.toBeCloseTo(step.projection, 2);
+    expect(at(w, "common1").u).toBeCloseTo(-wStep.projection, 9);
+    expect(findOverlaps(w.rooms)).toEqual([]);
+    expect(unreachableRooms(w)).toEqual([]);
+  });
+
+  it("survives 500 randomised parameter sets stepped, as the straight suite does", () => {
+    let seed = 20260730;
+    const rnd = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed / 0x7fffffff;
+    };
+    const jitter = (base: number, spread: number) => base + (rnd() * 2 - 1) * spread;
+
+    for (let i = 0; i < 500; i++) {
+      const p: SuiteParams = {
+        ...DEFAULT_PARAMS,
+        wingStep: true,
+        facade: rnd() < 0.5 ? "east" : "west",
+        sectionLength: jitter(44, 4),
+        hallWidth: jitter(4.5, 1),
+        bedDepth: jitter(16, 1),
+        commonAlong: jitter(15, 1),
+        commonDeep: jitter(20, 2),
+        bedAAlong: jitter(10, 1),
+        bathAlong: jitter(8, 2),
+        bathDeep: jitter(8, 1.5),
+        kDeep: jitter(10, 1),
+        kAlong: jitter(12, 1),
+      };
+      p.legDepth = p.hallWidth + p.partition + p.bedDepth;
+      const s = buildSuite(p);
+      expect(findOverlaps(s.rooms), `iteration ${i}`).toEqual([]);
+      expect(unreachableRooms(s), `iteration ${i}`).toEqual([]);
+    }
   });
 });
 

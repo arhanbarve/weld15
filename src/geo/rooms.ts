@@ -10,6 +10,9 @@
  *   v = feet north along the end section     (0 = south wall at the stair hall,
  *                                            44 = north gable)
  *
+ * With params.wingStep on, u = 0 is the END ZONE's facade line and a room out in
+ * Weld's projecting wing zone takes NEGATIVE u. See stepOntoTheWing().
+ *
  * Why L-shaped, which is forced rather than chosen:
  *   - the resident gives bedrooms 16 ft deep. A 4 ft private hall plus a 0.5 ft
  *     partition plus 16 ft is 20.5 ft, so the suite's main leg is ~21 ft deep
@@ -27,6 +30,11 @@
  * 143 ft overall, less two 15 ft stair halls and a 25 ft central porch, halved.
  * See docs/FINAL-LAYOUT.md.
  */
+
+// Type-only, and it has to stay type-only. See measuredFacadeStep below: a value
+// import of place.ts here breaks both generator scripts and with them the
+// anti-drift gate, because node cannot resolve place.ts's extensionless imports.
+import type { FacadeStep } from "./place";
 
 export type Rect = {
   id: string;
@@ -81,6 +89,46 @@ export type SuiteParams = {
   ceiling: number;
   /** which facade the rooms face */
   facade: "east" | "west";
+  /**
+   * Follow Weld's wing step on the facade side instead of drawing one straight
+   * facade line.
+   *
+   * OFF, and this one is settled rather than merely defaulted. Weld is a dumbbell,
+   * about 62 ft across the middle and 52 ft at the ends, and the suite's 44 ft
+   * section is long enough to cover part of both -- so the common room and K sit in
+   * the wide middle with roughly 5.2 ft of building on the far side of their facade
+   * wall. The question was whether that 5.2 ft is floor or fabric. It is fabric, on
+   * three grounds:
+   *
+   *   - the resident gives the common room as 15 x 15-20 ft. The straight reading already
+   *     puts it at the top of that range, at 20 ft deep. Stepping takes it to 25.17
+   *     ft and 377 sq ft, which contradicts the one dimension actually given for
+   *     that room. Nothing else in this project overrides a given figure on the
+   *     strength of an inference, and this is not the place to start.
+   *   - MACRIS CAM.184 describes Weld's skyline as broken by staircase towers AND
+   *     clustered chimney shafts, and the two roof features measured off
+   *     weld.rings[1] and [2] sit at building v +40.2 and -37.8 -- inside the two
+   *     wing zones. A 5.2 ft masonry projection and a stack rising directly above it,
+   *     in the same two zones, is one mechanism explaining both anomalies and
+   *     contradicting no source. The measured asymmetry supports it too: the
+   *     projection is 5.165 ft east and 5.298 ft west, which is what a survey of
+   *     masonry looks like rather than a room somebody set out.
+   *   - The argument that first suggested stepping does not survive testing. It ran:
+   *     measured inward from each zone's own wall, a 20 ft common room and a 16 ft
+   *     bedroom reach nearly the same line, so the inner wall is straight and the
+   *     facade steps. But holding the depth at 20 and shifting the room bodily
+   *     outward -- which is what that argument predicts -- detaches it from K, and
+   *     unreachableRooms() returns ["k"]. Measured, not assumed.
+   *
+   * Kept as a parameter rather than deleted because the measurement behind it is
+   * real and worth keeping addressable: facadeStep() in place.ts measures the step
+   * off the ring, the tests pin both modes, and if a floor plan ever turns up
+   * showing a deeper common room this is one flag rather than a rebuild. It is not
+   * a control the UI offers, because it is not an open question.
+   *
+   * See stepOntoTheWing() for what it does and what it does not do.
+   */
+  wingStep: boolean;
 };
 
 export const DEFAULT_PARAMS: SuiteParams = {
@@ -100,7 +148,46 @@ export const DEFAULT_PARAMS: SuiteParams = {
   masonry: 1.5,
   ceiling: 10.75,
   facade: "east",
+  wingStep: false,
 };
+
+/**
+ * The building's facade step, PUSHED IN by place.ts rather than imported from it.
+ *
+ * The measurement belongs in place.ts and is there: it is a fact about Weld's ring,
+ * and this module deliberately knows nothing about Weld. What is unusual is the
+ * direction. The obvious `import { facadeStep } from "./place"` was written, run,
+ * and withdrawn, because it breaks the anti-drift gate:
+ *
+ *   Error [ERR_MODULE_NOT_FOUND]: Cannot find module
+ *   '/Users/.../src/geo/place' imported from /Users/.../src/geo/rooms.ts
+ *
+ * tests/drift.test.ts runs scripts/emit-layout.mjs and scripts/emit-plan.mjs in
+ * plain node to prove the committed drawing and the committed layout tables still
+ * match the code. Those scripts import THIS file by path, node's ESM resolver does
+ * no extension guessing, and place.ts imports "./frames" and "@/data/weld.json" --
+ * neither of which node can resolve. So a value import here takes the two
+ * generators, and the gate that catches "54 x 151" style drift, down with it.
+ * walls.ts survives for the same reason this now does: its import of rooms.ts is
+ * type-only, and type-only imports are erased.
+ *
+ * The alternatives were worse. Typing 5.17 in as a literal is what
+ * docs/DIMENSION-AUDIT.md sec 1 is a list of. Measuring the ring here means
+ * importing weld.json into the pure layer and reimplementing frames.ts's rotation
+ * beside it, or measuring the step off the ring's own gable instead of place.ts's
+ * GABLE_INNER_V -- a second anchor 2.05 ft from the first, which is exactly the
+ * kind of quiet disagreement this project keeps finding in its own past.
+ *
+ * store.ts holds `orbit: null` for CameraRig to resolve, for the same class of
+ * reason. This is that pattern with the resolution done once at import rather than
+ * per frame.
+ */
+let measuredFacadeStep: ((p: SuiteParams) => FacadeStep) | null = null;
+
+/** Called once by place.ts as it loads. See measuredFacadeStep for why. */
+export function provideFacadeStep(measure: (p: SuiteParams) => FacadeStep): void {
+  measuredFacadeStep = measure;
+}
 
 export type Suite = {
   rooms: Rect[];
@@ -234,6 +321,11 @@ export function buildSuite(p: SuiteParams = DEFAULT_PARAMS): Suite {
     windows: ["facade", "gable"],
   });
 
+  // Applied to the finished list rather than folded into each push above, so that
+  // the seven rooms read exactly as they did before this option existed and the
+  // whole of the wing behaviour sits in one function with one argument for it.
+  if (p.wingStep) stepOntoTheWing(rooms, p);
+
   const area = (r: Rect) => r.du * r.dv;
   const named = new Set(["common1", "k", "bedA", "bath", "bedB"]);
 
@@ -253,6 +345,88 @@ export function buildSuite(p: SuiteParams = DEFAULT_PARAMS): Suite {
       across: p.legDepth - (p.hallWidth + t + p.bedDepth),
     },
   };
+}
+
+/** Float slack for "this room's outer face is the facade line". */
+const STEP_EPS = 1e-9;
+
+/**
+ * Push the wing-zone rooms' outer wall out onto Weld's real wing wall.
+ *
+ * WHAT IS WRONG WITHOUT IT
+ * Weld is a dumbbell, and the suite's 44 ft section crosses the step. place.ts
+ * measures it off the ring: on the east the wall stands at building u 30.61 across
+ * the wings and 25.44 in the end zone, a 5.17 ft projection. The suite runs from
+ * building v 26.15 to 70.15 and the step is at 48.45, so the common room (26.15 to
+ * 41.15) and K (26.15 to 38.15) sit in the wing zone while the unknown strip, the
+ * bathroom and bedroom B (52.15 to 70.15) sit in the end zone. Measured from the modelled
+ * facade's masonry mid-plane -- place.ts anchors the suite on a 49 ft clear width,
+ * so its masonry runs building u 24.5 to 26.0 and its mid-plane is 25.25, which is
+ * the plane weldGeometry.ts already hangs the window bays on -- the end-zone rooms
+ * miss the real wall by 0.19 ft, which is right, and the wing-zone rooms miss it by
+ * 5.36 ft, which is not. So the common room's "facade window" is not on an exterior
+ * wall at all, and a 5.36 x 22.3 ft slab of Weld sits outside it with no access and
+ * no purpose.
+ *
+ * WHAT IT DOES, AND WHAT THAT COSTS
+ * A room whose whole v range lies in the wing zone has its outer face moved out by
+ * the projection and its du grown by the same amount, so the INNER face does not
+ * move. That is deliberate: K's door and the hall's inner wall are hung off the
+ * common room's inner face, and moving it is not a change to one room.
+ *
+ * The cost is that the common room becomes commonDeep + projection = 25.17 ft deep,
+ * which is past the 15-20 ft the resident gave. The other reading of the same evidence --
+ * that the room is 20 ft deep measured from its OWN wall, which is what makes its
+ * inner wall land within 1.2 ft of the bedrooms' and is the reason to believe the
+ * step is real -- would keep du at 20 and shift the room bodily. That was built and
+ * refused: it opens a 5.17 ft gap between the common room and K, touches() stops
+ * finding them, and unreachableRooms() reports k. Both readings cannot be had, and a
+ * suite with a landlocked common room is not a candidate.
+ *
+ * BEDROOM A STRADDLES THE STEP, AND IS LEFT STRAIGHT
+ * At the defaults bedroom A runs building v 41.65 to 51.65 against a step at 48.45,
+ * so 6.8 ft of it is in the wing zone and 3.2 ft in the end zone. A faithful stepped
+ * bedroom A therefore has an L-shaped outer wall, which a Rect cannot hold and which
+ * would need a second rect, a rule for which of the two carries the window, and a
+ * story about what walls.ts should do with the re-entrant corner. It is NOT stepped
+ * here, and it is not half-stepped either: moving all of it would put 3.2 ft of
+ * bedroom outside the end-zone wall, and moving none of it leaves the straddle
+ * visible and stated, which is the honest of the two failures.
+ *
+ * WHAT THE RENDER STILL GETS WRONG
+ * walls.ts's perimeterWalls() lays the facade masonry at u = -masonry for the whole
+ * sectionLength, one straight band, and this module cannot change that. So with
+ * wingStep on that band runs THROUGH the deepened common room, and the 5.17 ft of
+ * floor beyond it has no outer wall and no ceiling -- suiteFootprint() starts at
+ * u = 0 as well. The step is real in the rooms, the areas and the plan; it is not
+ * yet real in the masonry. design/renders/wing-common-stepped.png shows exactly
+ * that, and a stepped perimeter band in walls.ts is what would finish it.
+ */
+function stepOntoTheWing(rooms: Rect[], p: SuiteParams): void {
+  if (!measuredFacadeStep) {
+    // Loud rather than silent, in the manner of weldGeometry's roofHeightAt: a suite
+    // that quietly ignores wingStep would pass every assertion about the straight
+    // layout while claiming to be the stepped one.
+    throw new Error(
+      "rooms: params.wingStep needs place.ts's ring measurement. Import @/geo/place " +
+        "before building a stepped suite; see provideFacadeStep.",
+    );
+  }
+  const { v: stepV, projection } = measuredFacadeStep(p);
+  // A ring with no step yields zero, and zero has to mean "leave it alone" rather
+  // than "move everything by nothing": the second would still rewrite the rooms.
+  if (!(projection > 0)) return;
+
+  for (const r of rooms) {
+    // On the facade, i.e. its outer face IS the facade line. K is at u = 20.5 and is
+    // inland, which is why it does not move even though it is in the wing zone.
+    if (Math.abs(r.u) > STEP_EPS) continue;
+    // Wholly south of the step. A room that reaches past it straddles it -- see
+    // bedroom A above -- and straddling rooms are left where they are.
+    if (r.v + r.dv > stepV + STEP_EPS) continue;
+    r.u -= projection;
+    r.du += projection;
+  }
 }
 
 /** Do any two rooms overlap? Returns the offending pairs. */
