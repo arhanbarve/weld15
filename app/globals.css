@@ -387,3 +387,70 @@ button,
   line-height: 1.55;
   color: var(--ink-scan);
 }
+
+/* ---------- P8 attribution ---------- */
+
+/* The sources disclosure. Bottom-left, which is the one corner nothing else uses: the
+   HUD is centred (top in the room, bottom elsewhere), the panel is right, and the skip
+   link is top-left only while focused. */
+.sources {
+  position: fixed;
+  left: var(--s2);
+  bottom: var(--s2);
+  z-index: var(--z-hud);
+  /* Narrow enough to clear the centred HUD when open. Measured at 1440 x 900: the HUD
+     occupies x 575 to 880, and a 30rem box from the left margin ends at 495. The 38rem
+     it was overlapped the stage buttons, which is a disclosure covering a control. */
+  max-width: min(30rem, calc(100vw - 2 * var(--s2)));
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  color: var(--ink-scan);
+  background: var(--chip-scan);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+}
+
+.sources > summary {
+  cursor: pointer;
+  padding: 0.55rem 0.7rem;
+  /* 44 px including the padding above and below, per MASTER.md. A summary is the hit
+     target here, so the minimum applies to it and not to a child. */
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.sources > summary:hover,
+.sources > summary:focus-visible {
+  color: var(--ink-scan);
+}
+
+.sources-body {
+  padding: 0 0.7rem 0.7rem;
+  max-height: min(50vh, 26rem);
+  overflow-y: auto;
+  font-family: var(--serif, Georgia, serif);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+
+.sources-body p {
+  margin: 0 0 0.6rem;
+  /* 65-75 characters at this size; the container is capped above. */
+  max-width: 62ch;
+}
+
+.sources-body code {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+}
+
+/* The absence is the point, so it is marked rather than left to read as one more
+   paragraph. A left rule would be the banned side-stripe; a top rule is a divider. */
+.sources-gap {
+  border-top: 1px solid var(--rule);
+  padding-top: 0.6rem;
+}

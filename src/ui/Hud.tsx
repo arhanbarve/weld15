@@ -9,6 +9,7 @@ import { STAGE3_CLAMP, clampOrbit, orbitOf, type Orbit } from "@/scene/orbit";
 import { keyframes, visibility } from "@/scene/stages";
 import type { NudgeDir } from "@/geo/drag";
 import { UrlSync } from "./UrlSync";
+import { Sources } from "./Sources";
 
 /**
  * Stage scrubber, stage name, the daylight controls, the stage-3 orbit keys, and
@@ -525,6 +526,8 @@ export function Hud() {
           <span className="tabular">{area.toFixed(0)} sq ft</span>
         </div>
       </div>
+
+      <Sources />
 
       <Panel
         open={panelOpen}

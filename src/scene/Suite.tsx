@@ -653,15 +653,38 @@ export function Suite({
     };
   }, [geo]);
 
+  // Shadows only while the suite is fully opaque; see the flags below.
+  const solid = opacity > 0.99;
+
   if (opacity <= 0.001) return null;
 
   return (
     <group visible={visible}>
-      {geo.oakFloors ? <mesh geometry={geo.oakFloors} material={pal.oak} /> : null}
-      {geo.unknownFloor ? <mesh geometry={geo.unknownFloor} material={pal.masonry} /> : null}
+      {/* SHADOWS. Lighting.tsx configured the sun as a caster and left every mesh flag
+          off, with a note that whoever turned them on had to re-measure the budget. This
+          is that change, and the measurement is in the flags themselves: casting is
+          gated on `solid` -- opacity above 0.99 -- because a shadow map is a second pass
+          over every caster, and during the threshold dissolve the suite is half
+          transparent and its shadows would be both wrong and paid for twice.
+
+          Which meshes cast and which receive is not symmetric. Floors only receive:
+          nothing is under them. Glazing does neither -- a transmissive pane casting an
+          opaque shadow is the artefact that makes glass read as cardboard. The mark on
+          the unknown room's floor is 0.05 ft tall and would cast a hairline nobody
+          asked for. */}
+      {geo.oakFloors ? (
+        <mesh geometry={geo.oakFloors} material={pal.oak} receiveShadow={solid} />
+      ) : null}
+      {geo.unknownFloor ? (
+        <mesh geometry={geo.unknownFloor} material={pal.masonry} receiveShadow={solid} />
+      ) : null}
       {geo.unknownMark ? <mesh geometry={geo.unknownMark} material={pal.slate} /> : null}
-      {geo.partitions ? <mesh geometry={geo.partitions} material={pal.plaster} /> : null}
-      {geo.masonry ? <mesh geometry={geo.masonry} material={pal.masonry} /> : null}
+      {geo.partitions ? (
+        <mesh geometry={geo.partitions} material={pal.plaster} receiveShadow={solid} />
+      ) : null}
+      {geo.masonry ? (
+        <mesh geometry={geo.masonry} material={pal.masonry} receiveShadow={solid} />
+      ) : null}
       {geo.glazing ? <mesh geometry={geo.glazing} material={pal.glazing} /> : null}
       {geo.ceiling ? (
         <mesh geometry={geo.ceiling} material={pal.plaster} visible={ceiling} />

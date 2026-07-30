@@ -1,6 +1,7 @@
 "use client";
 
 import { Canvas, useThree } from "@react-three/fiber";
+import * as THREE from "three";
 import { useEffect } from "react";
 import { LAST_STAGE, useStore } from "@/state/store";
 import { visibility, thresholdOpacity } from "./stages";
@@ -27,9 +28,12 @@ import type { CutawayMode } from "./cutaway";
  * Suite would need the params twice. Threshold is mounted by WeldExterior, because
  * the sweep is a property of the shell it dissolves.
  *
- * `shadows="soft"` is PCFSoftShadowMap. It costs nothing today -- Lighting records
- * why no mesh casts a shadow yet -- and it is set here because the shadow map type
- * is a renderer setting, not a light's.
+ * The shadow map type is set here because it is a renderer setting rather than a
+ * light's. It was `shadows="soft"`, which is PCFSoftShadowMap, and three r183 deprecated
+ * that: the console said "PCFSoftShadowMap has been deprecated. Using PCFShadowMap
+ * instead" on every mount, six times over in an e2e run. So it now asks for the map
+ * three was silently substituting anyway -- same rendering, no warning, and no
+ * dependency on how long the fallback stays in place.
  */
 
 /**
@@ -98,7 +102,7 @@ export default function Experience() {
         <Canvas
           camera={{ position: [0, 0, 2.6], fov: 45, near: 0.5, far: 25_000 }}
           dpr={[1, 2]}
-          shadows="soft"
+          shadows={{ type: THREE.PCFShadowMap }}
           gl={{ antialias: true, preserveDrawingBuffer: true }}
         >
           <CanvasLabel text={canvasLabel} />

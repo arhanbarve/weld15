@@ -551,17 +551,44 @@ test.describe("P6 -- the suite is changeable", () => {
     const midDrag = await calls();
     await page.mouse.up();
 
-    // Measured on this build: 26 to 27 idle at stage 5, and three more while a gesture is
-    // live. Three rather than the two the layer's own header predicts (a ghost and an
-    // outline), and the difference is that the outline appears on SELECTION and the ghost
-    // on DRAG, so a live gesture carries both plus the frame's own bookkeeping -- the perf
-    // probe reads the previous frame's accumulated totals, so a rebuild frame can land in
-    // the sample. Bounded rather than pinned for that reason.
+    // Measured on this build: 35 idle at stage 5, and three more while a gesture is live.
+    // Three rather than the two the layer's own header predicts (a ghost and an outline),
+    // and the difference is that the outline appears on SELECTION and the ghost on DRAG,
+    // so a live gesture carries both plus the frame's own bookkeeping -- the perf probe
+    // reads the previous frame's accumulated totals, so a rebuild frame can land in the
+    // sample. Bounded rather than pinned for that reason.
     //
-    // The ceiling is 30, which is campus.spec.ts's whole-scene budget and not a number
-    // chosen here. The hit plane itself is never submitted: its material is invisible,
-    // which keeps it raycastable without costing a call.
+    // The 35 is 27 plus the furniture's shadow pass, one call per instanced batch;
+    // Lighting.tsx carries the full measurement and why furniture-only was the
+    // compromise. So the ceiling here is 40 rather than campus.spec.ts's 30, which covers
+    // stages 1 to 3 where nothing casts.
     expect(midDrag - idle, `idle ${idle}, mid-drag ${midDrag}`).toBeLessThanOrEqual(3);
-    expect(midDrag, `idle ${idle}, mid-drag ${midDrag}`).toBeLessThanOrEqual(30);
+    expect(midDrag, `idle ${idle}, mid-drag ${midDrag}`).toBeLessThanOrEqual(40);
+  });
+
+  test("the room is lit with real shadows, and they are paid for once", async ({ page }) => {
+    await openInTheRoom(page);
+    const p = await page.evaluate(
+      () =>
+        (
+          window as unknown as {
+            __perf: { calls: number; shadows: boolean; casters: number; triangles: number };
+          }
+        ).__perf,
+    );
+
+    // The pass exists. Asserted structurally because pixels cannot prove it: a shadow and
+    // a dark oak board are the same pixels, and a budget assertion alone reads every
+    // caster being switched off as an improvement.
+    expect(p.shadows, "the renderer's shadow map is enabled").toBe(true);
+    // Eight casters, one per furniture batch: seven kinds plus the bedding. Bounded below
+    // rather than pinned at 8, because a kind added to furniture.ts should not fail this,
+    // and above so that switching every wall back on shows up here as a decision.
+    expect(p.casters, `casters ${p.casters}`).toBeGreaterThanOrEqual(8);
+    expect(p.casters, `casters ${p.casters}`).toBeLessThanOrEqual(12);
+    // And the cost is the measured one, not a surprise. 35 shipped; 40 leaves room for a
+    // gesture's ghost and outline.
+    expect(p.calls, `calls ${p.calls}`).toBeGreaterThan(30);
+    expect(p.calls, `calls ${p.calls}`).toBeLessThanOrEqual(40);
   });
 });

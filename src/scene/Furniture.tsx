@@ -142,10 +142,13 @@ function Batch({
   matrices,
   geometry,
   material,
+  shadows = false,
 }: {
   matrices: THREE.Matrix4[];
   geometry: THREE.BufferGeometry;
   material: THREE.Material;
+  /** Off below full opacity: see Suite.tsx, where the same gate is explained. */
+  shadows?: boolean;
 }) {
   const ref = useRef<THREE.InstancedMesh>(null);
 
@@ -157,7 +160,14 @@ function Batch({
     mesh.computeBoundingSphere();
   }, [matrices]);
 
-  return <instancedMesh ref={ref} args={[geometry, material, matrices.length]} />;
+  return (
+    <instancedMesh
+      ref={ref}
+      args={[geometry, material, matrices.length]}
+      castShadow={shadows}
+      receiveShadow={shadows}
+    />
+  );
 }
 
 /**
@@ -241,10 +251,16 @@ export function Furniture({
           matrices={matrices}
           geometry={box}
           material={materialFor(kind, pal)}
+          shadows={opacity > 0.99}
         />
       ))}
       {batches.bedding.length > 0 ? (
-        <Batch matrices={batches.bedding} geometry={box} material={pal.crimson} />
+        <Batch
+          matrices={batches.bedding}
+          geometry={box}
+          material={pal.crimson}
+          shadows={opacity > 0.99}
+        />
       ) : null}
     </group>
   );

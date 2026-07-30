@@ -28,6 +28,7 @@ import { useEffect, useRef } from "react";
  */
 export function Perf() {
   const gl = useThree((s) => s.gl);
+  const scene = useThree((s) => s.scene);
   const frames = useRef<number[]>([]);
 
   useEffect(() => {
@@ -43,11 +44,33 @@ export function Perf() {
     if (f.length > 120) f.shift();
     const sorted = [...f].sort((a, b) => a - b);
 
+    /**
+     * `shadows` and `casters` are here so that the shadow pass is GATEABLE rather than
+     * assumed.
+     *
+     * Draw calls alone cannot tell you shadows are working: turning every caster off
+     * lowers the count, which a budget assertion reads as an improvement. And the cost
+     * is real and was measured when the flags went on -- stage 5 went from 27 draw calls
+     * to 35, the eight being the furniture's shadow pass, one per instanced batch. So a
+     * test needs to be able to say "the second pass is present and it is drawing these
+     * casters", and pixels alone cannot say that either: a shadow and a dark oak board
+     * are the same pixels.
+     *
+     * Counted by traversal rather than tracked, because the flags are set per mesh in
+     * three files and a count kept anywhere else would be a fourth place to forget.
+     */
+    let casters = 0;
+    scene.traverse((o) => {
+      if ((o as { castShadow?: boolean }).castShadow) casters++;
+    });
+
     (window as unknown as { __perf?: unknown }).__perf = {
       calls: gl.info.render.calls,
       triangles: gl.info.render.triangles,
       lines: gl.info.render.lines,
       geometries: gl.info.memory.geometries,
+      shadows: gl.shadowMap.enabled,
+      casters,
       frames: f.length,
       medianMs: sorted.length ? +sorted[Math.floor(sorted.length / 2)]!.toFixed(2) : null,
     };
