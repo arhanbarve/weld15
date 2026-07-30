@@ -74,11 +74,14 @@ test("actually draws lit geometry, not just a cleared background", async ({ page
     return { brightPct: (bright / total) * 100, distinct: seen.size };
   });
 
-  expect(sample.distinct, "frame is a single flat colour").toBeGreaterThan(2);
+  // The 2% brightness bound here was calibrated for P0's placeholder cube, which
+  // P2 replaced with the globe. The globe measures 0.8% lit while carrying 361
+  // distinct colours, so brightness is the wrong gate for this scene; colour
+  // count is what distinguishes "rendered" from "cleared".
   expect(
-    sample.brightPct,
-    `only ${sample.brightPct.toFixed(1)}% of samples are lit geometry; the cube is not on screen`,
-  ).toBeGreaterThan(2);
+    sample.distinct,
+    `frame is a flat wash: only ${sample.distinct} distinct colours`,
+  ).toBeGreaterThan(20);
 });
 
 test("applies the design tokens and the self-hosted fonts", async ({ page }) => {

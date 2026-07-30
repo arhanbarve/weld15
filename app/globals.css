@@ -135,3 +135,93 @@ button,
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---------- P2 HUD ---------- */
+
+.hud {
+  position: fixed;
+  /* Centred rather than bottom-left: dev-tool badges and browser status chrome
+     both live in that corner and overlap the controls. */
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: var(--s2);
+  z-index: var(--z-hud);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.7rem 0.85rem;
+  background: var(--chip-scan);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  font-family: var(--mono);
+  color: var(--ink);
+  max-width: calc(100vw - 2 * var(--s2));
+  align-items: center;
+}
+
+.hud-stage {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  font-size: 0.9375rem;
+  letter-spacing: -0.01em;
+}
+
+.hud-num {
+  font-size: 0.6875rem;
+  color: var(--mark);
+  border: 1px solid var(--mark);
+  border-radius: 1px;
+  padding: 0.05rem 0.3rem;
+}
+
+.hud-flag {
+  font-size: 0.625rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.hud-scrub { display: flex; gap: 0.3rem; }
+
+.hud-scrub button {
+  min-width: 44px;
+  min-height: 44px;
+  background: transparent;
+  color: var(--dim);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  font-size: 0.8125rem;
+  transition: color var(--dur-micro) var(--ease-out-quint),
+    border-color var(--dur-micro) var(--ease-out-quint);
+}
+
+.hud-scrub button:hover { color: var(--ink); border-color: var(--line); }
+
+/* Current stage is marked by border and weight as well as colour, because
+   colour must never be the only indicator. */
+.hud-scrub button.on {
+  color: var(--ink);
+  border-color: var(--mark);
+  font-weight: 600;
+}
+
+.hud-t {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--dim);
+}
+
+.hud-t input { width: 11rem; accent-color: var(--mark); }
+
+.skip {
+  background: var(--chip-scan);
+  color: var(--ink);
+  border: 1px solid var(--mark);
+  border-radius: 2px;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.8125rem;
+  min-height: 44px;
+}

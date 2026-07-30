@@ -1,46 +1,59 @@
 "use client";
 
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls } from "@react-three/drei";
+import { useStore } from "@/state/store";
+import { visibility, thresholdOpacity } from "./stages";
+import { CameraRig } from "./CameraRig";
+import { Globe } from "./Globe";
+import { Campus } from "./Campus";
+import { WeldExterior } from "./WeldExterior";
+import { Suite } from "./Suite";
+import { Hud } from "@/ui/Hud";
 
 /**
- * P0 placeholder. One cube in the scan palette, orbitable, to prove the
- * renderer, the client boundary, the fonts and the tokens are all wired.
- * Replaced in P2 by the stage machine.
+ * P2 grey-box vertical slice: the whole journey, ugly but complete.
+ *
+ * Materials, lighting design and post-processing are deliberately absent. The
+ * point of this phase is to find out whether the through-the-wall threshold works
+ * at all, before anything is polished around it.
  */
 export default function Experience() {
+  const stage = useStore((s) => s.stage);
+  const t = useStore((s) => s.t);
+  const params = useStore((s) => s.params);
+
+  const vis = visibility(stage);
+  const { shell, interior } = thresholdOpacity(stage, t);
+
   return (
-    <div style={{ position: "fixed", inset: 0 }}>
-      <Canvas
-        camera={{ position: [6, 4.5, 8], fov: 45 }}
-        dpr={[1, 2]}
-        gl={{
-          antialias: true,
-          // Lets Playwright read the drawing buffer, so tests can assert that
-          // something was actually rendered rather than only that a WebGL
-          // context exists. Costs a little memory bandwidth; worth it as a
-          // permanent visual-regression gate. Revisit in P8 if perf demands.
-          preserveDrawingBuffer: true,
-        }}
-        // R3F does NOT orient the default camera toward the origin, and drei's
-        // OrbitControls only reorients on first interaction. Without this the
-        // scene renders correctly but points at empty space, which looks
-        // exactly like a broken renderer.
-        onCreated={({ camera }) => camera.lookAt(0, 0, 0)}
-        aria-label="Placeholder 3D scene: a single cube in the cyanotype palette"
-      >
-        <color attach="background" args={["#06203f"]} />
-        <ambientLight intensity={0.6} />
-        <directionalLight position={[5, 8, 4]} intensity={1.1} />
+    <>
+      <div style={{ position: "fixed", inset: 0 }}>
+        <Canvas
+          camera={{ position: [0, 0, 2.6], fov: 45, near: 0.5, far: 25_000 }}
+          dpr={[1, 2]}
+          gl={{ antialias: true, preserveDrawingBuffer: true }}
+          aria-label="Three-dimensional descent from orbit to the interior of Weld 15"
+        >
+          <color attach="background" args={["#06203f"]} />
+          {/* A hemisphere light means no face is ever unlit. Without it the
+              north gable is backlit and, at partial opacity during the
+              threshold, blends down to almost the background -- which made the
+              dissolve read as a flat colour wash rather than a wall going away.
+              Real lighting design is P4; this only guarantees every face reads. */}
+          <hemisphereLight args={["#cfe4f2", "#0c3260", 0.75]} />
+          <ambientLight intensity={0.35} />
+          <directionalLight position={[900, 1400, 700]} intensity={1.0} />
+          <directionalLight position={[-500, 400, -900]} intensity={0.55} />
 
-        <mesh>
-          <boxGeometry args={[2, 2, 2]} />
-          <meshStandardMaterial color="#8fc4f2" roughness={0.55} metalness={0} />
-        </mesh>
+          <CameraRig />
 
-        <gridHelper args={[40, 40, "#0c3260", "#0c3260"]} position={[0, -1.001, 0]} />
-        <OrbitControls enableDamping dampingFactor={0.08} target={[0, 0, 0]} />
-      </Canvas>
-    </div>
+          <Globe visible={vis.globe} />
+          <Campus visible={vis.campus} highlightWeld={stage >= 2} />
+          <WeldExterior visible={vis.weld} opacity={shell} />
+          <Suite visible={vis.interior} opacity={interior} params={params} />
+        </Canvas>
+      </div>
+      <Hud />
+    </>
   );
 }
