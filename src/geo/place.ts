@@ -93,10 +93,11 @@ export function suiteToThree(su: number, sv: number, z: number, params: SuitePar
  *
  *   import ringStations() from weldGeometry.ts   REFUSED. It would be the same
  *     measurement, already written, but weldGeometry.ts imports this module, so
- *     importing it back is a cycle whose top-level MAX_SECTION_LENGTH would read
- *     GABLE_INNER_V before this module had assigned it. Worse, weldGeometry.ts
- *     imports three, and rooms.ts importing this module would then pull three into
- *     the pure geometry layer. That rule is not negotiable, so this is not either.
+ *     importing it back is a cycle: this file's own top-level MAX_SECTION_LENGTH
+ *     would run against a weldGeometry whose LOOP_B is still undefined. Worse,
+ *     weldGeometry.ts imports three, and rooms.ts importing this module would then
+ *     pull three into the pure geometry layer. That rule is not negotiable, so this
+ *     is not either.
  *   a literal 5.2 in rooms.ts                   REFUSED. docs/DIMENSION-AUDIT.md
  *     sec 1 is a list of what typing a measured number into a second file costs.
  *   a third module both could import                Nothing to argue against, and
@@ -106,9 +107,13 @@ export function suiteToThree(su: number, sv: number, z: number, params: SuitePar
  *
  * What is duplicated by that choice is small and stated: facadeReachAt() is
  * spansAt() from weldGeometry.ts narrowed to "how far does the footprint reach on
- * one side", and facadeZones() is ringStations() with the width replaced by that
- * reach. The two epsilons below are the same numbers, for the same reason, and if
- * the ring is ever replaced both files have to be looked at.
+ * one side", and zonesOf() is ringStations() with the width replaced by whatever a
+ * caller hands it to measure. The two epsilons below are the same numbers, for the
+ * same reason, and if the ring is ever replaced both files have to be looked at.
+ *
+ * That same machinery now also carries maxSectionLength(), which arrived from
+ * weldGeometry.ts for a layering reason rather than a geometric one -- its own
+ * docblock below carries that story.
  */
 
 /**
@@ -120,7 +125,7 @@ export function suiteToThree(su: number, sv: number, z: number, params: SuitePar
  */
 const ZONE_EPS = 1;
 
-/** Two adjacent slices whose facade-side reach agrees within this are one zone, ft. */
+/** Two adjacent slices whose measured reach agrees within this are one zone, ft. */
 const PLATEAU_EPS = 1;
 
 /**
@@ -140,9 +145,9 @@ const RING_B: Building[] = (weld.rings[0] as number[][])
  * How far the footprint reaches from u = 0 on one facade's side, at v = const, ft.
  *
  * Measured from the suite's own centreline rather than taken as half the width, for
- * the reason weldGeometry.ts's centrelineHalfWidth() gives: this ring's mid-line is
- * 0.47 ft west of the published centroid the suite is anchored on, so the two sides
- * are not mirror images and half a width is neither of them.
+ * the reason clearHalfWidthAt() below spells out: this ring's mid-line is 0.47 ft west
+ * of the published centroid the suite is anchored on, so the two sides are not mirror
+ * images and half a width is neither of them.
  *
  * The crossing rule is half-open, the same one collide.ts's pointInPolygon uses, so
  * a line through a vertex crosses once rather than twice or not at all.
@@ -160,10 +165,11 @@ function facadeReachAt(v: number, facade: SuiteParams["facade"]): number {
   return reach;
 }
 
-type FacadeZone = { v0: number; v1: number; reach: number };
+type Zone = { v0: number; v1: number; reach: number };
 
 /**
- * The facade side of the footprint as a run of constant-reach zones, south to north.
+ * The footprint as a run of constant-reach zones, south to north, for whatever
+ * `reachAt` measures.
  *
  * Boundaries are the ring's own vertex positions along the axis, near-coincident
  * ones merged, and the reach is ray-cast at a slice's MIDPOINT rather than read off
@@ -176,8 +182,15 @@ type FacadeZone = { v0: number; v1: number; reach: number };
  * 24 ft -- and the middle of the zone is the least arbitrary place to read a wall
  * that is not quite straight. Reading the first slice's value instead, as
  * ringStations() does, would put the step at 5.11 ft rather than 5.17.
+ *
+ * The measure is a parameter because the two callers need different ones and the cut
+ * list is common to both: the boundaries are ring VERTEX positions, so they do not
+ * depend on which quantity is being read across them. Partitioning by one facade's
+ * reach and then reading a different quantity inside those zones would be reading a
+ * quantity at an arbitrary v wherever the two sides do not step together, which this
+ * ring happens not to do and a corrected ring might.
  */
-function facadeZones(facade: SuiteParams["facade"]): FacadeZone[] {
+function zonesOf(reachAt: (v: number) => number): Zone[] {
   const cuts: number[] = [];
   for (const v of RING_B.map((p) => p.v).sort((a, b) => a - b)) {
     const last = cuts[cuts.length - 1];
@@ -185,11 +198,11 @@ function facadeZones(facade: SuiteParams["facade"]): FacadeZone[] {
     cuts.push(v);
   }
 
-  const out: FacadeZone[] = [];
+  const out: Zone[] = [];
   for (let i = 0; i + 1 < cuts.length; i++) {
     const v0 = cuts[i]!;
     const v1 = cuts[i + 1]!;
-    const reach = facadeReachAt((v0 + v1) / 2, facade);
+    const reach = reachAt((v0 + v1) / 2);
     const prev = out[out.length - 1];
     if (prev && Math.abs(prev.reach - reach) < PLATEAU_EPS) {
       prev.v1 = v1;
@@ -197,7 +210,12 @@ function facadeZones(facade: SuiteParams["facade"]): FacadeZone[] {
     }
     out.push({ v0, v1, reach });
   }
-  return out.map((z) => ({ ...z, reach: facadeReachAt((z.v0 + z.v1) / 2, facade) }));
+  return out.map((z) => ({ ...z, reach: reachAt((z.v0 + z.v1) / 2) }));
+}
+
+/** The facade side of the footprint, zoned. */
+function facadeZones(facade: SuiteParams["facade"]): Zone[] {
+  return zonesOf((v) => facadeReachAt(v, facade));
 }
 
 /**
@@ -266,6 +284,99 @@ export function facadeStep(params: SuiteParams): FacadeStep {
  * registration has happened before any of them can call buildSuite().
  */
 provideFacadeStep(facadeStep);
+
+/**
+ * How wide the footprint is either side of the suite's centreline at v, in feet:
+ * u = 0 out to the NEARER of the two walls.
+ *
+ * NOT width / 2, and this is the one line of the cap that is easy to get wrong. The
+ * suite is anchored on u = 0, the published centroid, while this ring's own mid-line
+ * is 0.47 ft west of it -- so the two sides are not mirror images and half a width is
+ * neither of them. Halving spends that offset twice: at the waist it makes no odds
+ * (23.44 ft by width against 23.14 measured) but at the north end it is most of the
+ * margin, 25.90 by width against 25.44 measured, against the suite's own 24.5.
+ *
+ * Measured, because it matters for how this line is protected: on THIS ring halving
+ * does not move the cap at all. 23.44 is still under the suite's 24.5, so the waist is
+ * still the binding zone and maxSectionLength() returns 50.25256939280382 either way.
+ * No test can tell the two apart, which is why this comment exists and why
+ * tests/place.test.ts pins the measured half-width itself rather than only the cap.
+ */
+function clearHalfWidthAt(v: number): number {
+  return Math.min(facadeReachAt(v, "east"), facadeReachAt(v, "west"));
+}
+
+/**
+ * The longest end section Weld will take, ft. THE CLAMP FOR P6's sectionLength.
+ *
+ * WHY THIS IS HERE AND NOT BESIDE THE RING GEOMETRY IT MEASURES
+ * It was in scene/weldGeometry.ts next to ringStations(), which is where it belongs
+ * by subject, and weldGeometry.ts imports three. Its consumers are not renderers:
+ * P6's slider, and state/url.ts, which refuses a link whose sectionLength is past it.
+ * So the state layer imported a scene module and the whole of three.js came with it.
+ * The cost is not the bundle. scripts/emit-layout.mjs and emit-plan.mjs run against
+ * these modules in plain node and tests/drift.test.ts shells out to both, so any
+ * module that drags three into their reachable set fails at import with
+ * ERR_MODULE_NOT_FOUND -- a runtime failure tsc cannot see, which is how it got in
+ * twice, once from rooms.ts and once from url.ts, past a green typecheck both times.
+ *
+ * This module is three-free, its ring marching above is what the measurement needs,
+ * and it is what url.ts was reaching through anyway. weldGeometry.ts re-exports the
+ * number so its own tests and everything under scene/ still import it from where they
+ * always did. A comment did not hold this line twice, so tests/place.test.ts now walks
+ * the real import graph and fails if three reappears anywhere in geo/ or state/.
+ *
+ * WHAT THE NUMBER IS
+ * The suite hangs off the north gable's interior face, so it occupies v from
+ * GABLE_INNER_V - sectionLength to GABLE_INNER_V and needs CLEAR_HALF_U of footprint
+ * either side of u = 0 over that whole run. Weld is a dumbbell, so that is not
+ * available everywhere. Going south from the anchor, zoned and measured off this ring:
+ *
+ *   v 48.5 .. 72.2   half-width 25.44   the end zone the anchor is in    suite fits
+ *   v 19.9 .. 48.5   half-width 30.61   the wings                        suite fits
+ *   v -19.4 .. 19.9  half-width 23.14   the waist        NARROWER THAN THE SUITE IS
+ *
+ * so the answer is the distance from the anchor to the waist's north face,
+ * 70.15 - 19.90 = 50.25 ft. This is a fact about Weld and not about the model: a
+ * 60 ft end section would put the suite's south end where the building is 46.9 ft
+ * across, and the facade wall -- with the window bays in it -- would be outside the
+ * shell.
+ *
+ * WHY A SLIDER MUST CLAMP TO THIS RATHER THAN LET IT RIDE
+ * Nothing inside the suite notices. The rooms still tile, the areas still add up,
+ * walls.ts still emits the same bands and the same openings; the only symptom is
+ * masonry drawn outside a shell the camera usually stands inside. It took a randomised
+ * sweep to find it at all, and it found it 6 ft past the limit rather than at it,
+ * because the southmost window is centred on a 15 ft common room and so sits 3.5 ft
+ * north of the suite's own south wall. A slider that walks the suite out of the
+ * building silently is worse than one that stops, because a viewer cannot tell that
+ * case from a correct model.
+ *
+ * HOW EXACT IT IS
+ * The zone boundary is the LOWEST v of a merged cluster (see ZONE_EPS), and this
+ * ring's four vertices at the waist-to-wing transition spread over v 19.897 to
+ * 19.916. So the figure is 0.017 ft generous -- a fifth of an inch, against
+ * coordinates published to a tenth of a foot -- and clamped exactly here the suite's
+ * south corner lands on the waist's face rather than inside it. That is why the test
+ * brackets this bound at the ring's own 0.1 ft resolution instead of asserting a knife
+ * edge at the number itself.
+ */
+export function maxSectionLength(): number {
+  const zones = zonesOf(clearHalfWidthAt);
+  const tooNarrow = zones
+    .filter((z) => z.v0 < GABLE_INNER_V && z.reach < CLEAR_HALF_U)
+    // nearest the anchor first: the first one the suite would reach going south
+    .sort((a, b) => b.v1 - a.v1);
+  const first = tooNarrow[0];
+  // No zone too narrow -- a building with no waist -- and the whole ring south of the
+  // anchor is available.
+  return first
+    ? GABLE_INNER_V - first.v1
+    : GABLE_INNER_V - Math.min(...zones.map((z) => z.v0));
+}
+
+/** The same number, for a slider that has to clamp to it without recomputing it. */
+export const MAX_SECTION_LENGTH = maxSectionLength();
 
 /** The four corners of a suite-frame rect, in site feet. */
 export function rectCornersSite(r: Rect, params: SuiteParams): Site[] {

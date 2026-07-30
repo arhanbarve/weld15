@@ -7,12 +7,22 @@ import {
   type Suite,
   type SuiteParams,
 } from "@/geo/rooms";
-import { GRID, containedBy, footprintOf, overlaps, placeIsLegal } from "@/geo/collide";
+import {
+  GRID,
+  containedBy,
+  footprintOf,
+  overlaps,
+  placeIsLegal,
+  type Box,
+} from "@/geo/collide";
+import { buildWalls, type Opening, type Wall } from "@/geo/walls";
 import {
   BED_CLEARANCE,
+  DOOR_CLEARANCE,
   MATTRESS,
   SIZES,
   bedClearance,
+  doorLandings,
   layout,
   pieceBox,
   type FurnitureKind,
@@ -64,6 +74,52 @@ function collisions(ps: Piece[]): string[] {
       if (overlaps(pieceBox(ps[i]!), pieceBox(ps[j]!))) {
         bad.push(`${ps[i]!.id} / ${ps[j]!.id}`);
       }
+    }
+  }
+  return bad;
+}
+
+/**
+ * The clear landing a door needs, worked out here from buildWalls() rather than
+ * taken from the module under test.
+ *
+ * The depth is written as a literal 2 and not imported, so that the landing this
+ * file measures against is independent of the one furniture.ts places to. If the
+ * assertions asked doorLandings() where the doors are, a wrong landing would agree
+ * with itself and "no piece stands in a doorway" would pass on nothing.
+ * tests/drag.test.ts carries the same helper for the same reason; the constant is
+ * pinned against both modules' copies further down.
+ */
+const LANDING_DEPTH = 2;
+
+function landing(w: Wall, o: Opening): Box {
+  // Axis tie-break copied from buildOpenings(), which is what `offset` is measured
+  // along. `offset` runs from the BAND's origin corner, and bands merge, so it
+  // cannot be measured off the room.
+  const alongV = !(w.du > w.dv);
+  const c = LANDING_DEPTH;
+  return alongV
+    ? { u: w.u - c, v: w.v + o.offset, du: w.du + 2 * c, dv: o.width }
+    : { u: w.u + o.offset, v: w.v - c, du: o.width, dv: w.dv + 2 * c };
+}
+
+/** Every doorway in a suite, with the floor it needs, id first for the messages. */
+function doorwaysOf(s: Suite): { id: string; zone: Box }[] {
+  const { walls, openings } = buildWalls(s);
+  return openings
+    .filter((o) => o.kind === "door")
+    .map((o) => ({ id: o.id, zone: landing(walls.find((w) => w.id === o.wallId)!, o) }));
+}
+
+/**
+ * Pieces standing on a doorway landing, as "piece / door" so a failure says which
+ * piece is in which door rather than just how many there are.
+ */
+function inADoorway(s: Suite, ps: Piece[]): string[] {
+  const bad: string[] = [];
+  for (const d of doorwaysOf(s)) {
+    for (const p of ps) {
+      if (overlaps(pieceBox(p), d.zone)) bad.push(`${p.id} / ${d.id}`);
     }
   }
   return bad;
@@ -193,6 +249,123 @@ describe("layout at the defaults", () => {
     }
   });
 
+  it("stands nothing in a doorway landing", () => {
+    // The defect this whole arrangement was rebuilt for. Before layout() could see
+    // openings it put six pieces across three of the suite's five interior doors:
+    // both bedroom A desks and both bedroom B desks flush against the wall their
+    // hall door is in, the common room sofa square across K's door, and one of K's
+    // own chairs 0.25 ft into that same landing from the other side. Every one of
+    // them was legal by placeIsLegal(), which is the point -- a suite you cannot
+    // walk into passes every check collide.ts knows how to make, which is why
+    // unreachableRooms() exists in rooms.ts and why this assertion exists here.
+    expect(inADoorway(suite, pieces)).toEqual([]);
+
+    // Non-vacuity, in three parts, because "no piece is in a doorway" is also true
+    // of a suite with no doorways and of a landing measured as an empty box.
+    const doors = doorwaysOf(suite);
+    expect(doors.map((d) => d.id)).toEqual(["d0", "d1", "d2", "d3", "d4"]);
+    for (const d of doors) {
+      expect(d.zone.du * d.zone.dv, d.id).toBeGreaterThan(0);
+    }
+    // And the six old positions really are inside the landings this file measures,
+    // so the assertion above is testing the arrangement and not the measurement.
+    const oldPositions: [string, Box][] = [
+      ["bedA-desk-0", { u: 14, v: 15.5, du: 2, dv: 4 }],
+      ["bedA-desk-1", { u: 14, v: 21.5, du: 2, dv: 4 }],
+      ["bedB-desk-0", { u: 14, v: 34, du: 2, dv: 4 }],
+      ["bedB-desk-1", { u: 14, v: 40, du: 2, dv: 4 }],
+      ["common1-sofa-0", { u: 17.25, v: 4.5, du: 2.75, dv: 6 }],
+      ["k-chair-1", { u: 22.25, v: 6.5, du: 1.5, dv: 1.5 }],
+    ];
+    for (const [id, was] of oldPositions) {
+      expect(
+        doors.some((d) => overlaps(was, d.zone)),
+        `${id} used to stand in a doorway`,
+      ).toBe(true);
+    }
+  });
+
+  it("keeps its landing depth equal to the drag handler's, and measures it the same way", () => {
+    // furniture.ts and drag.ts each hold their own DOOR_CLEARANCE, because
+    // drag.ts imports furniture.ts for pieceBox and the reverse import would be a
+    // cycle. Equal by assertion, then, rather than by construction: if they drift,
+    // layout() emits an arrangement tryMove() will not let anyone put back.
+    // drag.ts's copy is pinned to the same 2 ft in tests/drag.test.ts.
+    expect(DOOR_CLEARANCE).toBe(LANDING_DEPTH);
+    // And the whole landing, not only its depth: same rectangles, same order, as
+    // the helper at the top of this file works out independently from buildWalls().
+    expect(doorLandings(suite)).toEqual(doorwaysOf(suite).map((d) => d.zone));
+  });
+
+  it("leaves no piece both off the grid and inside GRID / 2 of a landing", () => {
+    // THE PROPERTY THAT MAKES THE FIT-OUT RE-DROPPABLE, and the reason it is a
+    // disjunction rather than the simpler "every designed anchor is on the grid".
+    //
+    // Ten of the 29 anchors are not on the grid and cannot be put there without
+    // inventing dimensions. A bed frame is 82 x 40 in, so the second bed sits at a
+    // third of a foot along the run and the dresser at each bed's foot starts at
+    // u 6.833; a chair centred on a 4 ft desk frontage stands 1.25 ft in from its
+    // edge. Those are Harvard's mattress and a real centring, and rounding either to
+    // the nearest 0.5 ft to tidy this assertion up would be the laundering this
+    // module's header refuses.
+    //
+    // What every piece does have to satisfy is weaker and sufficient. drag.ts snaps a
+    // re-drop onto the same 0.5 ft grid, which moves an anchor by at most GRID / 2 on
+    // each axis, and an overlap needs both axes to close -- so a piece can be put back
+    // where it stands if its anchor is already on the grid, OR it keeps GRID / 2 clear
+    // of every landing on at least one axis. Both branches carry real pieces here,
+    // which is why the disjunction is asserted and not either half of it: k-chair-1
+    // stands exactly ON d3's boundary and is safe only by its grid alignment, and the
+    // four bedroom chairs are off the grid and safe only by their 1.25 ft of clearance.
+    // The sofa used to satisfy neither, which is the defect commonSlots() closed.
+    const zones = doorwaysOf(suite).map((d) => d.zone);
+    /**
+     * How far a landing is from this piece, as the gap a snap would have to close on
+     * BOTH axes to put the piece in it -- so the larger of the two axis gaps, and the
+     * nearest landing by that measure. Zero for a piece touching a boundary, and
+     * negative for one standing in it, which is what inADoorway() above refuses.
+     */
+    const clear = (p: Piece) => {
+      const f = pieceBox(p);
+      const gap = (z: Box) =>
+        Math.max(
+          Math.max(z.u - (f.u + f.du), f.u - (z.u + z.du)),
+          Math.max(z.v - (f.v + f.dv), f.v - (z.v + z.dv)),
+        );
+      return Math.min(...zones.map(gap));
+    };
+    const anchored = (p: Piece) =>
+      [p.u, p.v].every((x) => Math.abs(x / GRID - Math.round(x / GRID)) < EPS);
+
+    expect(
+      pieces.filter((p) => !anchored(p) && clear(p) < GRID / 2 - EPS).map((p) => p.id),
+    ).toEqual([]);
+
+    // Non-vacuity for each branch separately, with the pieces named, so that a change
+    // which empties one of them fails here rather than quietly turning the assertion
+    // above into a statement about the other.
+    expect(pieces.filter((p) => !anchored(p)).map((p) => p.id)).toEqual([
+      "bedA-bed-1",
+      "bedA-chair-0",
+      "bedA-chair-1",
+      "bedA-dresser-0",
+      "bedA-dresser-1",
+      "bedB-bed-1",
+      "bedB-chair-0",
+      "bedB-chair-1",
+      "bedB-dresser-0",
+      "bedB-dresser-1",
+    ]);
+    expect(pieces.filter((p) => clear(p) < GRID / 2 - EPS).map((p) => p.id)).toEqual([
+      "k-chair-1",
+    ]);
+    // And the two numbers that branch turns on: K's chair has no margin at all, and
+    // the sofa now has exactly the half-step, which is the tightest a piece can be and
+    // still be safe on clearance alone.
+    expect(clear(pieces.find((p) => p.id === "k-chair-1")!)).toBeCloseTo(0, 12);
+    expect(clear(pieces.find((p) => p.id === "common1-sofa-0")!)).toBeCloseTo(GRID / 2, 12);
+  });
+
   it("gives every piece a unique id and repeats itself exactly", () => {
     expect(new Set(pieces.map((p) => p.id)).size).toBe(pieces.length);
     // Nothing here may depend on Set or Map iteration luck, or on a clock: the
@@ -243,15 +416,32 @@ describe("layout at the defaults", () => {
       ).toBeCloseTo(wallV, 12);
       expect(dressers[i]!.p.yaw, `dresser ${i}`).toBe(beds[i]!.p.yaw);
 
-      // Desk against the far end wall, chair pulled out in front of it and
-      // centred on its frontage.
-      expect(desks[i]!.f.u + desks[i]!.f.du, `desk ${i}`).toBeCloseTo(bedA.u + bedA.du, 12);
-      expect(chairs[i]!.f.u + chairs[i]!.f.du, `chair ${i}`).toBeCloseTo(desks[i]!.f.u, 12);
-      expect(chairs[i]!.f.v - desks[i]!.f.v, `chair ${i}`).toBeCloseTo(
-        desks[i]!.f.v + desks[i]!.f.dv - (chairs[i]!.f.v + chairs[i]!.f.dv),
+      // Desk against that same long wall, third in the line, as deep into the
+      // room as the hall door's landing allows. It used to stand flush against
+      // the far end wall with its 4 ft frontage along the run, which is the
+      // position that put two desks across a 3 ft door in that same wall; turned
+      // a quarter and pulled back by DOOR_CLEARANCE it clears the landing and
+      // stands flush against its edge.
+      expect(desks[i]!.f.u + desks[i]!.f.du, `desk ${i}`).toBeCloseTo(
+        bedA.u + bedA.du - DOOR_CLEARANCE,
         12,
       );
-      expect(chairs[i]!.p.yaw, `chair ${i}`).toBe(90); // turned to face the desk
+      expect(
+        i === 0 ? desks[i]!.f.v : desks[i]!.f.v + desks[i]!.f.dv,
+        `desk ${i}`,
+      ).toBeCloseTo(wallV, 12);
+      expect(desks[i]!.p.yaw, `desk ${i}`).toBe(beds[i]!.p.yaw);
+
+      // Chair pulled out in front of the desk, centred on its 4 ft frontage and
+      // flush against its face, turned to look back at it.
+      expect(chairs[i]!.f.u - desks[i]!.f.u, `chair ${i}`).toBeCloseTo(
+        desks[i]!.f.u + desks[i]!.f.du - (chairs[i]!.f.u + chairs[i]!.f.du),
+        12,
+      );
+      const deskFace = i === 0 ? desks[i]!.f.v + desks[i]!.f.dv : desks[i]!.f.v;
+      const chairAtIt = i === 0 ? chairs[i]!.f.v : chairs[i]!.f.v + chairs[i]!.f.dv;
+      expect(chairAtIt, `chair ${i}`).toBeCloseTo(deskFace, 12);
+      expect(chairs[i]!.p.yaw, `chair ${i}`).toBe(i === 0 ? 180 : 0);
     }
     // And the two stations are on opposite walls, not stacked on one.
     expect(dressers[0]!.f.v).toBeLessThan(dressers[1]!.f.v);
@@ -271,34 +461,56 @@ describe("layout at the defaults", () => {
       expect(bedClearance(b, bedA, ps), b.id).toBeCloseTo(aisle, 12);
     }
 
-    // Along the 16 ft depth: bed, dresser, chair, desk in a line. Added up from
-    // the footprints layout() actually placed, not from SIZES -- which extent of
-    // each piece runs along the depth depends on how the recipe turned it, so
-    // summing the table is a true statement about the constants and not about
-    // this arrangement. It was that substitution that had the dresser down as
-    // 18 in when it stands unturned at 30, overstating the free floor by a foot.
+    // Along the 16 ft depth: bed, dresser, desk in one line against the station's
+    // own wall. Added up from the footprints layout() actually placed, not from
+    // SIZES -- which extent of each piece runs along the depth depends on how the
+    // recipe turned it, so summing the table is a true statement about the
+    // constants and not about this arrangement. It was that substitution that had
+    // the dresser down as 18 in when it stands unturned at 30, overstating the
+    // free floor by a foot.
     const along = (id: string) => {
       const p = ps.find((x) => x.id === id);
       expect(p, id).toBeDefined();
       return pieceBox(p!).du; // u is the depth in bedroom A
     };
-    const depths = ["bed", "dresser", "chair", "desk"].map((k) => along(`bedA-${k}-0`));
-    expect(depths.map((d) => Math.round(d * 12))).toEqual([82, 30, 18, 24]);
+    const depths = ["bed", "dresser", "desk"].map((k) => along(`bedA-${k}-0`));
+    expect(depths.map((d) => Math.round(d * 12))).toEqual([82, 30, 48]);
     const band = depths.reduce((s, d) => s + d, 0);
-    expect(band).toBeCloseTo(154 / 12, 12);
-    expect(band).toBeCloseTo(12.8333, 4);
-    expect(bedA.du - band).toBeCloseTo(3.1667, 4);
-    // And station 1's four pieces measure the same, so one station is the band.
+    expect(band).toBeCloseTo(160 / 12, 12);
+    expect(band).toBeCloseTo(13.3333, 4);
+    // The desk contributes 48 in and not the 24 it used to, because the door is
+    // what turned it a quarter. The band grew by 6 in and the room got EASIER,
+    // which is the whole point of the trade: the 2 ft it gave back across the run
+    // is what lets a 3 ft door into that wall at all.
+    expect(bedA.du - band).toBeCloseTo(2.6667, 4);
+    expect(bedA.du - band).toBeGreaterThan(DOOR_CLEARANCE);
+    // And station 1's three pieces measure the same, so one station is the band.
     expect(
-      ["bed", "dresser", "chair", "desk"].reduce((s, k) => s + along(`bedA-${k}-1`), 0),
+      ["bed", "dresser", "desk"].reduce((s, k) => s + along(`bedA-${k}-1`), 0),
     ).toBeCloseTo(band, 12);
 
-    // So the run binds first, and it binds well outside the resident's stated one foot
-    // of uncertainty on the 10: the second bed keeps its 2 ft down to 8.67 ft
-    // and keeps its place at all down to 6.67 ft.
+    // The chair is not in that line: it stands out in front of the desk, inside
+    // the desk's own stretch of the depth, which is why it costs the band nothing.
+    const desk0 = pieceBox(ps.find((x) => x.id === "bedA-desk-0")!);
+    const chair0 = pieceBox(ps.find((x) => x.id === "bedA-chair-0")!);
+    expect(chair0.u).toBeGreaterThanOrEqual(desk0.u - EPS);
+    expect(chair0.u + chair0.du).toBeLessThanOrEqual(desk0.u + desk0.du + EPS);
+    // What it costs instead is the run: desk 24 in plus chair 18 in is 3.5 ft off
+    // each station's wall, so the two stations spend 7 ft of the 10 and leave
+    // exactly the 3 ft a door needs. That is why the desks stand clear of the far
+    // wall rather than in its two corners -- see farLimit().
+    expect(SIZES.desk.dv + SIZES.chair.du).toBeCloseTo(3.5, 12);
+    expect(bedA.dv - 2 * (SIZES.desk.dv + SIZES.chair.du)).toBeCloseTo(3, 12);
+
+    // So the run still binds first, and it binds well outside the resident's stated one
+    // foot of uncertainty on the 10: the second bed keeps its 2 ft down to 8.67 ft
+    // and keeps its place at all down to 6.67 ft. The depth binds second, at band
+    // plus landing = 15.33 ft, which IS inside that one foot -- so a bedroom at the
+    // bottom of the stated range has its desks rescued rather than designed.
     expect(2 * SIZES.bed.dv + BED_CLEARANCE).toBeCloseTo(8.6667, 4);
     expect(bedA.dv - (2 * SIZES.bed.dv + BED_CLEARANCE)).toBeGreaterThan(1);
-    expect(bedA.du - band).toBeGreaterThan(bedA.dv - (2 * SIZES.bed.dv + BED_CLEARANCE));
+    expect(band + DOOR_CLEARANCE).toBeCloseTo(15.3333, 4);
+    expect(bedA.du - (band + DOOR_CLEARANCE)).toBeLessThan(1);
   });
 
   it("arranges the common room round the sofa, with the table clear of it", () => {
@@ -312,8 +524,27 @@ describe("layout at the defaults", () => {
     const sofa = pieceBox(one("sofa")[0]!);
     const table = pieceBox(one("table")[0]!);
 
-    // Back to the inner end wall, facing the facade and its window.
-    expect(sofa.u + sofa.du).toBeCloseTo(r.u + r.du, 12);
+    // Facing the facade and its window, back toward the inner end wall but not
+    // against it: K's door is in that wall, centred on the room's 15 ft run, and a
+    // 6 ft sofa centred on the same run covered v 4.5 to 10.5 of it against a
+    // doorway at v 6 to 9. The whole group is pulled back by DOOR_CLEARANCE
+    // instead, which the 20 ft depth can afford.
+    //
+    // WHY THIS IS NO LONGER AN EQUALITY. It asserted that the far edge fell exactly
+    // ON the landing boundary at u 18, which is where farLimit() alone put it: legal,
+    // since touching a landing is not standing in one, and impossible to put back.
+    // The anchor was u 15.25, a quarter foot off the grid, so drag.ts snapped a
+    // re-drop to 15.5 and carried that edge into the landing. commonSlots() now lands
+    // the anchor on the grid instead, which costs the room a quarter foot of depth it
+    // has no use for and makes the whole fit-out re-droppable -- see the sofa note
+    // there, and tests/drag.test.ts for the half of the claim that involves drag.ts.
+    expect(sofa.u).toBe(15);
+    expect(sofa.u + sofa.du).toBeCloseTo(r.u + r.du - DOOR_CLEARANCE - GRID / 2, 12);
+    // Still as deep as the grid allows: one step further back would waste half a foot
+    // of floor, one step forward is inside the landing. Both halves, because "on the
+    // grid" alone would also be satisfied by a sofa parked at the window.
+    expect(sofa.u + sofa.du + GRID).toBeGreaterThan(r.u + r.du - DOOR_CLEARANCE);
+    expect(sofa.u + sofa.du).toBeLessThanOrEqual(r.u + r.du - DOOR_CLEARANCE + EPS);
     expect(one("sofa")[0]!.yaw).toBe(270);
     expect(sofa.v - r.v).toBeCloseTo(r.v + r.dv - (sofa.v + sofa.dv), 12);
     // Clear floor between the sofa and the table, so you can get to the sofa.
@@ -336,13 +567,27 @@ describe("layout at the defaults", () => {
     const r = roomOf(suite, "k");
     const ps = inRoom(pieces, "k");
     const table = pieceBox(ps.find((p) => p.kind === "table")!);
-    // Centred both ways: a study table you sit round, not a piece of casework.
-    expect(table.u - r.u).toBeCloseTo(r.u + r.du - (table.u + table.du), 12);
+    // Centred along the room's 12 ft length: a study table you sit round, not a
+    // piece of casework.
     expect(table.v - r.v).toBeCloseTo(r.v + r.dv - (table.v + table.dv), 12);
+    // Across the 10 ft width it is centred too, until K's own doorway says
+    // otherwise. The seated group is the table plus a grid step and a chair on each
+    // side, 6.5 ft of the 10, so centred it would leave 1.75 ft either side -- and
+    // the door off the common room, in K's u = 20.5 wall, needs DOOR_CLEARANCE. So
+    // the group sits a quarter foot off centre, away from that wall, which is the
+    // whole cost of making this room door-aware. Rescuing the one chair that stood
+    // in the landing would have bought the same 3 inches and left the four chairs
+    // no longer symmetric about the table.
+    const group = SIZES.table.dv + 2 * (GRID + SIZES.chair.du);
+    expect(group).toBeCloseTo(6.5, 12);
+    expect((r.du - group) / 2).toBeCloseTo(1.75, 12);
+    expect(table.u - r.u).toBeCloseTo(r.u + r.du - (table.u + table.du) + 0.5, 12);
     // Two chairs on each long side, a grid step clear, and the pair at the
     // table's two ends rather than stacked at one.
     const chairs = ps.filter((p) => p.kind === "chair").map(pieceBox);
     expect(chairs.length).toBe(4);
+    // The pair on the doorway side stands exactly DOOR_CLEARANCE off that wall.
+    expect(Math.min(...chairs.map((c) => c.u)) - r.u).toBeCloseTo(DOOR_CLEARANCE, 12);
     const near = chairs.filter((c) => c.u + c.du <= table.u + 1e-9);
     const far = chairs.filter((c) => c.u >= table.u + table.du - 1e-9);
     expect([near.length, far.length]).toEqual([2, 2]);
@@ -375,7 +620,8 @@ describe("layout at the defaults", () => {
       else expect(g.front, `${p.id} faces its own wall`).toBeGreaterThan(EPS);
     }
     // Non-vacuity: the claim is only worth anything if pieces really are backed
-    // against walls. Measured at the defaults: 17 of the 29.
+    // against walls. Measured at the defaults: 16 of the 29 -- 17 before the sofa
+    // came off the wall K's door is in.
     expect(backedToAWall).toBeGreaterThanOrEqual(15);
   });
 
@@ -504,8 +750,8 @@ describe("bedClearance", () => {
 
 describe("degrading when the walls move in", () => {
   it("moves a piece rather than overlapping when its designed slot is gone", () => {
-    // An 11 ft deep bedroom is 1.83 ft short of the bed-dresser-chair-desk band,
-    // so the dressers cannot stand where the recipe puts them. bathDeep comes
+    // An 11 ft deep bedroom is 2.33 ft short of the bed-dresser-desk band, so
+    // nothing after the beds can stand where the recipe puts it. bathDeep comes
     // down with it to keep the unknown strip a positive width.
     const p: SuiteParams = { ...DEFAULT_PARAMS, bedDepth: 11, bathDeep: 6 };
     p.legDepth = p.hallWidth + p.partition + p.bedDepth;
@@ -518,28 +764,42 @@ describe("degrading when the walls move in", () => {
     // it in this 11 ft room instead would be circular: the pieces here are the
     // rescued positions, which is the thing under test.
     const stated = layout(suite);
-    const band = ["bed", "dresser", "chair", "desk"].reduce(
+    const band = ["bed", "dresser", "desk"].reduce(
       (t, k) => t + pieceBox(stated.find((x) => x.id === `bedA-${k}-0`)!).du,
       0,
     );
-    expect(band).toBeCloseTo(12.8333, 4);
-    expect(band - bedA.du).toBeCloseTo(1.8333, 4);
+    expect(band).toBeCloseTo(13.3333, 4);
+    expect(band - bedA.du).toBeCloseTo(2.3333, 4);
 
     const ps = layout(s);
     expect(illegal(s, ps)).toEqual([]);
     expect(collisions(ps)).toEqual([]);
+    expect(inADoorway(s, ps)).toEqual([]);
     // Nothing dropped: the dressers were rescued, not abandoned.
     expect(kindsOf(inRoom(ps, "bedA"))).toEqual({ bed: 2, desk: 2, chair: 2, dresser: 2 });
     const dressers = inRoom(ps, "bedA").filter((x) => x.kind === "dresser");
     expect(dressers.map((d) => d.id)).toEqual(["bedA-dresser-0", "bedA-dresser-1"]);
     // Where they actually land. Pinned exactly, because the scan is the only
     // code here that picks coordinates freely and this is the one case that
-    // exercises it: both anchors are on collide.ts's 0.5 ft grid, the first is
-    // turned a quarter to fit the aisle, and each stays on the side of the room
-    // its own station was on rather than crossing over the other's.
+    // exercises it: both anchors are on collide.ts's 0.5 ft grid, both keep the
+    // orientation the recipe asked for, and each stays on the side of the room its
+    // own station was on rather than crossing over the other's.
     expect(dressers.map((d) => [pieceBox(d).u, pieceBox(d).v, d.yaw])).toEqual([
-      [7, 18.5, 90],
-      [8.5, 20, 180],
+      [8.5, 17.5, 0],
+      [8.5, 22, 180],
+    ]);
+    // The desks are rescued here too, and where they go is what shows the two ways
+    // out of a doorway working together: the landing takes u 9 to 11 across v 19 to
+    // 22, and each desk goes flush against the far end wall in its own corner --
+    // deeper than the recipe designed, which is legal because it clears the door
+    // across the run instead of along the depth.
+    expect(
+      inRoom(ps, "bedA")
+        .filter((x) => x.kind === "desk")
+        .map((d) => [pieceBox(d).u + pieceBox(d).du, pieceBox(d).v]),
+    ).toEqual([
+      [11, 15.5],
+      [11, 23.5],
     ]);
     for (const d of dressers) {
       const f = pieceBox(d);
@@ -582,10 +842,11 @@ describe("degrading when the walls move in", () => {
     expect(kindsOf(inRoom(ps, "bedB"))).toEqual({ bed: 2, desk: 2, chair: 2, dresser: 2 });
   });
 
-  it("gives up on side by side to keep one bed its 2 ft, rather than keeping neither", () => {
+  it("puts the beds end to end when the run is too short, and the door then costs both of them their 2 ft", () => {
     // A 7 ft run cannot take two 40 in beds and a 2 ft aisle. Side by side both
-    // beds would be boxed in; end to end along the 16 ft depth one of them keeps
-    // its clearance, so that is what settle()'s strict pass goes looking for.
+    // beds would be boxed in; end to end along the 16 ft depth each of them has
+    // 3.67 ft of clear floor down its long side, so that is what settle()'s strict
+    // pass goes looking for and it is still what it finds.
     const s = buildSuite({ ...DEFAULT_PARAMS, bedAAlong: 7 });
     const bedA = roomOf(s, "bedA");
     expect(bedA.dv).toBe(7);
@@ -594,17 +855,40 @@ describe("degrading when the walls move in", () => {
     const ps = layout(s);
     expect(illegal(s, ps)).toEqual([]);
     expect(collisions(ps)).toEqual([]);
-    const beds = inRoom(ps, "bedA").filter((x) => x.kind === "bed");
+    expect(inADoorway(s, ps)).toEqual([]);
+    const mine = inRoom(ps, "bedA");
+    const beds = mine.filter((x) => x.kind === "bed");
     expect(beds.length).toBe(2);
     // End to end, not side by side.
     expect(pieceBox(beds[1]!).u).toBeGreaterThanOrEqual(
       pieceBox(beds[0]!).u + pieceBox(beds[0]!).du,
     );
-    const clear = beds.map((b) => bedClearance(b, bedA, inRoom(ps, "bedA")));
-    expect(clear[0]).toBeGreaterThanOrEqual(BED_CLEARANCE - EPS);
-    // The other one cannot have it -- 7 ft does not stretch -- and the module
-    // says so by leaving it tight rather than by pretending.
-    expect(clear[1]).toBeLessThan(BED_CLEARANCE);
+    // With the beds alone down, both have their 2 ft: 7 ft of run less a 3.33 ft
+    // bed is 3.67, and the two beds do not stand beside each other.
+    for (const b of beds) {
+      expect(bedClearance(b, bedA, beds), b.id).toBeCloseTo(bedA.dv - SIZES.bed.dv, 12);
+    }
+
+    // THEN THE SECOND DESK ARRIVES, AND THE DOORWAY IS WHY IT LANDS WHERE IT DOES.
+    // This room is over-full -- 7 x 16 with two beds, two desks, two chairs, two
+    // dressers and a 3 ft door -- and it is 3 ft outside the resident's stated 10 with a
+    // foot of uncertainty, so it is a degradation case and not a design target. The
+    // arithmetic is worth pinning because the doorway is precisely what costs it:
+    // with the beds end to end, bed 1 fills station 1's whole far region, and the
+    // one remaining spot that would have taken desk 1 without crowding bed 0 is
+    // u 14 to 16 turned upright -- which is inside the hall door's landing.
+    const desk1 = mine.find((x) => x.id === "bedA-desk-1")!;
+    const wouldHaveFit: Box = { u: 14, v: 18.5, du: 2, dv: 4 };
+    expect(containedBy(wouldHaveFit, bedA)).toBe(true);
+    expect(collisions([...beds, mine.find((x) => x.id === "bedA-desk-0")!])).toEqual([]);
+    expect(doorwaysOf(s).some((d) => overlaps(wouldHaveFit, d.zone))).toBe(true);
+    // So it is rescued into bed 0's side band instead, and both beds end up tight.
+    // Legal, walkable at every door, and stated rather than pretended: the
+    // alternative was dropping the desk, which the permissive pass exists not to do.
+    expect([pieceBox(desk1).u, pieceBox(desk1).v]).toEqual([3, 20.5]);
+    for (const b of beds) {
+      expect(bedClearance(b, bedA, mine), b.id).toBeLessThan(BED_CLEARANCE);
+    }
   });
 
   it("returns nothing for a room no piece fits, without throwing", () => {
@@ -687,6 +971,11 @@ describe("property sweep over randomised suites", () => {
       const ps = layout(s);
       expect(illegal(s, ps), `iteration ${i}`).toEqual([]);
       expect(collisions(ps), `iteration ${i}`).toEqual([]);
+      // Every doorway walkable, at every one of these parameter sets. The doors
+      // move with the walls -- buildOpenings() centres each one on its own band --
+      // so this is the assertion that says the fit-out follows them rather than
+      // that it happens to clear the five it was designed against.
+      expect(inADoorway(s, ps), `iteration ${i}`).toEqual([]);
       // Within the stated tolerances the designed arrangement always fits, so
       // nothing may quietly go missing: a drop here means a real conflict.
       expect(ps.length, `iteration ${i}`).toBe(29);
@@ -742,6 +1031,11 @@ describe("property sweep over randomised suites", () => {
       const ps = layout(s);
       expect(illegal(s, ps), `iteration ${i}`).toEqual([]);
       expect(collisions(ps), `iteration ${i}`).toEqual([]);
+      // Holds through the degradation too, and it is the harder half of the claim:
+      // here pieces are being rescued onto the grid all over the suite, and a rescue
+      // is exactly how a piece would end up in a doorway by accident rather than by
+      // design. accept() gates the scan's candidates as well as the designed slots.
+      expect(inADoorway(s, ps), `iteration ${i}`).toEqual([]);
       expect(ps.length, `iteration ${i}`).toBeLessThanOrEqual(29);
       // Bedroom A is unaffected by the residual, so it is always fully fitted.
       expect(kindsOf(inRoom(ps, "bedA")), `iteration ${i}`).toEqual({
@@ -757,15 +1051,17 @@ describe("property sweep over randomised suites", () => {
     }
     // A floor on how much of the fit-out survives, which is the only thing that
     // measures how good the rescue is rather than merely that it is legal.
-    // Measured at this seed: 4549 of the 4640 slots placed. The bound is tight
-    // on purpose -- the generator is deterministic, so it cannot drift, and it
-    // is what noticed that dropping the flush-to-the-wall anchors from stops()
-    // costs 18 pieces while breaking nothing else.
+    // Measured at this seed: 4541 of the 4640 slots placed, against 4549 before the
+    // doorways were kept clear -- so the whole door rule costs 8 slots out of 4640
+    // across 160 suites. The bound is tight on purpose: the generator is
+    // deterministic, so it cannot drift, and it is what noticed that dropping the
+    // flush-to-the-wall anchors from stops() costs 18 pieces while breaking nothing
+    // else.
     expect(placed).toBeGreaterThanOrEqual(4540);
     expect(placed).toBeLessThanOrEqual(160 * 29);
     // Non-vacuity, and the reason this sweep is separate from the one above:
     // both branches have to be exercised or "degrades legally" is untested.
-    // Measured at this seed: 133 complete, 27 degraded, bedroom B down to 2.0 ft.
+    // Measured at this seed: 124 complete, 36 degraded, bedroom B down to 2.0 ft.
     expect(complete).toBeGreaterThan(60);
     expect(degraded).toBeGreaterThan(10);
     expect(minBedB).toBeLessThan(6);

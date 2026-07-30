@@ -1,4 +1,7 @@
 import { describe, it, expect } from "vitest";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import weld from "@/data/weld.json";
 import { buildSuite, DEFAULT_PARAMS } from "@/geo/rooms";
 import { buildWalls } from "@/geo/walls";
@@ -14,8 +17,10 @@ import {
   gableAzimuth,
   facadeStep,
   floorLevel,
+  maxSectionLength,
   GABLE_INNER_V,
   CLEAR_HALF_U,
+  MAX_SECTION_LENGTH,
   WELD,
 } from "@/geo/place";
 
@@ -294,6 +299,177 @@ describe("facade orientation feeds solar.ts", () => {
   it("puts the east facade at 103.2 degrees, a morning wall", () => {
     // 13.2 + 90. Used by the sun tests; recorded here so the two agree.
     expect(facadeAzimuth({ ...DEFAULT_PARAMS, facade: "east" })).toBeCloseTo(103.2, 6);
+  });
+});
+
+/**
+ * The section-length cap, measured a second way.
+ *
+ * maxSectionLength() zones the ring and reads each zone at its own midpoint. This
+ * block does none of that: it walks v northward in thousandths of a foot, ray-casting
+ * the raw ring at each step, and asks where the footprint first becomes wide enough to
+ * hold the suite. Two routes to the same waist face is the argument the facade-step
+ * block above makes, and it is the check that the derivation survived being moved here
+ * from scene/weldGeometry.ts -- tests/weldGeometry.test.ts still comes at the same
+ * number through ringStations(), which is a third route again.
+ */
+describe("the cap on sectionLength is measured off the ring", () => {
+  /** u = 0 out to the nearer wall at v = const, from the raw ring. Not width / 2. */
+  const halfWidthAt = (v: number) => {
+    const loop = ring.slice(0, -1).map((p) => siteToBuilding({ x: p[0]!, y: p[1]! }));
+    let east = -Infinity;
+    let west = -Infinity;
+    for (let i = 0; i < loop.length; i++) {
+      const a = loop[i]!;
+      const c = loop[(i + 1) % loop.length]!;
+      if (a.v > v === c.v > v) continue;
+      const u = a.u + ((c.u - a.u) * (v - a.v)) / (c.v - a.v);
+      east = Math.max(east, u);
+      west = Math.max(west, -u);
+    }
+    return Math.min(east, west);
+  };
+
+  it("finds the waist and the wings, so the probe is not vacuous", () => {
+    // the waist is narrower than the suite; a foot into the wings it is not
+    expect(halfWidthAt(0)).toBeCloseTo(23.14, 2);
+    expect(halfWidthAt(0)).toBeLessThan(CLEAR_HALF_U);
+    expect(halfWidthAt(21)).toBeGreaterThan(CLEAR_HALF_U);
+  });
+
+  it("stops the suite at the waist's north face, 50.25 ft back from the gable", () => {
+    let face = Infinity;
+    for (let v = 0; v < 30; v += 0.001) {
+      if (halfWidthAt(v) >= CLEAR_HALF_U) {
+        face = v;
+        break;
+      }
+    }
+    expect(Number.isFinite(face), "the scan found the step at all").toBe(true);
+    // 0.02 ft, and the slack is stated rather than tuned: the zone boundary is the
+    // LOWEST v of a merged cluster whose four vertices spread over v 19.897 to 19.916,
+    // so the implementation is up to 0.017 ft generous against a scan that finds the
+    // true crossing. See maxSectionLength()'s own docblock.
+    expect(Math.abs(GABLE_INNER_V - face - MAX_SECTION_LENGTH)).toBeLessThan(0.02);
+    expect(MAX_SECTION_LENGTH).toBeCloseTo(50.25, 1);
+    expect(maxSectionLength(), "the exported value is the function's").toBe(MAX_SECTION_LENGTH);
+  });
+});
+
+/**
+ * three.js must not be reachable from geo/ or state/, and this is where that is
+ * asserted because this file's own module is where the rule sent maxSectionLength().
+ *
+ * The rule has teeth: scripts/emit-layout.mjs and emit-plan.mjs import these modules
+ * by path in plain node and tests/drift.test.ts shells out to both, so three in the
+ * reachable set is an ERR_MODULE_NOT_FOUND at import -- invisible to tsc, and drift
+ * only catches the modules those two scripts happen to reach. It has been broken twice,
+ * once by a value import in rooms.ts and once by url.ts importing MAX_SECTION_LENGTH
+ * from scene/weldGeometry.ts, and in both cases the file carried a comment saying not
+ * to. So this walks the real import graph instead: the roots are every .ts under
+ * src/geo and src/state as they are on disk, and the edges are the specifiers those
+ * files actually load. Nothing here is a list of files to keep up to date, which is
+ * the only version of this test worth having.
+ */
+describe("the geometry and state layers stay three-free", () => {
+  const SRC = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
+
+  /** Anything that would pull the renderer in. Bare specifiers only. */
+  const RENDERER = /^(three($|[-/])|@react-three\/|postprocessing($|\/))/;
+
+  const sources = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) return sources(p);
+      return /\.tsx?$/.test(e.name) ? [p] : [];
+    });
+
+  /**
+   * The specifiers a file loads at RUNTIME.
+   *
+   * Comments are stripped first, and they have to be: these modules quote refused
+   * imports in prose, spelled exactly as code (rooms.ts's `import { facadeStep } from
+   * "./place"` is the reason place.ts pushes instead of being pulled, and furniture.ts
+   * quotes two more), and a scanner that believed them would be walking edges nobody
+   * wrote.
+   *
+   * `import type` / `export type` statements are dropped because they are erased. An
+   * inline `{ type X }` in an otherwise value import is NOT dropped -- over-reporting
+   * an edge is safe here, under-reporting one is the bug this test exists to catch.
+   */
+  const loads = (file: string): string[] => {
+    const src = readFileSync(file, "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
+    const re = /(?:^|[^\w.$])(?:import|export)[\s(]+(?!type[\s{])(?:[^'";]*?\bfrom\s*)?["']([^"']+)["']/g;
+    return [...src.matchAll(re)].map((m) => m[1]!);
+  };
+
+  /** A specifier as a file under src/, or null for a package. */
+  const fileOf = (spec: string, importer: string): string | null => {
+    const base = spec.startsWith("@/")
+      ? join(SRC, spec.slice(2))
+      : spec.startsWith(".")
+        ? resolve(dirname(importer), spec)
+        : null;
+    if (base === null) return null;
+    for (const c of [base, `${base}.ts`, `${base}.tsx`, join(base, "index.ts")]) {
+      if (existsSync(c) && statSync(c).isFile()) return c;
+    }
+    return null;
+  };
+
+  /** Every path from `roots` to a renderer package, as "a -> b -> three". */
+  const routesToThree = (roots: string[]): string[] => {
+    const from = new Map<string, string | null>(roots.map((r) => [r, null]));
+    const queue = [...roots];
+    const out: string[] = [];
+    const chain = (file: string, tail: string) => {
+      const parts = [tail];
+      for (let f: string | null | undefined = file; f; f = from.get(f)) {
+        parts.unshift(relative(join(SRC, ".."), f));
+      }
+      return parts.join(" -> ");
+    };
+    while (queue.length > 0) {
+      const file = queue.shift()!;
+      for (const spec of loads(file)) {
+        const next = fileOf(spec, file);
+        if (next === null) {
+          if (RENDERER.test(spec)) out.push(chain(file, spec));
+          continue;
+        }
+        if (from.has(next)) continue;
+        from.set(next, file);
+        queue.push(next);
+      }
+    }
+    return out;
+  };
+
+  const layers = [...sources(join(SRC, "geo")), ...sources(join(SRC, "state"))];
+
+  it("has found the modules it is meant to be walking", () => {
+    expect(layers.length).toBeGreaterThan(8);
+    expect(layers).toContain(join(SRC, "geo", "place.ts"));
+    expect(layers).toContain(join(SRC, "state", "url.ts"));
+    // and it is reading real edges out of them, not an empty regex
+    expect(loads(join(SRC, "state", "url.ts"))).toContain("@/geo/place");
+  });
+
+  it("can find three when it is there, several hops away", () => {
+    // The positive control, and it is CanvasHost.tsx rather than a module that imports
+    // three itself: it reaches three only through `dynamic(() => import("./Experience"))`,
+    // so a route out of it proves the walk follows transitive edges AND lazy ones. A
+    // walker that only noticed a file's own direct `import * as THREE` would pass the
+    // test below on a graph that had three three levels down.
+    const routes = routesToThree([join(SRC, "scene", "CanvasHost.tsx")]);
+    expect(routes.filter((r) => r.endsWith("-> three")).length).toBeGreaterThan(0);
+    expect(Math.max(...routes.map((r) => r.split(" -> ").length))).toBeGreaterThan(2);
+  });
+
+  it("reaches three from no module under src/geo or src/state", () => {
+    expect(routesToThree(layers)).toEqual([]);
   });
 });
 

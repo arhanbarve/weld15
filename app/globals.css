@@ -297,3 +297,76 @@ button,
   border-radius: 1px;
   padding: 0.25rem 0.5rem;
 }
+
+/* ---------- the desktop gate ---------- */
+
+/* Fixed and inset rather than a page flow, because `body` is `overflow: hidden`
+   with `height: 100%` for the canvas's sake, so a document that is taller than the
+   viewport is CLIPPED here rather than scrolled. Hit at 375 x 500, where the last
+   line of the second paragraph went under the fold with no way to reach it. The
+   gate carries its own scroll instead of asking the body to relax. */
+.gate {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  overflow-y: auto;
+  padding: var(--s3);
+  /* The scan's vignette, from the same gradient .vignette uses, over the same
+     ground: the first thing a phone sees is part of the drawing rather than a
+     dialog that arrived from somewhere else. */
+  background:
+    radial-gradient(ellipse at center, transparent 42%, rgba(4, 20, 38, 0.55) 100%),
+    var(--void);
+}
+
+/* `margin: auto` inside the flex scroller, NOT `place-items: center` on the
+   scroller. Centring a flex or grid item that overflows its scroll container puts
+   the overflow above `scrollTop: 0` and the top of the card becomes unreachable;
+   auto margins collapse to zero on the overflowing axis instead. */
+.gate-card {
+  margin: auto;
+  /* ~68ch of Baskerville at 1rem, inside MASTER.md's 65-75ch line-length cap. */
+  max-width: 34rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s3);
+  /* The HUD's chip, border, radius: same chrome, one size up. Text on the void
+     always gets its own ground, and --ink-scan over --chip-scan composited on
+     --void measures ~15:1. */
+  background: var(--chip-scan);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+}
+
+/* Shrink-wraps the chip. Without this the .weld-chip rule lands on a block-level
+   <p> and its crimson border runs the full width of the card, which reads as a
+   banner rather than a label. */
+.gate-locator {
+  margin: 0;
+  align-self: flex-start;
+}
+
+.gate-title {
+  margin: 0;
+  font-family: var(--serif);
+  /* Floor is 22px so it still outranks the prose at 375; the ceiling is where a
+     Baskerville line of this length stops needing two lines on a laptop. */
+  font-size: clamp(1.375rem, 4.5vw, 1.875rem);
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  color: var(--line-hi);
+}
+
+.gate-prose {
+  margin: 0;
+  /* 1rem exactly, per MASTER.md's 16px minimum body on mobile -- and no clamp,
+     because prose that shrinks with the viewport shrinks fastest where it can least
+     afford to. */
+  font-size: 1rem;
+  /* Bottom of MASTER.md's 1.5-1.75 body range rather than the middle of it, because
+     the whole message has to clear 375 x 667 without scrolling and seventeen lines of
+     prose spend every 0.05 of leading twice over. */
+  line-height: 1.55;
+  color: var(--ink-scan);
+}

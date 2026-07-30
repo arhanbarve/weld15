@@ -384,20 +384,35 @@ export function Hud() {
           </span>
         </label>
 
-        {/* Roof off. Three signals, none of them colour on its own: the label says
-            which state it is in, aria-pressed says so to a screen reader, and the
-            `on` class carries a border and a weight as well as a hue. */}
-        <div className="hud-scrub" role="group" aria-label="Cutaway">
-          <button
-            type="button"
-            onClick={() => setCutaway(!cutaway)}
-            aria-pressed={cutaway}
-            data-testid="roof-off"
-            className={cutaway ? "on" : ""}
-          >
-            {cutaway ? "roof off" : "roof on"}
-          </button>
-        </div>
+        {/* Roof off, and only where it does something.
+
+            Measured against the deployed build, stage by stage: the mean frame
+            luminance moves by 2.73 at stage 5 and by 0.00, 0.00, 0.18, 0.08 and 0.00
+            at stages 0 to 4. So for five of the six stages this was a control that
+            changed nothing while looking like it should -- worse than a missing
+            control, because a viewer who presses it concludes the app is broken
+            rather than that the button does not apply.
+
+            The cause is known and is not a bug in the toggle: `cutaway` reaches
+            Suite's `ceiling` prop, and WeldExterior does not read it, so Weld's own
+            roof stays on. Taking the roof off the exterior at stages 2 to 4 is the
+            dollhouse view the label actually promises and it is what P6's cutaway
+            modes are for; hiddenWalls() is being built now. When that lands this gate
+            widens to the stages it then covers. Until then it is honest about its
+            reach. */}
+        {stage === 5 ? (
+          <div className="hud-scrub" role="group" aria-label="Cutaway">
+            <button
+              type="button"
+              onClick={() => setCutaway(!cutaway)}
+              aria-pressed={cutaway}
+              data-testid="roof-off"
+              className={cutaway ? "on" : ""}
+            >
+              {cutaway ? "roof off" : "roof on"}
+            </button>
+          </div>
+        ) : null}
       </div>
     </>
   );

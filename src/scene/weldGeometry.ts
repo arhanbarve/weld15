@@ -86,13 +86,15 @@
  * What is not acceptable is a guessed number presented as measured, so neither
  * number appears in this file as a literal.
  *
- * WHY sectionLength HAS A CEILING AND WHERE IT COMES FROM
+ * WHY sectionLength HAS A CEILING AND WHY THE CEILING IS NOT MEASURED IN THIS FILE
  * place.ts hangs the suite off the north gable and anchors it on a 49 ft clear
  * width, and Weld's waist is 46.9 ft across, so past a certain section length the
  * suite is wider than the building it is in. maxSectionLength() measures where that
  * happens -- 50.25 ft south of the anchor -- and that is the number P6's
- * sectionLength slider has to clamp to. The function carries the arithmetic and the
- * argument for clamping rather than letting it ride.
+ * sectionLength slider has to clamp to. It used to be derived here, off
+ * ringStations(); it is now derived in place.ts and re-exported below, because
+ * state/url.ts needs it too and this module imports three. The re-export's own
+ * docblock has the argument.
  *
  * WHY THE BAY REVEALS SIT AT THE MASONRY MID-PLANE
  * place.ts anchors the suite on a 49 ft clear width centred on u = 0, so its
@@ -115,7 +117,7 @@ import {
 } from "@/geo/frames";
 import { buildSuite, DEFAULT_PARAMS, type SuiteParams } from "@/geo/rooms";
 import { buildWalls } from "@/geo/walls";
-import { WELD, CLEAR_HALF_U, GABLE_INNER_V, floorLevel, suiteToBuilding } from "@/geo/place";
+import { WELD, floorLevel, suiteToBuilding } from "@/geo/place";
 import { extrudedGeometry } from "./geometry";
 
 export type WeldMasses = {
@@ -315,76 +317,21 @@ function spansAt(v: number): [number, number][] {
 }
 
 /**
- * How far a station's footprint reaches either side of the suite's centreline, ft.
+ * The clamp on sectionLength, re-exported from where it can actually live.
  *
- * Not width / 2. place.ts anchors the suite on u = 0, the published centroid, while
- * this ring's own mid-line is RIDGE_U, 0.47 ft west of it -- so half the width
- * overstates what is available on the east by that much. It changes no verdict at
- * the waist (23.44 ft by width against 23.15 measured) but it is most of the margin
- * at the north end, where the measured reach is 25.46 ft against the suite's 24.5.
+ * It was derived here, off ringStations(), and it reads as if it belongs here. It
+ * cannot: state/url.ts validates a shared link against it, and importing it from this
+ * module put three.js into the state layer -- which is a layering rule with teeth,
+ * because tests/drift.test.ts runs scripts/emit-*.mjs in plain node and three in the
+ * reachable set is an ERR_MODULE_NOT_FOUND at import. So the derivation moved to
+ * geo/place.ts, which is three-free and already marches this ring for the facade step,
+ * and its docblock there carries the measurement, the clamp argument and the trap.
  *
- * A station with a lobe has more than one span, and only the span containing the
- * centreline can hold the suite; a station with no span there holds nothing.
+ * Re-exported rather than left for callers to re-point: this is where every scene
+ * module and tests/weldGeometry.test.ts have always read it, and the number is the
+ * same number.
  */
-function centrelineHalfWidth(s: Station): number {
-  const span = s.spans.find(([lo, hi]) => lo <= 0 && hi >= 0);
-  return span ? Math.min(-span[0], span[1]) : 0;
-}
-
-/**
- * The longest end section the ring will take, ft. THE CLAMP FOR P6's sectionLength.
- *
- * place.ts hangs the suite off the north gable's interior face, so it occupies v
- * from GABLE_INNER_V - sectionLength to GABLE_INNER_V and needs CLEAR_HALF_U of
- * footprint either side of u = 0 over that whole run. Weld is a dumbbell, so that is
- * not available everywhere. Measured off this ring by ringStations(), going south
- * from the anchor:
- *
- *   v 48.5 .. 72.1   reach 25.88   the end zone the anchor is in    suite fits
- *   v 19.9 .. 48.5   reach 31.07   the wings                       suite fits
- *   v -19.4 .. 19.9  reach 23.15   the waist        NARROWER THAN THE SUITE IS WIDE
- *
- * so the answer is the distance from the anchor to the waist's north face,
- * 70.15 - 19.90 = 50.25 ft. This is a fact about Weld and not about the model: a
- * 60 ft end section would put the suite's south end where the building is 46.9 ft
- * across, and the facade wall -- with the window bays in it -- would be outside the
- * shell.
- *
- * WHY A SLIDER MUST CLAMP TO THIS RATHER THAN LET IT RIDE
- * Nothing inside the suite notices. The rooms still tile, the areas still add up,
- * walls.ts still emits the same bands and the same openings; the only symptom is
- * masonry drawn outside a shell the camera usually stands inside. It took a
- * randomised sweep to find it at all, and it found it 6 ft past the limit rather
- * than at it, because the southmost window is centred on a 15 ft common room and so
- * sits 3.5 ft north of the suite's own south wall. A slider that walks the suite out
- * of the building silently is worse than one that stops, because a viewer cannot
- * tell that case from a correct model.
- *
- * HOW EXACT IT IS
- * The station boundary is the LOWEST v of a merged cluster (see STATION_EPS), and
- * this ring's four vertices at the waist-to-wing transition spread over v 19.897 to
- * 19.916. So the figure is 0.017 ft generous -- a fifth of an inch, against
- * coordinates published to a tenth of a foot -- and clamped exactly here the suite's
- * south corner lands on the waist's face rather than inside it. That is why the test
- * brackets this bound at the ring's own 0.1 ft resolution instead of asserting a
- * knife edge at the number itself.
- */
-export function maxSectionLength(): number {
-  const stations = ringStations();
-  const tooNarrow = stations
-    .filter((s) => s.v0 < GABLE_INNER_V && centrelineHalfWidth(s) < CLEAR_HALF_U)
-    // nearest the anchor first: the first one the suite would reach going south
-    .sort((a, b) => b.v1 - a.v1);
-  const first = tooNarrow[0];
-  // No station too narrow -- a building with no waist -- and the whole ring south of
-  // the anchor is available.
-  return first
-    ? GABLE_INNER_V - first.v1
-    : GABLE_INNER_V - Math.min(...stations.map((s) => s.v0));
-}
-
-/** The same number, for a slider that has to clamp to it without recomputing it. */
-export const MAX_SECTION_LENGTH = maxSectionLength();
+export { maxSectionLength, MAX_SECTION_LENGTH } from "@/geo/place";
 
 /**
  * The height of the roof surface over a point in the building frame.
