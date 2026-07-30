@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { buildSuite, DEFAULT_PARAMS, type SuiteParams } from "@/geo/rooms";
+import {
+  buildSuite,
+  DEFAULT_PARAMS,
+  unreachableRooms,
+  type SuiteParams,
+} from "@/geo/rooms";
 import {
   buildWalls,
   footprintArea,
@@ -103,16 +108,49 @@ describe("openings", () => {
     }
   });
 
-  it("puts the bathroom door on a wall the bathroom actually touches", () => {
-    // Revision 2 of the drawing had the bath's door opening into a closet,
-    // because closets sat between the hall and the bath. Assert it cannot recur.
+  it("puts the bathroom door on a wall that genuinely divides the hall from the bath", () => {
+    // This test existed before and passed while the door was in the wrong wall,
+    // because it asserted membership in `between` -- and `between` lists every room
+    // a merged band runs past. The band at v = 25.5 touches the bath AND the hall
+    // without dividing them, so the assertion was satisfied by a wall 8 ft away
+    // from the one the door needed to be in. Assert `separates` instead, which is
+    // the relation the door actually depends on.
     const w = wallBetween(walls, "hall", "bath");
-    expect(w, "no wall separates the hall from the bathroom").toBeDefined();
-    expect(w!.between).toContain("bath");
-    expect(w!.between).toContain("hall");
+    expect(w, "no wall divides the hall from the bathroom").toBeDefined();
+    expect(
+      w!.separates.some(
+        ([a, b]) =>
+          (a === "hall" && b === "bath") || (a === "bath" && b === "hall"),
+      ),
+      `${w!.id} touches both but divides ${JSON.stringify(w!.separates)}`,
+    ).toBe(true);
+
+    // And the geometry has to agree: the two rooms sit on opposite faces of it.
+    const bath = suite.rooms.find((r) => r.id === "bath")!;
+    const hall = suite.rooms.find((r) => r.id === "hall")!;
+    expect(w!.u).toBeCloseTo(bath.u + bath.du, 6);
+    expect(w!.u + w!.du).toBeCloseTo(hall.u, 6);
+
     const door = openings.find((o) => o.kind === "door" && o.connects.includes("bath"));
     expect(door).toBeDefined();
     expect(door!.wallId).toBe(w!.id);
+  });
+
+  it("gives the unknown strip no door, and does not call that unreachable", () => {
+    // The strip beside the bathroom is space the project can measure and cannot
+    // name, so it gets no opening -- see rooms.ts. What must NOT happen is a door
+    // appearing there by accident, which is how it would acquire an invented use.
+    const strip = suite.rooms.find((r) => r.id === "unknown")!;
+    expect(strip.kind).toBe("unknown");
+
+    const its = openings.filter((o) => o.connects.includes("unknown"));
+    expect(its.filter((o) => o.kind === "door")).toEqual([]);
+    // It does keep the facade window, which is the whole reason the bathroom took
+    // the hall side rather than this strip: one of the two had to be the interior
+    // room, and a windowless bathroom is ordinary where a windowless unknown is
+    // just less informative. So assert the window is present, not merely allowed.
+    expect(its.filter((o) => o.kind === "window")).toHaveLength(1);
+    expect(unreachableRooms(suite)).toEqual([]);
   });
 
   it("opens the three hall doors the resident describes, plus K off the common room", () => {

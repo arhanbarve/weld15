@@ -2,7 +2,7 @@
 //
 // This exists because the docs drifted from the geometry: FINAL-LAYOUT.md
 // carried a transposed bathroom, a hall half a foot too narrow, a total 65 sq ft
-// light, and no mention of the closets at all. Hand-maintaining duplicates of
+// light, and no mention of the unknown strip at all. Hand-maintaining duplicates of
 // computed numbers is exactly how "54 x 151" survived across three artifacts.
 //
 //   node scripts/emit-layout.mjs
@@ -25,7 +25,7 @@ for (const r of suite.rooms) {
 }
 console.log(`| **the resident's five rooms** | | **${f(suite.roomArea)}** | |`);
 console.log(
-  `| **With hall and closets** | | **${f(suite.netArea)}** | ${f(suite.netArea / 4)} per person for four |`,
+  `| **With hall and the unknown strip** | | **${f(suite.netArea)}** | ${f(suite.netArea / 4)} per person for four |`,
 );
 
 console.log("\n| Quantity | Value | Source |");

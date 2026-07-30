@@ -10,13 +10,13 @@
 <rect x="62.0" y="478.0" width="130.0" height="156.0" fill="rgba(143,196,242,0.26)"/>
 <rect x="185.5" y="62.0" width="58.5" height="370.5" fill="rgba(157,182,212,0.07)"/>
 <rect x="250.5" y="302.5" width="208.0" height="130.0" fill="rgba(143,196,242,0.15)"/>
-<rect x="354.5" y="198.5" width="104.0" height="97.5" fill="rgba(157,182,212,0.16)"/>
-<rect x="250.5" y="198.5" width="97.5" height="97.5" fill="rgba(228,161,94,0.13)"/>
+<rect x="361.0" y="198.5" width="97.5" height="97.5" fill="none"/>
+<rect x="250.5" y="198.5" width="104.0" height="97.5" fill="rgba(157,182,212,0.16)"/>
 <rect x="250.5" y="62.0" width="208.0" height="130.0" fill="rgba(143,196,242,0.15)"/>
 <rect x="185.5" y="432.5" width="273.0" height="6.5" fill="#5783B4"/>
 <rect x="244.0" y="296.0" width="214.5" height="6.5" fill="#5783B4"/>
 <rect x="244.0" y="192.0" width="214.5" height="6.5" fill="#5783B4"/>
-<rect x="348.0" y="198.5" width="6.5" height="97.5" fill="#5783B4"/>
+<rect x="354.5" y="198.5" width="6.5" height="97.5" fill="#5783B4"/>
 <rect x="244.0" y="302.5" width="6.5" height="130.0" fill="#5783B4"/>
 <rect x="244.0" y="198.5" width="6.5" height="97.5" fill="#5783B4"/>
 <rect x="244.0" y="62.0" width="6.5" height="130.0" fill="#5783B4"/>
@@ -28,16 +28,14 @@
 <rect x="179.0" y="62.0" width="6.5" height="409.5" fill="#5783B4"/>
 <rect x="55.5" y="478.0" width="6.5" height="156.0" fill="#5783B4"/>
 <rect x="62.0" y="471.5" width="123.5" height="6.5" fill="#5783B4"/>
-<rect x="302.5" y="432.5" width="39.0" height="6.5" fill="#0A2547"/>
-<rect x="302.5" y="432.5" width="39.0" height="6.5" fill="#8FC4F2" opacity="0.9"/>
-<rect x="331.8" y="296.0" width="39.0" height="6.5" fill="#0A2547"/>
-<rect x="331.8" y="296.0" width="39.0" height="6.5" fill="#8FC4F2" opacity="0.9"/>
-<rect x="331.8" y="192.0" width="39.0" height="6.5" fill="#0A2547"/>
-<rect x="331.8" y="192.0" width="39.0" height="6.5" fill="#8FC4F2" opacity="0.9"/>
+<rect x="244.0" y="348.0" width="6.5" height="39.0" fill="#0A2547"/>
+<rect x="244.0" y="348.0" width="6.5" height="39.0" fill="#8FC4F2" opacity="0.9"/>
+<rect x="244.0" y="227.8" width="6.5" height="39.0" fill="#0A2547"/>
+<rect x="244.0" y="227.8" width="6.5" height="39.0" fill="#8FC4F2" opacity="0.9"/>
+<rect x="244.0" y="107.5" width="6.5" height="39.0" fill="#0A2547"/>
+<rect x="244.0" y="107.5" width="6.5" height="39.0" fill="#8FC4F2" opacity="0.9"/>
 <rect x="192.0" y="517.0" width="6.5" height="39.0" fill="#0A2547"/>
 <rect x="192.0" y="517.0" width="6.5" height="39.0" fill="#8FC4F2" opacity="0.9"/>
-<rect x="335.0" y="296.0" width="32.5" height="6.5" fill="#0A2547"/>
-<rect x="335.0" y="296.0" width="32.5" height="6.5" fill="#8FC4F2" opacity="0.9"/>
 <rect x="179.0" y="416.9" width="6.5" height="41.6" fill="#0A2547"/>
 <rect x="179.0" y="416.9" width="6.5" height="41.6" fill="#E4526F" opacity="0.9"/>
 <rect x="458.5" y="296.0" width="19.5" height="104.0" fill="#8FC4F2" opacity="0.45"/>
@@ -58,12 +56,12 @@
 <text class="lbl" x="354.5" y="363.5" text-anchor="middle">Bedroom A</text>
 <text class="dim" x="354.5" y="377.5" text-anchor="middle">16 x 10</text>
 <text class="tag" x="354.5" y="389.5" text-anchor="middle" fill="#7FD1A6">GIVEN 10 x 16</text>
-<text class="lbl" x="406.5" y="243.3" text-anchor="middle">Bathroom</text>
-<text class="dim" x="406.5" y="257.3" text-anchor="middle">8 x 7.5</text>
-<text class="tag" x="406.5" y="269.3" text-anchor="middle" fill="#E4A15E">INFERRED</text>
-<text class="lbl" x="299.3" y="243.3" text-anchor="middle">Closets</text>
-<text class="dim" x="299.3" y="257.3" text-anchor="middle">7.5 x 7.5</text>
-<text class="tag" x="299.3" y="269.3" text-anchor="middle" fill="#E4A15E">INFERRED</text>
+<text class="lbl" x="409.8" y="243.3" text-anchor="middle">Unknown</text>
+<text class="dim" x="409.8" y="257.3" text-anchor="middle">7.5 x 7.5</text>
+<text class="tag" x="409.8" y="269.3" text-anchor="middle" fill="#E4A15E">INFERRED</text>
+<text class="lbl" x="302.5" y="243.3" text-anchor="middle">Bathroom</text>
+<text class="dim" x="302.5" y="257.3" text-anchor="middle">8 x 7.5</text>
+<text class="tag" x="302.5" y="269.3" text-anchor="middle" fill="#E4A15E">INFERRED</text>
 <text class="lbl" x="354.5" y="123.0" text-anchor="middle">Bedroom B</text>
 <text class="dim" x="354.5" y="137.0" text-anchor="middle">16 x 10</text>
 <text class="tag" x="354.5" y="149.0" text-anchor="middle" fill="#7FD1A6">GIVEN 10 x 16</text>

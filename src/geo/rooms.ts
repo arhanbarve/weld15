@@ -179,28 +179,43 @@ export function buildSuite(p: SuiteParams = DEFAULT_PARAMS): Suite {
   });
   v += p.bedAAlong + t;
 
-  // Bathroom takes the facade side so it is not a windowless interior box; the
-  // strip behind it becomes closets, which the 1875 text says every room had.
+  // The bathroom takes the HALL side of this band, and the strip behind it, on the
+  // facade, is left unknown.
+  //
+  // An earlier version had these the other way round, so that the bathroom could
+  // keep the facade window and the strip behind it could be called closets on the
+  // strength of the 1875 text. Two things were wrong with that. Geometrically the
+  // bathroom then reached only u = 8 while the hall starts at u = 16.5, so it did
+  // not touch the hall at all and the door labelled hall-to-bathroom actually
+  // opened into the strip -- you would have walked through the closets to reach the
+  // bath. And the strip's use is not something this project knows: naming it from
+  // the 1875 mention of closets is inference dressed as a source, which is the error
+  // docs/DIMENSION-AUDIT.md exists to stop.
+  //
+  // So: the bathroom is the room you enter from the hall, and it is interior and
+  // windowless, which is what a bathroom in a building of this period usually is.
+  // The strip keeps the facade window and keeps its own ignorance.
+  const unknownDeep = p.bedDepth - p.bathDeep - t;
+  rooms.push({
+    id: "unknown",
+    label: "Unknown",
+    u: 0,
+    v,
+    du: unknownDeep,
+    dv: p.bathAlong,
+    kind: "unknown",
+    stated: "not mentioned",
+    windows: ["facade"],
+  });
   rooms.push({
     id: "bath",
     label: "Bathroom",
-    u: 0,
+    u: unknownDeep + t,
     v,
     du: p.bathDeep,
     dv: p.bathAlong,
     kind: "bath",
     stated: "not given",
-    windows: ["facade"],
-  });
-  rooms.push({
-    id: "closets",
-    label: "Closets",
-    u: p.bathDeep + t,
-    v,
-    du: p.bedDepth - p.bathDeep - t,
-    dv: p.bathAlong,
-    kind: "service",
-    stated: "not mentioned",
     windows: [],
   });
   v += p.bathAlong + t;
@@ -277,6 +292,14 @@ export function touches(a: Rect, b: Rect, t = 0.5): boolean {
  * Every room must be reachable from the hall, directly or through another room.
  * K is reached through the common room, which is what "attached to the common
  * room" means; everything else opens off the hall.
+ *
+ * Rooms of kind "unknown" are exempt, and the exemption is the point rather than a
+ * loophole. The 7.5 ft strip on the facade beside the bathroom is space this
+ * project can measure and cannot name; giving it a door would mean choosing whose
+ * door it is, and every choice available -- closet off bedroom A, store off the
+ * bathroom -- asserts a use no source supports. So it is modelled as enclosed
+ * space with no opening, and this gate is told not to read that as a defect. If it
+ * ever acquires a use, it stops being kind "unknown" and the gate applies again.
  */
 export function unreachableRooms(suite: Suite): string[] {
   const byId = new Map(suite.rooms.map((r) => [r.id, r]));
@@ -296,5 +319,7 @@ export function unreachableRooms(suite: Suite): string[] {
       }
     }
   }
-  return suite.rooms.filter((r) => !seen.has(r.id)).map((r) => r.id);
+  return suite.rooms
+    .filter((r) => r.kind !== "unknown" && !seen.has(r.id))
+    .map((r) => r.id);
 }

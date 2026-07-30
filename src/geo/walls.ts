@@ -28,8 +28,21 @@ export type Wall = {
   du: number;
   dv: number;
   kind: WallKind;
-  /** ids of the rooms on either side, where there is one */
+  /** ids of the rooms this band touches anywhere along its length */
   between: string[];
+  /**
+   * Room pairs this band genuinely divides: the two rooms sit on OPPOSITE sides
+   * of it at the same point along its length.
+   *
+   * Distinct from `between`, and the distinction is load-bearing. Bands merge, so
+   * `between` lists every room a long band runs past -- the band at v = 15 touches
+   * the common room, bedroom A and the hall, because it runs the full 21 ft width
+   * of the suite. It divides only the common room from bedroom A. wallBetween()
+   * used to search `between` and so returned that band for hall/bedroom A, putting
+   * bedroom A's door in the common room's wall. Four of the five interior doors
+   * were in the wrong wall and every one of them looked plausible in the tables.
+   */
+  separates: [string, string][];
   /**
    * True for the suite's enclosing walls rather than its internal partitions.
    * Kept separate because area conservation is checked against the NET interior
@@ -178,7 +191,7 @@ export function buildWalls(suite: Suite): { walls: Wall[]; openings: Opening[] }
         du,
         dv,
         kind: classify(),
-        between: neighbours(u, v, du, dv, rooms),
+        ...adjacency(u, v, du, dv, rooms),
       });
     }
   }
@@ -221,7 +234,12 @@ function perimeterWalls(suite: Suite, startId: number): Wall[] {
     between: string[],
   ) => {
     if (du <= EPS || dv <= EPS) return;
-    out.push({ id: `p${n++}`, u, v, du, dv, kind, between, perimeter: true });
+    // `separates` is always measured, never taken from the caller's list. A
+    // perimeter band has open space or another suite on one face, so most of them
+    // divide nothing and get an empty list -- which is the correct answer and the
+    // reason the suite's entry door is hung by face rather than by wallBetween().
+    const { separates } = adjacency(u, v, du, dv, suite.rooms);
+    out.push({ id: `p${n++}`, u, v, du, dv, kind, between, separates, perimeter: true });
   };
 
   const facing = (uu: number, vv: number) =>
@@ -246,7 +264,7 @@ function perimeterWalls(suite: Suite, startId: number): Wall[] {
   // attribute the party wall and the bump faces to whichever rooms touch them
   for (const w of out) {
     if (w.between.length === 0) {
-      w.between = neighbours(w.u, w.v, w.du, w.dv, suite.rooms);
+      w.between = adjacency(w.u, w.v, w.du, w.dv, suite.rooms).between;
     }
   }
   return out;
@@ -271,37 +289,70 @@ function classify(): WallKind {
 }
 
 /**
- * Which rooms this band separates.
+ * Which rooms a band touches, and which pairs it actually divides.
  *
  * Sampled along the band's whole length, not just at its midpoint. Bands merge:
  * the partition between the hall and the rooms west of it is one band running
  * past bedroom A, the bathroom and bedroom B. A midpoint-only probe reported
  * whichever room happened to sit at the middle and silently lost the others,
  * which broke every wallBetween() lookup. Caught by the bathroom-door test.
+ *
+ * Widening that probe to the whole length fixed the lost rooms and introduced the
+ * opposite error: `between` then listed rooms that merely sit beside a long band,
+ * so a lookup by membership matched bands that divide nothing. Hence the second
+ * return value. A pair is recorded only when the two rooms answer the probe on
+ * OPPOSITE faces at the SAME point along the band, which is what "divides" means
+ * and what membership in a set cannot express.
  */
-function neighbours(u: number, v: number, du: number, dv: number, rooms: Rect[]): string[] {
+function adjacency(
+  u: number,
+  v: number,
+  du: number,
+  dv: number,
+  rooms: Rect[],
+): { between: string[]; separates: [string, string][] } {
   const probe = 0.05;
-  const found = new Set<string>();
   const step = 0.25;
+  const found = new Set<string>();
+  const pairs = new Set<string>();
 
+  const at = (pu: number, pv: number) => rooms.find((x) => contains(x, pu, pv))?.id;
+
+  const record = (lo: string | undefined, hi: string | undefined) => {
+    if (lo) found.add(lo);
+    if (hi) found.add(hi);
+    if (!lo || !hi || lo === hi) return;
+    // Sorted so a pair is one key whichever face the probe found first.
+    pairs.add([lo, hi].sort().join(" "));
+  };
+
+  // Across the band's thickness at each step along its length. Which axis is
+  // which depends on the band's shape, so probe both; a band is thin in one of
+  // them and the other loop contributes nothing.
   for (let t = step / 2; t < dv; t += step) {
-    for (const pu of [u - probe, u + du + probe]) {
-      const r = rooms.find((x) => contains(x, pu, v + t));
-      if (r) found.add(r.id);
-    }
+    record(at(u - probe, v + t), at(u + du + probe, v + t));
   }
   for (let t = step / 2; t < du; t += step) {
-    for (const pv of [v - probe, v + dv + probe]) {
-      const r = rooms.find((x) => contains(x, u + t, pv));
-      if (r) found.add(r.id);
-    }
+    record(at(u + t, v - probe), at(u + t, v + dv + probe));
   }
-  return [...found].sort();
+
+  return {
+    between: [...found].sort(),
+    separates: [...pairs].map((k) => k.split(" ") as [string, string]),
+  };
 }
 
-/** The wall band separating two rooms, if there is exactly one. */
+/**
+ * The wall band dividing two rooms.
+ *
+ * Searches `separates`, not `between`. See the Wall type for why that matters:
+ * searching `between` returned a band that merely runs past both rooms, which put
+ * four of five interior doors in the wrong wall.
+ */
 export function wallBetween(walls: Wall[], a: string, b: string): Wall | undefined {
-  return walls.find((w) => w.between.includes(a) && w.between.includes(b));
+  return walls.find((w) =>
+    w.separates.some(([x, y]) => (x === a && y === b) || (x === b && y === a)),
+  );
 }
 
 /** The wall band on a room's facade or gable face. */
@@ -342,8 +393,16 @@ function buildOpenings(suite: Suite, walls: Wall[]): Opening[] {
   // K opens off the common room. That is what "attached to the common room"
   // means, and it is the only reading the geometry allows.
   door("common1", "k", 3);
-  // Closets are reached from the hall.
-  door("hall", "closets", 2.5);
+  // No door into the unknown strip beside the bathroom, deliberately. Its use is
+  // not known, so whose door it would be is not known either; see unreachableRooms
+  // in rooms.ts, which is told to exempt kind "unknown" for the same reason.
+  //
+  // `door()` returning silently when wallBetween finds nothing is what let this go
+  // unnoticed before: the bathroom did not touch the hall, so door("hall","bath")
+  // should have produced nothing, and it only produced something because
+  // wallBetween matched a band that divides nothing. The silence is still right --
+  // a slider can legitimately close a room to zero -- but the tests below now
+  // assert the door COUNT rather than trusting the call to have worked.
 
   // The suite entry sits in the hall's inner wall, toward its south end, which
   // is where the stair hall is.
