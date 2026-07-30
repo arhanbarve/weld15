@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "plan": "node scripts/emit-plan.mjs > design/weld15-plan.svg && node scripts/emit-layout.mjs"
   },
   "dependencies": {
     "next": "16.2.12",
