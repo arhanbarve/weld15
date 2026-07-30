@@ -225,3 +225,34 @@ button,
   font-size: 0.8125rem;
   min-height: 44px;
 }
+
+/* ---------- P3 cyanotype chrome ---------- */
+
+/* A radial vignette in the DOM rather than a post-processing pass: same look,
+   no frame-time cost, and it keeps the composer to a single bloom. */
+.vignette {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-canvas);
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 42%,
+    rgba(4, 20, 38, 0.55) 100%
+  );
+}
+
+/* Weld's label sits on a solid chip, never on the gradient: MASTER.md requires
+   text over the void to have its own ground. */
+.weld-chip {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--ink-scan);
+  background: var(--chip-scan);
+  border: 1px solid var(--mark);
+  border-radius: 1px;
+  padding: 0.25rem 0.5rem;
+}

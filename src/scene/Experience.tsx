@@ -8,6 +8,8 @@ import { Globe } from "./Globe";
 import { Campus } from "./Campus";
 import { WeldExterior } from "./WeldExterior";
 import { Suite } from "./Suite";
+import { Effects } from "./Effects";
+import { Perf } from "./Perf";
 import { Hud } from "@/ui/Hud";
 
 /**
@@ -46,13 +48,17 @@ export default function Experience() {
           <directionalLight position={[-500, 400, -900]} intensity={0.55} />
 
           <CameraRig />
+          <Perf />
 
           <Globe visible={vis.globe} />
           <Campus visible={vis.campus} highlightWeld={stage >= 2} />
           <WeldExterior visible={vis.weld} opacity={shell} />
           <Suite visible={vis.interior} opacity={interior} params={params} />
+
+          <Effects />
         </Canvas>
       </div>
+      <div className="vignette" aria-hidden="true" />
       <Hud />
     </>
   );
