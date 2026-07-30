@@ -102,6 +102,13 @@
  */
 
 import { placeIsLegal, type Box } from "@/geo/collide";
+// A value import out of src/scene, which for every other module in src/state would
+// be the layering mistake this project has already paid for twice. cutaway.ts is the
+// exception and says so in its own header: it is deliberately three-free, for exactly
+// the reason that matters here -- so that the modules which have to run in plain node
+// can name a cutaway mode without dragging the renderer in behind it. Checked rather
+// than assumed: its imports are @/geo/place, @/geo/rooms and two type-only ones.
+import { CUTAWAY_MODES, type CutawayMode } from "@/scene/cutaway";
 import { SIZES, layout, pieceBox, type FurnitureKind, type Piece } from "@/geo/furniture";
 import { MAX_SECTION_LENGTH } from "@/geo/place";
 import {
@@ -129,9 +136,14 @@ import type { StageId } from "@/state/store";
  *     SuiteParams holds them yet, and a field no reducer reads is a field the
  *     round-trip test would be the only consumer of. They belong to G1/H.
  *   - `day: string` is `date: string`, which is what store.ts calls it.
- *   - `cutaway` is a boolean, not a CutawayMode, because that is what the store
- *     holds today. F3 owns the four-mode type; widening this to it is a one-line
- *     change to KINDS-style table plus the flags bit.
+ *   - `cutaway` WAS a boolean, because that is what the store held when this was
+ *     written. It is now the CutawayMode F3 owns, and the widening cost what this
+ *     comment predicted: two bits of the flags field instead of one, and the
+ *     mode's index into CUTAWAY_MODES rather than a truth value. VERSION is
+ *     unchanged, and that is a statement about the world rather than laziness --
+ *     url.ts was untracked and no deployed build carried an encoder, so there is
+ *     no link in existence that the old spelling could have produced. The next
+ *     format change will not have that excuse and must bump it.
  *   - `t` and `orbit` are added. Both are in the store and both are part of what
  *     you are looking at: t is the descent's progress through stage 4, orbit is
  *     where the camera stands in stage 3. A link that dropped them would reopen
@@ -147,7 +159,7 @@ export type Snapshot = {
   t: number;
   params: SuiteParams;
   pieces: Piece[];
-  cutaway: boolean;
+  cutaway: CutawayMode;
   /** Decimal hours of Cambridge wall clock, 0..24. */
   hour: number;
   /** Civil date, "YYYY-MM-DD". */
@@ -171,8 +183,8 @@ export const SNAPSHOT_PARAM = "s";
 //   u8    version                      must be 1
 //   uint  stage                        0..5
 //   uint  t                            thousandths
-//   uint  flags                        bit0 cutaway, bit1 facade=west,
-//                                      bit2 wingStep, bit3 orbit present
+//   uint  flags                        bits0-1 cutaway mode index, bit2 facade=west,
+//                                      bit3 wingStep, bit4 orbit present
 //   uint  hour                         minutes
 //   int   date                         days since 1970-01-01, UTC
 //   int   x15                          params lengths, inches, in LENGTH_KEYS order
@@ -224,6 +236,24 @@ const MAX_DAYS = 100_000;
 
 const YAWS = [0, 90, 180, 270] as const;
 const STAGE_IDS = [0, 1, 2, 3, 4, 5] as const satisfies readonly StageId[];
+
+/**
+ * The two low bits of the flags field, holding the cutaway mode's index.
+ *
+ * Guarded at import rather than trusted, because the failure would otherwise be
+ * silent and shaped exactly like the bugs this file is written against: a fifth
+ * mode's index is 4, which is 0b100, which sets the FACADE bit and comes back as a
+ * suite that has quietly turned round to face the other way. There is no cheap type
+ * that says "this tuple has at most four members", so this is a throw at module load
+ * -- loud, once, on the developer's own machine, and impossible to get past.
+ */
+const MODE_MASK = 0b11;
+if (CUTAWAY_MODES.length > MODE_MASK + 1) {
+  throw new Error(
+    `url.ts: ${CUTAWAY_MODES.length} cutaway modes will not fit two flag bits. ` +
+      `Widen MODE_MASK and the flags layout, and bump VERSION.`,
+  );
+}
 
 /**
  * Order matters and completeness matters more, so both tables are declared as a
@@ -306,7 +336,7 @@ export const DEFAULT_SNAPSHOT: Snapshot = {
     u: Math.round(p.u * PER_FOOT) / PER_FOOT,
     v: Math.round(p.v * PER_FOOT) / PER_FOOT,
   })),
-  cutaway: false,
+  cutaway: "none",
   hour: 9,
   date: "2026-09-15",
   orbit: null,
@@ -398,7 +428,7 @@ export function decode(q: string): Snapshot | null {
     const stage = pick(STAGE_IDS, getUint(r));
     const t = getUint(r) / PER_UNIT;
     const flags = getUint(r);
-    if (flags > 0b1111) return null;
+    if (flags > 0b11111) return null;
     const hour = getUint(r) / PER_HOUR;
     const date = daysToDate(getInt(r));
 
@@ -406,12 +436,12 @@ export function decode(q: string): Snapshot | null {
     for (const k of LENGTH_KEYS) lengths[k] = getInt(r) / PER_FOOT;
     const params: SuiteParams = {
       ...lengths,
-      facade: flags & 0b0010 ? "west" : "east",
-      wingStep: (flags & 0b0100) !== 0,
+      facade: flags & 0b00100 ? "west" : "east",
+      wingStep: (flags & 0b01000) !== 0,
     };
 
     const orbit: Orbit | null =
-      flags & 0b1000
+      flags & 0b10000
         ? {
             azimuthDeg: getInt(r) / PER_CENTI,
             polarDeg: getUint(r) / PER_CENTI,
@@ -452,7 +482,16 @@ export function decode(q: string): Snapshot | null {
     // trailer already proves nobody appended by accident.
     if (r.at !== body.length) return null;
 
-    const s: Snapshot = { stage, t, params, pieces, cutaway: (flags & 1) !== 0, hour, date, orbit };
+    const s: Snapshot = {
+      stage,
+      t,
+      params,
+      pieces,
+      cutaway: pick(CUTAWAY_MODES, flags & MODE_MASK),
+      hour,
+      date,
+      orbit,
+    };
     validate(s, suite);
     return s;
   } catch {
@@ -520,7 +559,7 @@ function validate(s: Snapshot, suite: Suite): void {
   if (!(STAGE_IDS as readonly number[]).includes(s.stage)) reject();
   if (!inRange(s.t, 0, 1)) reject();
   if (!inRange(s.hour, 0, 24)) reject();
-  if (typeof s.cutaway !== "boolean") reject();
+  if (!CUTAWAY_MODES.includes(s.cutaway)) reject();
   dateToDays(s.date);
 
   if (s.orbit) {
@@ -584,11 +623,15 @@ function ordinalOf(p: Piece): number {
 }
 
 function flagsOf(s: Snapshot): number {
+  const mode = CUTAWAY_MODES.indexOf(s.cutaway);
+  // -1 & MODE_MASK is 3, so an unknown mode would encode as "section" rather than
+  // fail. Refusing is the only answer that cannot lie about what the sender saw.
+  if (mode < 0) reject();
   return (
-    (s.cutaway ? 0b0001 : 0) |
-    (s.params.facade === "west" ? 0b0010 : 0) |
-    (s.params.wingStep ? 0b0100 : 0) |
-    (s.orbit ? 0b1000 : 0)
+    mode |
+    (s.params.facade === "west" ? 0b00100 : 0) |
+    (s.params.wingStep ? 0b01000 : 0) |
+    (s.orbit ? 0b10000 : 0)
   );
 }
 

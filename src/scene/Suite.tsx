@@ -1,12 +1,17 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 // three-stdlib exports the older name; three's own copy calls it mergeGeometries.
 import { mergeBufferGeometries } from "three-stdlib";
 import { buildSuite, type Rect, type SuiteParams } from "@/geo/rooms";
 import { buildWalls, suiteFootprint, type Opening, type Wall } from "@/geo/walls";
 import { suiteToThree, floorLevel } from "@/geo/place";
+import type { Piece } from "@/geo/furniture";
+import type { DragResult } from "@/geo/drag";
+import { hiddenWalls, type CutawayMode } from "./cutaway";
+import { DragLayer } from "./DragLayer";
 import { materials, scaleFloorUv } from "./materials";
 import { Furniture } from "./Furniture";
 
@@ -374,7 +379,7 @@ type SuiteGeometry = {
  * The whole interior as at most seven geometries, grouped by the material each
  * needs rather than by what part of the building it is.
  */
-function buildSuiteGeometry(params: SuiteParams): SuiteGeometry {
+function buildSuiteGeometry(params: SuiteParams, hidden: ReadonlySet<string>): SuiteGeometry {
   const suite = buildSuite(params);
   const { walls, openings } = buildWalls(suite);
   const { yaw } = suiteBasis(params);
@@ -405,6 +410,12 @@ function buildSuiteGeometry(params: SuiteParams): SuiteGeometry {
   const masonry: Slab[] = [];
   const panes: Slab[] = [];
   for (const w of walls) {
+    // A hidden wall is not drawn at all rather than drawn transparent, and its glazing
+    // goes with it. Transparency would leave the pane hanging in mid-air where the
+    // wall was, and would still cost the draw call and the depth sort that the merge
+    // above exists to avoid. cutaway.ts's hysteresis is what stops this rebuilding on
+    // alternate frames as the camera crosses a wall's plane.
+    if (hidden.has(w.id)) continue;
     const cuts = cutsFor(w, openings, wallH);
     const target = w.kind === "exterior" ? masonry : partitions;
     target.push(...wallSlabs(w, cuts, floor, wallH));
@@ -501,29 +512,113 @@ function useSuitePalette(opacity: number) {
   return pal;
 }
 
+const NO_WALLS: ReadonlySet<string> = new Set();
+
+/**
+ * Callbacks for a Suite mounted without an editor above it.
+ *
+ * Module constants rather than inline arrows, so that a Suite rendered read-only --
+ * which is every stage before 5, and every test that mounts it for its geometry -- does
+ * not hand DragLayer a new function identity on every render and defeat its memos.
+ */
+const NO_SELECT = () => {};
+const NO_RESULT = () => {};
+
+/** Two sets of wall ids, compared by content. */
+function sameWalls(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const id of a) if (!b.has(id)) return false;
+  return true;
+}
+
+/**
+ * Which walls the cutaway is currently hiding, from where the camera actually is.
+ *
+ * The camera position is read per frame because that is the only place it exists --
+ * CameraRig writes it directly onto the three.js camera, so there is no store field to
+ * subscribe to. What must NOT happen per frame is a React render, and that is what the
+ * set comparison is for: hiddenWalls() returns a fresh Set every call, so handing it
+ * straight to useState would re-render sixty times a second and rebuild every wall
+ * geometry with it.
+ *
+ * The previous set is fed back in, which is what arms cutaway.ts's hysteresis: a
+ * dropped wall stays dropped until the camera is WALL_HOLD_FT past its plane. Without
+ * that feedback a camera sitting exactly on a wall's plane would flicker it on and off
+ * on alternate frames, and each flip would rebuild the merged geometry.
+ */
+function useHiddenWalls(
+  walls: Wall[],
+  mode: CutawayMode,
+  params: SuiteParams,
+): ReadonlySet<string> {
+  const [hidden, setHidden] = useState<ReadonlySet<string>>(NO_WALLS);
+  const live = useRef<ReadonlySet<string>>(NO_WALLS);
+
+  useFrame(({ camera }) => {
+    const next = hiddenWalls(
+      walls,
+      mode,
+      [camera.position.x, camera.position.y, camera.position.z],
+      params,
+      live.current,
+    );
+    if (sameWalls(next, live.current)) return;
+    live.current = next;
+    setHidden(next);
+  });
+
+  return hidden;
+}
+
 /**
  * Weld 15's interior.
  *
- * `ceiling` is a prop with a default rather than a store read, because the store
- * has no cutaway field yet and the integrator adds it; wiring it here would make
- * this file wait on theirs.
+ * `cutaway` arrives as a mode rather than as a boolean, and `pieces` as an
+ * arrangement rather than being derived: both are store state now, which is what P6
+ * bought. The ceiling comes off for every mode except "none" -- not only for
+ * "roofOff" -- because a wall dropped by wallsDown or a plane taken out by section
+ * still leaves you looking into a room through a lid if the plate stays up.
  */
 export function Suite({
   visible,
   opacity,
   params,
-  ceiling = true,
+  pieces,
+  cutaway = "none",
   furniture = true,
+  edit = false,
+  selected = null,
+  onSelect,
+  onResult,
+  onHiddenWalls,
 }: {
   visible: boolean;
   opacity: number;
   params: SuiteParams;
-  /** Off for the roof-off cutaway. */
-  ceiling?: boolean;
+  /** The arrangement, from the store. */
+  pieces: Piece[];
+  cutaway?: CutawayMode;
   furniture?: boolean;
+  /** Whether the pointer can pick up and move a piece. */
+  edit?: boolean;
+  selected?: string | null;
+  onSelect?: (id: string | null) => void;
+  onResult?: (id: string, r: DragResult) => void;
+  /** Reported upward so the HUD can say what is currently hidden. */
+  onHiddenWalls?: (ids: ReadonlySet<string>) => void;
 }) {
-  const geo = useMemo(() => buildSuiteGeometry(params), [params]);
+  const shape = useMemo(() => {
+    const suite = buildSuite(params);
+    return { suite, ...buildWalls(suite) };
+  }, [params]);
+  const hidden = useHiddenWalls(shape.walls, cutaway, params);
+  const ceiling = cutaway === "none";
+  const geo = useMemo(() => buildSuiteGeometry(params, hidden), [params, hidden]);
   const pal = useSuitePalette(opacity);
+
+  useEffect(() => {
+    onHiddenWalls?.(hidden);
+  }, [hidden, onHiddenWalls]);
 
   useEffect(() => {
     return () => {
@@ -546,7 +641,27 @@ export function Suite({
       {geo.ceiling ? (
         <mesh geometry={geo.ceiling} material={pal.plaster} visible={ceiling} />
       ) : null}
-      {furniture ? <Furniture opacity={opacity} params={params} yaw={geo.yaw} /> : null}
+      {furniture ? (
+        <Furniture opacity={opacity} params={params} yaw={geo.yaw} pieces={pieces} />
+      ) : null}
+      {/* The drag layer is mounted HERE and not in Experience, because DragLayer's
+          contract is that its suite, openings, pieces and yaw all describe the same
+          params -- drag.ts throws if an opening names a wall the suite has not got.
+          This component already holds all four for one `params`, so passing them from
+          one place is what makes disagreement impossible rather than merely unlikely.
+          `shape` and `geo.yaw` come from the same memo chain the walls were built
+          from. */}
+      <DragLayer
+        enabled={edit && visible && opacity > 0.99}
+        params={params}
+        suite={shape.suite}
+        pieces={pieces}
+        openings={shape.openings}
+        yaw={geo.yaw}
+        selected={selected}
+        onSelect={onSelect ?? NO_SELECT}
+        onResult={onResult ?? NO_RESULT}
+      />
     </group>
   );
 }

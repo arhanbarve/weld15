@@ -3,6 +3,7 @@ import { GRID, footprintOf, placeIsLegal } from "@/geo/collide";
 import { SIZES, layout, pieceBox, type FurnitureKind, type Piece } from "@/geo/furniture";
 import { buildSuite, DEFAULT_PARAMS, type Suite, type SuiteParams } from "@/geo/rooms";
 import { MAX_SECTION_LENGTH } from "@/scene/weldGeometry";
+import { CUTAWAY_MODES, type CutawayMode } from "@/scene/cutaway";
 import { useStore } from "@/state/store";
 import { DEFAULT_SNAPSHOT, SNAPSHOT_PARAM, decode, encode, type Snapshot } from "@/state/url";
 
@@ -136,7 +137,7 @@ function randomSnapshot(rnd: Rnd): Snapshot {
     t: intIn(rnd, 0, 1000) / 1000,
     params,
     pieces: randomPieces(rnd, buildSuite(params)),
-    cutaway: rnd() < 0.5,
+    cutaway: pickOne(rnd, CUTAWAY_MODES),
     hour: intIn(rnd, 0, 1440) / 60,
     date: dateOf(intIn(rnd, -25_000, 25_000)),
     orbit:
@@ -164,13 +165,16 @@ const defaultSuite = buildSuite();
 const onLattice = (pieces: Piece[]): Piece[] =>
   pieces.map((p) => ({ ...p, u: Math.round(p.u * 12) / 12, v: Math.round(p.v * 12) / 12 }));
 
-/** A full snapshot: every room furnished, the camera parked, the roof off. */
+/** A full snapshot: every room furnished, the camera parked, one wall dropped. */
 const realistic: Snapshot = {
   stage: 5,
   t: 1,
   params: DEFAULT_PARAMS,
   pieces: onLattice(layout(defaultSuite)),
-  cutaway: true,
+  // Not "none" and not the last mode either: an index of 2 has a bit set that a
+  // boolean flag never did, so this fixture exercises the widened field rather
+  // than agreeing with the old one by accident.
+  cutaway: "wallsDown",
   hour: 17.5,
   date: "2026-12-21",
   orbit: { azimuthDeg: -113.25, polarDeg: 42.5, radius: 121.75 },
@@ -229,7 +233,7 @@ describe("round trip", () => {
       wingStep: new Set<boolean>(),
       orbit: new Set<boolean>(),
       stages: new Set<number>(),
-      cutaway: new Set<boolean>(),
+      cutaway: new Set<CutawayMode>(),
     };
     let minSection = Infinity;
     let maxSection = -Infinity;
@@ -263,7 +267,10 @@ describe("round trip", () => {
     expect(seen.facades, "both facades").toEqual(new Set(["east", "west"]));
     expect(seen.wingStep).toEqual(new Set([true, false]));
     expect(seen.orbit, "orbit both null and set").toEqual(new Set([true, false]));
-    expect(seen.cutaway).toEqual(new Set([true, false]));
+    // All four modes, not "at least two". The field is two bits wide now, and a
+    // sweep that only ever saw "none" and "roofOff" would leave the high bit --
+    // the one that overlaps where the facade flag used to live -- untested.
+    expect(seen.cutaway, "every cutaway mode").toEqual(new Set(CUTAWAY_MODES));
     expect(seen.stages.size, "every stage").toBe(6);
     // Section lengths across the legal range, up to Weld's waist.
     expect(minSection).toBeLessThan(45);
@@ -557,6 +564,27 @@ const onePiece: Snapshot = { ...realistic, pieces: [layout(defaultSuite)[0]!] };
 const noPieces: Snapshot = { ...realistic, pieces: [] };
 const COUNT_AT = bodyOf(noPieces).length - 1;
 
+/**
+ * Where the flags byte is, derived the same way and for a sharper reason.
+ *
+ * It was assumed to be byte 3 -- version, stage, t, flags, one byte each -- and that
+ * was wrong: `realistic.t` is 1, which is 1000 thousandths, which is a TWO byte
+ * varint, so byte 3 is the high half of t. The flag test that used index 3 therefore
+ * passed by pushing t out of its 0..1 range and being rejected for that instead. It
+ * is the same class of error the whole file is written against, and the fix is the
+ * same one COUNT_AT already uses: ask the encoder.
+ *
+ * Two snapshots differing only in their cutaway mode differ only in the flags byte,
+ * and both remain one byte because the field's largest value is 0b11111. The
+ * assertions below are what make that a derivation rather than a second guess.
+ */
+const FLAGS_AT = (() => {
+  const none = bodyOf({ ...realistic, cutaway: "none" });
+  const section = bodyOf({ ...realistic, cutaway: "section" });
+  const at = none.findIndex((b, i) => b !== section[i]);
+  return at;
+})();
+
 describe("decode is total", () => {
   it("agrees with the encoder about where the piece block starts", () => {
     // If this drifts the surgery below stops being attributable, so it is
@@ -663,9 +691,27 @@ describe("decode is total", () => {
     expect(decode(sign(badVersion))).toBe(null);
     // Unused flag bits. A hand-edit that sets one is not a string this version
     // wrote, and quietly ignoring it would make the format silently extensible.
+    // The flags byte is where the encoder says it is, not where the byte layout
+    // comment suggests. See FLAGS_AT.
+    const none = bodyOf({ ...realistic, cutaway: "none" });
+    const section = bodyOf({ ...realistic, cutaway: "section" });
+    expect(none.length, "a mode change moves no other byte").toBe(section.length);
+    expect(none.filter((b, i) => b !== section[i]).length, "exactly one byte").toBe(1);
+    expect(FLAGS_AT).toBeGreaterThan(0);
+
     const badFlags = [...body];
-    badFlags[3] = badFlags[3]! | 0b10000;
+    badFlags[FLAGS_AT] = badFlags[FLAGS_AT]! | 0b100000;
     expect(decode(sign(badFlags))).toBe(null);
+    // Non-vacuity for the line above: a decoder that refused EVERY flags byte it
+    // had not written itself would pass it. So each of the four values the low two
+    // bits can hold has to come back as its own mode, which also pins the order of
+    // CUTAWAY_MODES into the wire format -- reordering that list changes what every
+    // existing link means, and this is where that would be caught.
+    CUTAWAY_MODES.forEach((mode, i) => {
+      const bits = [...body];
+      bits[FLAGS_AT] = (bits[FLAGS_AT]! & ~0b11) | i;
+      expect(decode(sign(bits))?.cutaway, `mode index ${i}`).toBe(mode);
+    });
   });
 
   it("returns null for a piece in a room that does not exist", () => {

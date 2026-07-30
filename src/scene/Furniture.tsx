@@ -2,8 +2,8 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { buildSuite, type SuiteParams } from "@/geo/rooms";
-import { layout, pieceBox, MATTRESS, SIZES, type FurnitureKind } from "@/geo/furniture";
+import { type SuiteParams } from "@/geo/rooms";
+import { pieceBox, MATTRESS, SIZES, type FurnitureKind, type Piece } from "@/geo/furniture";
 import { suiteToThree, floorLevel } from "@/geo/place";
 import { materials } from "./materials";
 
@@ -163,20 +163,29 @@ function Batch({
 /**
  * The fit-out for a suite.
  *
- * `beds` is not a prop: occupancy is furniture.ts's default of four, from the
- * housing assignment in docs/DIMENSION-AUDIT.md, and there is no store field for it
- * to come from yet.
+ * `pieces` is a PROP and no longer a call to layout() inside this component's own
+ * render, and that one change is what made the model changeable. While the
+ * arrangement was a pure function of the params there was nowhere for a drag to be
+ * recorded -- any move would have been recomputed away on the next render. The store
+ * owns the arrangement now, seeded from layout() once, and this component draws what
+ * it is handed.
+ *
+ * So occupancy is not this file's business either. It is store.ts's `occupancy`, and
+ * refit() is the act that applies it.
  */
 export function Furniture({
   opacity,
   params,
   yaw,
+  pieces,
   visible = true,
 }: {
   opacity: number;
   params: SuiteParams;
   /** The suite yaw from suiteBasis(). See boxMatrix() for why it is a prop. */
   yaw: number;
+  /** The arrangement to draw, from the store. */
+  pieces: Piece[];
   visible?: boolean;
 }) {
   const pal = useFurniturePalette(opacity);
@@ -189,7 +198,6 @@ export function Furniture({
   }, [box]);
 
   const batches = useMemo(() => {
-    const pieces = layout(buildSuite(params));
     const floor = floorLevel(1);
 
     // Keyed off SIZES rather than a second list of kinds, so a kind added to
@@ -221,7 +229,7 @@ export function Furniture({
     }
 
     return { byKind: [...byKind].filter(([, m]) => m.length > 0), bedding };
-  }, [params, yaw]);
+  }, [params, yaw, pieces]);
 
   if (opacity <= 0.001) return null;
 

@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { STAGES, useStore, type StageId } from "@/state/store";
+import { LAST_STAGE, STAGES, useStore, type StageId } from "@/state/store";
 import { STAGE3_CLAMP, clampOrbit, orbitOf, type Orbit } from "@/scene/orbit";
 import { keyframes } from "@/scene/stages";
+import type { NudgeDir } from "@/geo/drag";
+import { UrlSync } from "./UrlSync";
 
 /**
  * Stage scrubber, stage name, the daylight controls, the stage-3 orbit keys, and
@@ -155,6 +157,28 @@ const NUDGE_BY_KEY: Record<string, Nudge> = Object.fromEntries(
 );
 
 /**
+ * Arrow keys to a piece move, in the SUITE frame.
+ *
+ * u is inward from the facade and v is north along the section, so the mapping to
+ * screen arrows is a choice and it is made here once. Up and down are v, because the
+ * section is the long axis and the camera at stage 5 looks along it; left and right are
+ * u. The pointer path lands in the same coordinates through cameraInSuite(), so the two
+ * inputs move a piece the same way.
+ *
+ * `r` rotates. A quarter turn is drag.ts's tryRotate() and it is on a letter rather
+ * than on a modified arrow because a modifier plus an arrow is a screen-reader
+ * shortcut on more than one platform.
+ */
+const PIECE_KEYS: Record<string, NudgeDir | "rotate"> = {
+  ArrowUp: "v+",
+  ArrowDown: "v-",
+  ArrowRight: "u+",
+  ArrowLeft: "u-",
+  r: "rotate",
+  R: "rotate",
+};
+
+/**
  * Apply one press to the orbit.
  *
  * The orbit is read from the store HERE rather than taken from a render, for the
@@ -218,8 +242,7 @@ export function Hud() {
   const hour = useStore((s) => s.hour);
   const setDate = useStore((s) => s.setDate);
   const setHour = useStore((s) => s.setHour);
-  const cutaway = useStore((s) => s.cutaway);
-  const setCutaway = useStore((s) => s.setCutaway);
+  const selected = useStore((s) => s.selected);
   const params = useStore((s) => s.params);
   const orbit = useStore((s) => s.orbit);
   const setOrbit = useStore((s) => s.setOrbit);
@@ -250,8 +273,45 @@ export function Hud() {
     return () => window.clearTimeout(id);
   }, [stage, orbit]);
 
+  /**
+   * Arrow keys move the SELECTED PIECE, once there is one and once the room is on
+   * screen.
+   *
+   * On the window rather than on a container, because the piece being moved is in the
+   * canvas and the canvas cannot hold focus meaningfully -- there is nothing inside it
+   * to focus. That makes the two guards below load-bearing rather than defensive:
+   *
+   *   the stage gate  arrow keys belong to the orbit group at stage 3, which handles
+   *                   them on its own element. Two handlers claiming ArrowLeft would
+   *                   orbit the camera AND move a bed on one press.
+   *   the target gate a range input uses arrows to change its own value, and every
+   *                   dimension in the panel is a range input. Claiming the key while
+   *                   one has focus would make the sliders unusable by keyboard, which
+   *                   is the exact accessibility failure this project keeps finding.
+   *
+   * It calls the same nudge() the panel's buttons call, which is the same nudge()
+   * drag.ts exports -- one code path, three inputs. docs/phases/P6.md's risk table
+   * names "keyboard path is an afterthought" and this is the mitigation it asks for.
+   */
+  useEffect(() => {
+    if (stage !== LAST_STAGE || !selected) return;
+    const onKey = (e: KeyboardEvent) => {
+      const dir = PIECE_KEYS[e.key];
+      if (!dir) return;
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || el?.isContentEditable) return;
+      e.preventDefault();
+      if (dir === "rotate") useStore.getState().rotate(selected);
+      else useStore.getState().nudge(selected, dir);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [stage, selected]);
+
   return (
     <>
+      <UrlSync />
       <button className="skip" onClick={skip} data-testid="skip">
         Skip to the room
       </button>
@@ -384,35 +444,17 @@ export function Hud() {
           </span>
         </label>
 
-        {/* Roof off, and only where it does something.
+        {/* The cutaway control used to live here as a single roof-on/roof-off toggle,
+            gated to stage 5 because that was the only stage where it did anything --
+            measured, stage by stage, on the deployed build: the mean frame luminance
+            moved by 2.73 at stage 5 and by 0.00, 0.00, 0.18, 0.08 and 0.00 at stages 0
+            to 4.
 
-            Measured against the deployed build, stage by stage: the mean frame
-            luminance moves by 2.73 at stage 5 and by 0.00, 0.00, 0.18, 0.08 and 0.00
-            at stages 0 to 4. So for five of the six stages this was a control that
-            changed nothing while looking like it should -- worse than a missing
-            control, because a viewer who presses it concludes the app is broken
-            rather than that the button does not apply.
-
-            The cause is known and is not a bug in the toggle: `cutaway` reaches
-            Suite's `ceiling` prop, and WeldExterior does not read it, so Weld's own
-            roof stays on. Taking the roof off the exterior at stages 2 to 4 is the
-            dollhouse view the label actually promises and it is what P6's cutaway
-            modes are for; hiddenWalls() is being built now. When that lands this gate
-            widens to the stages it then covers. Until then it is honest about its
-            reach. */}
-        {stage === 5 ? (
-          <div className="hud-scrub" role="group" aria-label="Cutaway">
-            <button
-              type="button"
-              onClick={() => setCutaway(!cutaway)}
-              aria-pressed={cutaway}
-              data-testid="roof-off"
-              className={cutaway ? "on" : ""}
-            >
-              {cutaway ? "roof off" : "roof on"}
-            </button>
-          </div>
-        ) : null}
+            It is now four modes in Panel, which owns the radio group, the live-region
+            announcement and the disabled state. There is deliberately no second writer
+            of `cutaway` in this file: two controls over one field is how they come to
+            disagree. The measurement is kept because it is the reason Panel's group is
+            disabled before the interior exists rather than merely inert. */}
       </div>
     </>
   );
