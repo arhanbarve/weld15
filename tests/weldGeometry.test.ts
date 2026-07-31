@@ -2,22 +2,38 @@ import { describe, it, expect } from "vitest";
 import type * as THREE from "three";
 import weld from "@/data/weld.json";
 import { pointInPolygon } from "@/geo/collide";
-import { fromThree, siteToBuilding, normalizeAngle } from "@/geo/frames";
+import { buildingToSite, fromThree, siteToBuilding, toThree, normalizeAngle } from "@/geo/frames";
+import { normalizeRing } from "@/geo/extrude";
 import { buildSuite, DEFAULT_PARAMS, type SuiteParams } from "@/geo/rooms";
 import { buildWalls } from "@/geo/walls";
-import { WELD, CLEAR_HALF_U, GABLE_INNER_V, floorLevel, suiteCornersSite } from "@/geo/place";
+import {
+  WELD,
+  CLEAR_HALF_U,
+  GABLE_INNER_V,
+  floorLevel,
+  suiteCornersSite,
+  suiteToBuilding,
+  suiteToThree,
+} from "@/geo/place";
+import { sectionPlaneU, WALL_HOLD_FT, type CutawayMode } from "@/scene/cutaway";
+import { keyframes } from "@/scene/stages";
 import {
   buildWeld,
+  buildWeldCut,
   bayRects,
   maxSectionLength,
   ringStations,
   narrowLobes,
   towerCentres,
+  weldCut,
   MAX_SECTION_LENGTH,
+  NO_CUT,
   RIDGE_U,
+  ROOF_CUT,
   TOWER_CONTROLS,
   TOWER_DEFAULTS,
   type Station,
+  type WeldCut,
 } from "@/scene/weldGeometry";
 
 /**
@@ -850,3 +866,339 @@ function mulberry32(seed: number): () => number {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+/**
+ * The cutaway, on the shell rather than on the interior.
+ *
+ * P6 shipped four modes that only the interior obeyed: hiddenWalls() took its bands
+ * down and Suite.tsx dropped the ceiling plate, but the 1872 shell stayed shut, so
+ * from outside every mode showed the same opaque brick. These are the assertions for
+ * the other half of it, and they exist because the failures are all invisible in a
+ * screenshot: a shell cut on the wrong side of the plane, a clipped quad wound
+ * inside out, or a part removed by emitting an empty geometry that still costs its
+ * draw call all look like a building until something is counted.
+ *
+ * WHY THE STAGE KEYFRAMES AND NOT A CAMERA INVENTED HERE. Two of the four modes
+ * answer differently from every position, so a synthetic camera would measure a
+ * cutaway that never happens. The two the product actually uses are stage 3, which
+ * is where the dollhouse view has to work, and stage 4, which is the approach; both
+ * are read out of stages.ts, so a keyframe change lands here rather than leaving the
+ * counts in WeldExterior's header quietly stale.
+ */
+describe("the cutaway opens the shell", () => {
+  const MODES: readonly CutawayMode[] = ["none", "roofOff", "wallsDown", "section"];
+  const kf = keyframes(DEFAULT_PARAMS);
+  /** Stage 3: the dollhouse camera, off Weld's south-east quarter. */
+  const STAGE3 = kf[3].position;
+  /** Stage 4: square on the north gable, which is the end the suite is at. */
+  const STAGE4 = kf[4].position;
+
+  /** The ring in the building frame, vertex for vertex with weldGeometry's own LOOP. */
+  const loopB = normalizeRing(RING)
+    .slice(0, -1)
+    .map((p) => siteToBuilding({ x: p[0]!, y: p[1]! }));
+  const N = loopB.length;
+
+  /** A camera at a building-frame point, in three.js world space. */
+  function camAt(u: number, v: number, y: number): [number, number, number] {
+    const s = buildingToSite({ u, v });
+    return toThree(s.x, s.y, y);
+  }
+
+  function cutFor(mode: CutawayMode, camera: [number, number, number]): WeldCut {
+    return weldCut(mode, camera, DEFAULT_PARAMS);
+  }
+
+  function massesFor(cut: WeldCut) {
+    return buildWeldCut(DEFAULT_PARAMS, TOWER_DEFAULTS, cut);
+  }
+
+  const triCount = (g: THREE.BufferGeometry) => g.getIndex()!.count / 3;
+
+  /**
+   * The wall triangles that are NOT the grade cap.
+   *
+   * Selected by "has a vertex off the ground" rather than by index, because the cap is
+   * the one part every mode keeps and it spans the whole footprint -- so any assertion
+   * about where the shell has been cut back to is false of the cap by construction, and
+   * an assertion that quietly included it would be testing the cap instead.
+   */
+  function standing(g: THREE.BufferGeometry): Pt[][] {
+    return triangles(g).filter((t) => t.some((p) => p.y > EPS));
+  }
+
+  /**
+   * The lid: the cap extrude() closes the solid with at the eaves, 60 ft up.
+   *
+   * It is why roofOff needs the shell rebuilt at all rather than just the gable
+   * unmounted -- left up, it is a flat floor over the entire footprint at exactly the
+   * height the roof used to start, and the mode shows no more of the plan than "none".
+   */
+  const lidTris = (g: THREE.BufferGeometry) =>
+    triangles(g).filter((t) => t.every((p) => Math.abs(p.y - WELD.eaves) < EPS)).length;
+  const gradeTris = (g: THREE.BufferGeometry) =>
+    triangles(g).filter((t) => t.every((p) => Math.abs(p.y) < EPS)).length;
+
+  it("keeps all four parts, and every triangle of them, at mode none", () => {
+    const m = massesFor(cutFor("none", STAGE3));
+    expect(Object.values(m).every((g) => g !== null)).toBe(true);
+    // The counts WeldExterior's header quotes as its draw-call budget: 416 triangles
+    // over four meshes. 220 is the 56-edge ring closed at both ends (2 x 54 cap
+    // triangles plus 2 per edge), 112 the gable's fan, 24 two roof features, 60 five
+    // window reveals.
+    expect({
+      walls: triCount(m.walls!),
+      roof: triCount(m.roof!),
+      towers: triCount(m.towers!),
+      bays: triCount(m.bays!),
+    }).toEqual({ walls: 220, roof: 112, towers: 24, bays: 60 });
+    expect(triCount(m.walls!) + triCount(m.roof!) + triCount(m.towers!) + triCount(m.bays!)).toBe(
+      416,
+    );
+  });
+
+  it("removes a part by not emitting it, never by emitting an empty geometry", () => {
+    // Every part gone at once, which no camera produces but which the type allows: the
+    // three that can vanish come back null and the shell survives as its grade cap.
+    // An empty BufferGeometry would be the shorter branch in buildWeldCut and it is not
+    // free -- three's renderer only returns early when the draw count is NEGATIVE, so a
+    // zero-length index still reaches gl.drawElements and still spends a draw call.
+    const everything: WeldCut = {
+      roof: true,
+      walls: new Set(Array.from({ length: N }, (_, i) => i)),
+      bays: new Set(bayRects(DEFAULT_PARAMS).map((_, i) => i)),
+      half: null,
+    };
+    const m = massesFor(everything);
+    expect(m.roof).toBeNull();
+    expect(m.towers).toBeNull();
+    expect(m.bays).toBeNull();
+    // Not null, and not because a wall survived: the grade cap is kept in every mode,
+    // for the reason Suite.tsx keeps the suite's own floors in every mode.
+    expect(m.walls).not.toBeNull();
+    expect(triCount(m.walls!)).toBe(54);
+    expect(standing(m.walls!)).toHaveLength(0);
+  });
+
+  it("costs at most the four meshes it costs at mode none, from either keyframe", () => {
+    // The table in WeldExterior's header, measured. It is a table of DRAW CALLS, so
+    // what is counted is parts that are emitted at all.
+    const parts = (mode: CutawayMode, cam: [number, number, number]) =>
+      Object.values(massesFor(cutFor(mode, cam))).filter((g) => g !== null).length;
+    expect(MODES.map((m) => parts(m, STAGE3))).toEqual([4, 2, 2, 1]);
+    expect(MODES.map((m) => parts(m, STAGE4))).toEqual([4, 2, 2, 1]);
+  });
+
+  it("takes the eaves lid off with the roof and leaves the grade cap on", () => {
+    const whole = massesFor(cutFor("none", STAGE3)).walls!;
+    const opened = massesFor(cutFor("roofOff", STAGE3)).walls!;
+    expect(lidTris(whole)).toBe(54);
+    expect(lidTris(opened)).toBe(0);
+    expect(gradeTris(whole)).toBe(54);
+    expect(gradeTris(opened)).toBe(54);
+    // Nothing else moved: roofOff drops the lid and the two roof masses, and not one
+    // wall quad. 220 - 54 = 166.
+    expect(triCount(opened)).toBe(166);
+    const m = massesFor(cutFor("roofOff", STAGE3));
+    expect(m.roof).toBeNull();
+    expect(m.towers).toBeNull();
+    expect(triCount(m.bays!)).toBe(60);
+  });
+
+  it("answers the two camera-free modes with the same object every time", () => {
+    // Identity, not equality. WeldExterior compares cuts to decide whether to rebuild
+    // the shell, and it checks identity first -- so a fresh object per frame here would
+    // rebuild 220 triangles sixty times a second in the two modes that are the common
+    // case. Both constants are exported for that reason.
+    expect(weldCut("none", STAGE3, DEFAULT_PARAMS)).toBe(NO_CUT);
+    expect(weldCut("roofOff", STAGE3, DEFAULT_PARAMS)).toBe(ROOF_CUT);
+    expect(weldCut("none", STAGE4, DEFAULT_PARAMS)).toBe(NO_CUT);
+    expect(weldCut("roofOff", STAGE4, DEFAULT_PARAMS)).toBe(ROOF_CUT);
+  });
+
+  /**
+   * Outward, re-derived here rather than imported.
+   *
+   * edgeMargin() is private and this is deliberately not a second copy of it: it drops
+   * the along-edge term and keeps only the sign, so it answers the weaker question "is
+   * the camera on the outward side of this edge at all". That is the question a sign
+   * error in the normal gets wrong, and frames.ts warns that such an error mirrors the
+   * building invisibly. A full copy of the margin could only ever agree with itself.
+   */
+  function outwardDot(e: number, cam: { u: number; v: number }): number {
+    const a = loopB[e]!;
+    const b = loopB[(e + 1) % N]!;
+    const du = b.u - a.u;
+    const dv = b.v - a.v;
+    const len = Math.hypot(du, dv);
+    return ((cam.u - a.u) * dv - (cam.v - a.v) * du) / len;
+  }
+
+  const inBuilding = (cam: [number, number, number]) => {
+    const s = fromThree(cam);
+    return siteToBuilding({ x: s.x, y: s.y });
+  };
+
+  it("drops only shell walls the camera is outside, in wallsDown", () => {
+    for (const [label, cam] of [
+      ["stage 3", STAGE3],
+      ["stage 4", STAGE4],
+    ] as const) {
+      const cut = cutFor("wallsDown", cam);
+      const b = inBuilding(cam);
+      expect(cut.walls.size, `${label} drops something`).toBeGreaterThan(0);
+      for (const e of cut.walls) {
+        expect(outwardDot(e, b), `${label} edge ${e} faces the camera`).toBeGreaterThan(0);
+      }
+      expect(cut.roof, `${label} takes the roof too`).toBe(true);
+    }
+  });
+
+  it("holds a dropped wall down for two feet past its own plane", () => {
+    // The Schmitt trigger, exercised by handing weldCut() a previous answer rather than
+    // by driving a camera in the right order -- which is the whole reason `prev` is an
+    // argument. Without it a camera parked on a wall's plane flickers the wall on and
+    // off on alternate frames, and each flip rebuilds the shell.
+    //
+    // The edge is FOUND, not named: the ring is data and an index written down here
+    // would move the day weld.json is re-digitised. One foot outside the north gable
+    // face, at the building's own mid-line, drops three edges; stepping a foot inside
+    // releases exactly the one whose plane was crossed.
+    const gableV = Math.max(...loopB.map((p) => p.v));
+    const outside = cutFor("wallsDown", camAt(0, gableV + 1, 30));
+    const inside = cutFor("wallsDown", camAt(0, gableV - 1, 30));
+    const crossed = [...outside.walls].filter((e) => !inside.walls.has(e));
+    expect(crossed.length, "a foot inside the face releases something").toBeGreaterThan(0);
+
+    const held = weldCut("wallsDown", camAt(0, gableV - 1, 30), DEFAULT_PARAMS, outside);
+    for (const e of crossed) expect(held.walls.has(e), `edge ${e} held`).toBe(true);
+
+    // And released once the camera is WALL_HOLD_FT past, which is what makes this a
+    // hold rather than a wall that never comes back.
+    const past = weldCut(
+      "wallsDown",
+      camAt(0, gableV - (WALL_HOLD_FT + 0.5), 30),
+      DEFAULT_PARAMS,
+      outside,
+    );
+    for (const e of crossed) expect(past.walls.has(e), `edge ${e} released`).toBe(false);
+  });
+
+  it("takes a bay down with the shell wall it is a hole in", () => {
+    // From stage 4 the camera is square on the north gable, so the gable bay's own wall
+    // goes and the bay goes with it. Left standing it is an 8 x 10.75 ft slab of slate
+    // hanging in the hole it was a window in.
+    //
+    // EXACTLY that one, which is the assertion and not a detail. Every other bay is a
+    // facade window whose own wall runs the other way and is still standing, and the
+    // nearest ring edge to bedroom B's south window is an exact 1.870 ft tie between its
+    // facade edge and a 3.1 ft north-facing jog beside it. Attributed to the jog -- which
+    // is what plain distance does -- that window disappears out of a facade that has not
+    // moved. nearestEdge() carries the measurement.
+    const rects = bayRects(DEFAULT_PARAMS);
+    const gableBay = rects.reduce((a, b, i) => (b.v > rects[a]!.v ? i : a), 0);
+    const cut = cutFor("wallsDown", STAGE4);
+    expect([...cut.bays]).toEqual([gableBay]);
+    // The reveals that survive are emitted, and only those: six quads a box, so 12
+    // triangles each.
+    expect(triCount(massesFor(cut).bays!)).toBe((rects.length - cut.bays.size) * 12);
+
+    // From stage 3 the cut does not reach the suite at all, and that is recorded rather
+    // than asserted away. The camera is off the south-east quarter, so what drops is the
+    // SOUTH half of the east facade -- every dropped edge lies south of every bay -- and
+    // the four facade windows keep their wall. It is why the dollhouse view at stage 3
+    // is section's job and not wallsDown's.
+    const far = cutFor("wallsDown", STAGE3);
+    expect(far.bays.size).toBe(0);
+    const droppedV = [...far.walls].flatMap((e) => [loopB[e]!.v, loopB[(e + 1) % N]!.v]);
+    expect(Math.max(...droppedV)).toBeLessThan(Math.min(...rects.map((r) => r.v)));
+  });
+
+  it("cuts the shell back to the section plane, on the camera's side", () => {
+    const planeU = suiteToBuilding(sectionPlaneU(DEFAULT_PARAMS), 0, DEFAULT_PARAMS).u;
+    for (const [label, cam] of [
+      ["stage 3, outside the facade", STAGE3],
+      // Inside, behind the hall: the far half is then the facade half, so this is the
+      // assertion that the cut follows the camera rather than a fixed half. A sign
+      // error that mirrored the plane would pass every test taken from one side.
+      ["inside, behind the hall", camAt(-10, 50, 6)],
+    ] as const) {
+      const cut = cutFor("section", cam);
+      expect(cut.half, `${label} has a plane`).not.toBeNull();
+      expect(cut.half!.u, `${label} plane`).toBeCloseTo(planeU, 6);
+      const keep = cut.half!.keep;
+      // The kept half is the one the camera is NOT in.
+      const camU = inBuilding(cam).u;
+      expect(keep * (camU - planeU), `${label} keeps the far half`).toBeLessThan(0);
+
+      const walls = massesFor(cut).walls!;
+      for (const t of standing(walls)) {
+        for (const p of t) {
+          expect(
+            keep * (p.u - planeU),
+            `${label}: standing wall at u ${p.u.toFixed(2)} is on the camera's side`,
+          ).toBeGreaterThan(-EPS);
+        }
+      }
+      // And it reaches the plane rather than stopping at the last whole edge: the two
+      // ring edges the plane crosses are CUT there, each leaving one column of vertices
+      // exactly on the plane, at grade and at the eaves.
+      const onPlane = standing(walls)
+        .flatMap((t) => t)
+        .filter((p) => Math.abs(p.u - planeU) < EPS);
+      expect(new Set(onPlane.map((p) => `${p.x.toFixed(4)},${p.y.toFixed(4)},${p.z.toFixed(4)}`)).size)
+        .toBe(4);
+      expect(standing(walls), `${label} keeps about half the wall quads`).toHaveLength(58);
+    }
+  });
+
+  it("keeps the bays that are in the half it keeps", () => {
+    // The bays are windows in the suite's own perimeter, and the suite is wholly on the
+    // facade side of the hall's centreline -- so from outside the facade every bay is in
+    // the half that goes, and the reveals are not emitted at all. From behind the hall
+    // the same plane keeps all five. Which is the point: the two answers differ, so this
+    // pins the sign rather than the count.
+    expect(massesFor(cutFor("section", STAGE3)).bays).toBeNull();
+    expect(triCount(massesFor(cutFor("section", camAt(-10, 50, 6))).bays!)).toBe(60);
+  });
+
+  it("hides nothing but the roof from a camera in the cut plane", () => {
+    // Standing in the hall, on the plane itself: neither half is the near one.
+    // hiddenWalls() refuses to pick there rather than flip on a coin toss, and the shell
+    // has to refuse in the same breath or the two cuts disagree about which half of the
+    // building the viewer is in.
+    const onPlane = suiteToThree(sectionPlaneU(DEFAULT_PARAMS), 20, 6, DEFAULT_PARAMS);
+    expect(weldCut("section", onPlane, DEFAULT_PARAMS)).toBe(ROOF_CUT);
+  });
+
+  it("winds every surviving triangle outward, clipped ones included", () => {
+    // The clipped quads are the only geometry in this module that is not extrude()'s
+    // own, and a quad wound the other way is invisible on a DoubleSide material until
+    // the light moves. Compared against the normal the extrusion computed for the whole
+    // edge, which is also the assertion that the clip inherits it rather than
+    // recomputing one that can disagree with its neighbours.
+    for (const cam of [STAGE3, STAGE4]) {
+      for (const mode of MODES) {
+        const m = massesFor(cutFor(mode, cam));
+        for (const [name, g] of Object.entries(m)) {
+          if (g === null) continue;
+          const pos = g.getAttribute("position");
+          const nrm = g.getAttribute("normal");
+          const idx = g.getIndex()!;
+          for (let i = 0; i < idx.count; i += 3) {
+            const a = idx.getX(i);
+            const t: Tri = [point(g, a), point(g, idx.getX(i + 1)), point(g, idx.getX(i + 2))];
+            const ax = t[1].x - t[0].x, ay = t[1].y - t[0].y, az = t[1].z - t[0].z;
+            const bx = t[2].x - t[0].x, by = t[2].y - t[0].y, bz = t[2].z - t[0].z;
+            const cx = ay * bz - az * by, cy = az * bx - ax * bz, cz = ax * by - ay * bx;
+            const len = Math.hypot(cx, cy, cz);
+            expect(len, `${mode}/${name} triangle ${i / 3} is degenerate`).toBeGreaterThan(1e-6);
+            const dot = (cx * nrm.getX(a) + cy * nrm.getY(a) + cz * nrm.getZ(a)) / len;
+            expect(dot, `${mode}/${name} triangle ${i / 3} winding`).toBeGreaterThan(0);
+            expect(pos.getX(a)).not.toBeNaN();
+          }
+        }
+      }
+    }
+  });
+});

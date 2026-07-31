@@ -96,6 +96,70 @@
  * state/url.ts needs it too and this module imports three. The re-export's own
  * docblock has the argument.
  *
+ * WHY THE SHELL IS SPLITTABLE, AND WHAT A CUTAWAY REMOVES
+ * P6's cutaway modes exist so the plan can be read from outside, and until this
+ * module could leave a part out they could not work: cutaway.ts's hiddenWalls() takes
+ * down the interior's own bands and Suite.tsx drops the ceiling plate, but the 1872
+ * shell stayed opaque, so from stage 3 there was nothing to look into.
+ * WeldExterior.tsx carries the four modes and the draw calls each one costs.
+ *
+ * A part is removed by NOT EMITTING IT, never by making it transparent. Two measured
+ * reasons. tests/e2e/campus.spec.ts gates the whole scene at 30 draw calls and this
+ * shell is merged into four meshes to fit that, so a transparent part still costs its
+ * call -- and an EMPTY geometry costs one too: three's WebGLRenderer only returns
+ * early when the draw count is NEGATIVE (WebGLRenderer.js, `drawCount < 0`), so a
+ * zero-length index still reaches gl.drawElements and still increments
+ * renderer.info.render.calls. Hence buildWeldCut() returns null for a part that is
+ * wholly gone and WeldExterior mounts no mesh for it, which is the shape Suite.tsx's
+ * mergeSlabs() already has.
+ *
+ * WHAT THE PARTS ARE
+ * The roof, the two roof features standing on it, one quad per ring edge, the eaves
+ * LID over the shell, the grade cap under it, and one box per window bay. The lid
+ * belongs to the ROOF rather than to the walls, which is not obvious and is the whole
+ * difference between roofOff working and doing nothing: extrude() closes its solid
+ * with a cap at the eaves, the gable covers that cap so it is invisible in every other
+ * mode, and leaving it up in roofOff would swap the roof for a flat floor over the
+ * entire footprint. The grade cap is kept in every mode, because it is what the
+ * building stands on and because Suite.tsx keeps the suite's own floors in every mode.
+ *
+ * The edge quads and the two caps are SELECTED OUT OF ONE extrude() CALL rather than
+ * rebuilt here. extrude.ts documents its layout -- n lid vertices, n grade vertices,
+ * then four per edge in ring order; n-2 triangles per cap, then two per edge -- so
+ * this module asserts that layout and copies the index ranges it wants. Rebuilding the
+ * ring here instead would be a second extrusion of the same polygon, free to disagree
+ * with the first about winding, about normals and about where the eaves are, and
+ * gableRoof() fans off that same ring: a shell built by a second route is how a gap
+ * all the way round the eaves appears.
+ *
+ * The vertices of a dropped part stay in the position buffer, unreferenced. An indexed
+ * draw never shades a vertex no triangle names, so the cost is about 4 kB of ring that
+ * is not read, and compacting would mean remapping every index for nothing. The
+ * bounding sphere is computed over all of them, so a cut shell is culled as if it were
+ * whole -- the safe direction, since it can only keep a mesh that would have passed
+ * the frustum test anyway.
+ *
+ * WHY section CLIPS AN EDGE INSTEAD OF DROPPING IT
+ * cutaway.ts's section keeps any interior band the plane passes through, on the ground
+ * that it cannot split a band and the band IS the cut face. Neither of the two rules
+ * available without clipping does for the shell, and the numbers are small enough that
+ * they had to be measured rather than argued: at the default params the plane lands at
+ * building u = 5.75 and crosses exactly TWO of the ring's 56 edges, the 14.80 ft panel
+ * of the north gable and a 6.38 ft one at the south end. Keeping both whole, which is
+ * the interior's rule, leaves 7.23 ft of wall standing on the camera's side of the cut
+ * -- 5.88 of it in one stub across the south end. Dropping both instead takes 13.95 ft
+ * out of the half that is supposed to stay, nearly all of it the north gable, which is
+ * the end the suite is at and the end being looked into. So a crossing edge is cut AT
+ * the plane and only the far part is emitted. That is 21 ft of the 440 ft perimeter and
+ * it is the difference between a section and a section with a stub in it.
+ *
+ * The split point is interpolated in SITE coordinates from a parameter
+ * measured in the BUILDING frame, which is exact rather than approximate: the two
+ * frames differ by a rotation, so the point a fraction t along a segment is the same
+ * point in both. The clipped quad takes the whole edge's own normal, read back out of
+ * the extrusion rather than recomputed, so it cannot disagree with its neighbours
+ * about which way is out.
+ *
  * WHY THE BAY REVEALS SIT AT THE MASONRY MID-PLANE
  * place.ts anchors the suite on a 49 ft clear width centred on u = 0, so its
  * exterior masonry face lands at u = 26.0 while this ring's east wall is at
@@ -107,9 +171,10 @@
 
 import * as THREE from "three";
 import weld from "@/data/weld.json";
-import { normalizeRing } from "@/geo/extrude";
+import { extrude, normalizeRing } from "@/geo/extrude";
 import {
   buildingToSite,
+  fromThree,
   siteToBuilding,
   toThree,
   type Building,
@@ -118,7 +183,7 @@ import {
 import { buildSuite, DEFAULT_PARAMS, type SuiteParams } from "@/geo/rooms";
 import { buildWalls } from "@/geo/walls";
 import { WELD, floorLevel, suiteToBuilding } from "@/geo/place";
-import { extrudedGeometry } from "./geometry";
+import { cameraInSuite, sectionPlaneU, WALL_HOLD_FT, type CutawayMode } from "./cutaway";
 
 export type WeldMasses = {
   /** the 59-point ring extruded to eaves (60 ft) */
@@ -130,6 +195,15 @@ export type WeldMasses = {
   /** window reveals, one box per opening of kind "window" */
   bays: THREE.BufferGeometry;
 };
+
+/**
+ * The same four parts, any of which a cutaway can take away entirely.
+ *
+ * Mapped off WeldMasses rather than written out, so a fifth part cannot be added to
+ * one and forgotten in the other. Null and not an empty geometry: see the header on
+ * what an empty index still costs.
+ */
+export type WeldCutMasses = { [K in keyof WeldMasses]: THREE.BufferGeometry | null };
 
 /** A window reveal in the building frame: centre, opening width, opening height. */
 export type BayRect = { u: number; v: number; w: number; h: number };
@@ -198,7 +272,7 @@ function midU(pts: Building[]): number {
 }
 
 /**
- * Weld's exterior, as four geometries.
+ * Weld's exterior, as four geometries, with nothing cut away.
  *
  * `params` only reaches the bays: the shell and the roof come from the GIS ring
  * and are the same whatever the suite sliders do. `towers` is a second argument
@@ -206,17 +280,378 @@ function midU(pts: Building[]): number {
  * suite, and because SuiteParams is a fixed interface three other modules build
  * against. Both are defaulted, so buildWeld() and buildWeld(params) still mean
  * what they meant.
+ *
+ * Kept as the non-nullable face of buildWeldCut() rather than widened to match it.
+ * Threshold.tsx merges walls and roof into its sweep surface and disposes all four,
+ * and its own docblock says the sweep rides the whole building; a shell that could
+ * arrive half-missing is not what that component is asking for, and it would have to
+ * grow four null checks to say so. The assertion below is what makes the narrower
+ * type true rather than asserted: NO_CUT keeps every part, and if some later part can
+ * come back empty at NO_CUT this throws here instead of reaching a caller as null.
  */
 export function buildWeld(
   params: SuiteParams = DEFAULT_PARAMS,
   towers: TowerParams = TOWER_DEFAULTS,
 ): WeldMasses {
+  const m = buildWeldCut(params, towers, NO_CUT);
+  for (const [name, g] of Object.entries(m)) {
+    if (g === null) throw new Error(`weldGeometry: no ${name} emitted with nothing cut away`);
+  }
+  return m as WeldMasses;
+}
+
+/**
+ * Weld's exterior with a cutaway applied: the same four parts, minus what `cut` says.
+ *
+ * Every removal is a part that is not emitted, and a part that is wholly gone comes
+ * back as null so the caller can mount no mesh for it -- the header says what an empty
+ * geometry costs instead. `cut` is data rather than a predicate on purpose: WeldExterior
+ * memoises this call on it, and a function prop would be a new identity every render.
+ */
+export function buildWeldCut(
+  params: SuiteParams = DEFAULT_PARAMS,
+  towers: TowerParams = TOWER_DEFAULTS,
+  cut: WeldCut = NO_CUT,
+): WeldCutMasses {
   return {
-    walls: extrudedGeometry(weld.rings[0] as number[][], WELD.eaves),
-    roof: gableRoof(),
-    towers: towerGeometry(towers),
-    bays: bayGeometry(params),
+    walls: shellGeometry(cut),
+    // The roof features stand ON the slate, 9.4 and 9.6 ft off the ridge and seated
+    // well down the slope (see towerGeometry). With the roof gone they would be two
+    // boxes hanging in the air over an open building, which reads as a fault rather
+    // than as a cutaway, so they go with the surface that carries them.
+    roof: cut.roof ? null : gableRoof(),
+    towers: cut.roof ? null : towerGeometry(towers),
+    bays: bayGeometry(params, cut.bays),
   };
+}
+
+/**
+ * A cutaway of the shell, expressed as the parts NOT to emit.
+ *
+ * Two of the four fields are sets of indices rather than of ids, which is the one
+ * thing here that differs from hiddenWalls()'s answer. The shell's parts have no ids
+ * to name: a ring edge is a position in weld.rings[0] and a bay is a position in the
+ * window list buildWalls() emits, and both lists are derived, ordered and rebuilt from
+ * the same inputs on every call. `bays` therefore indexes bayRects() order, which is
+ * the order bayGeometry() emits in, and both come from bays(params) with the same
+ * params -- weldCut() and buildWeldCut() must be handed the same SuiteParams or the
+ * cut lands on the wrong window.
+ */
+export type WeldCut = {
+  /** the gabled roof, the two features standing on it, and the eaves lid beneath it */
+  roof: boolean;
+  /** ring edge indices whose wall quad is not emitted at all */
+  walls: ReadonlySet<number>;
+  /** bay indices, in bayRects() order, whose reveal is not emitted */
+  bays: ReadonlySet<number>;
+  /**
+   * A half-space in the BUILDING frame that every surviving wall quad is cut back to:
+   * a point survives where `keep * (its u - this u) >= 0`, and an edge that crosses the
+   * plane is split there. Used by section, and null in every other mode.
+   */
+  half: { u: number; keep: 1 | -1 } | null;
+};
+
+const NO_PARTS: ReadonlySet<number> = new Set();
+
+/** Nothing removed: mode "none", and the default for every caller that has no camera. */
+export const NO_CUT: WeldCut = { roof: false, walls: NO_PARTS, bays: NO_PARTS, half: null };
+
+/**
+ * The roof, its features and the eaves lid, and nothing else.
+ *
+ * Mode roofOff's whole answer, and also the answer for the two camera-driven modes in
+ * their degenerate case. Exported as a constant because WeldExterior compares cuts by
+ * identity first: roofOff needs no camera, so it must not allocate a fresh set per
+ * frame and force a re-render with it.
+ */
+export const ROOF_CUT: WeldCut = { roof: true, walls: NO_PARTS, bays: NO_PARTS, half: null };
+
+/**
+ * A zero this file compares distances in feet against.
+ *
+ * cutaway.ts's own EPS, and used in the same two places: the degenerate camera sitting
+ * exactly in the section plane, and "wholly on the camera's side of it". Not a
+ * measurement tolerance -- 1e-9 ft is far below the ring's published tenth of a foot --
+ * but the difference between a strict and a non-strict comparison, written where the
+ * comparison is.
+ */
+const EPS = 1e-9;
+
+/**
+ * What a cutaway mode takes off the shell, from where the camera is.
+ *
+ * PURE, and the caller keeps the state, exactly as hiddenWalls() is pure and Suite.tsx
+ * keeps its one useRef. The same argument applies for the same reason: with `prev` as
+ * an argument the hysteresis can be exercised by handing this a set, calling it twice
+ * with the same arguments cannot return two different answers, and two viewports
+ * cannot couple through module state.
+ *
+ * THROTTLING IS THE CALLER'S JOB AND IT IS NOT OPTIONAL. The wallsDown and section
+ * branches both walk buildSuite() and buildWalls() by way of bays(), which is the call
+ * chain that made hiddenWalls() in a useFrame a measured input stall -- a cutaway mode
+ * change stopped responding for longer than a 30 s test would wait (docs/phases/P6-UI.md
+ * records it). WeldExterior recomputes only after a quarter foot of camera movement for
+ * that reason, and mirrors Suite.tsx's fast path so the two modes that need no camera
+ * cost nothing at all.
+ *
+ * FRAMES, and there are three in one function. The shell is in the BUILDING frame, so
+ * that is where every part is tested; the camera arrives in three.js world space and
+ * gets there through frames.ts's own fromThree and siteToBuilding, which are the
+ * sanctioned pair and round-trip tested in both directions. The section plane is a
+ * SUITE-frame u, so it is carried into the building frame through place.ts's own
+ * forward map, sampled at two points -- suiteToBuilding negates u on the east facade,
+ * and writing that reflection out again here is the hand-rolled second inverse that
+ * cutaway.ts and frames.ts both warn mirrors the building invisibly.
+ *
+ * WHICH SIDE THE CAMERA IS ON is decided by the same expression hiddenWalls() uses, in
+ * the suite frame, through cameraInSuite(). That is not belt and braces: if the shell
+ * picked its half by any independent route the two cuts could pick opposite halves,
+ * and a shell cut disagreeing with the interior's cut reads as a rendering fault
+ * rather than as a section.
+ */
+export function weldCut(
+  mode: CutawayMode,
+  camera: Vec3,
+  params: SuiteParams,
+  prev: WeldCut = NO_CUT,
+): WeldCut {
+  if (mode === "none") return NO_CUT;
+  if (mode === "roofOff") return ROOF_CUT;
+
+  const openings = bays(params);
+
+  if (mode === "section") {
+    const su = sectionPlaneU(params);
+    const u = suiteToBuilding(su, 0, params).u;
+    // Which way suite +u runs in building u, sampled off place.ts's map rather than
+    // reasoned about: +1 on the west facade, -1 on the east.
+    const inward = Math.sign(suiteToBuilding(su + 1, 0, params).u - u) as 1 | -1;
+    const side = cameraInSuite(camera, params).u - su;
+    // Camera in the cut plane, i.e. standing in the hall: neither half is the near
+    // one. hiddenWalls() hides nothing here rather than pick, so nor does this.
+    if (Math.abs(side) < EPS) return ROOF_CUT;
+    const near = (Math.sign(side) * inward) as 1 | -1;
+
+    const drop = new Set<number>();
+    openings.forEach((b, i) => {
+      // Wholly on the camera's side, which is hiddenWalls()'s rule for a band. A bay
+      // is a box, so its own extent across the plane is what "wholly" measures.
+      const half = (b.alongV ? b.through : b.w) / 2;
+      if (near * (b.u - u) - half > -EPS) drop.add(i);
+    });
+    return { roof: true, walls: NO_PARTS, bays: drop, half: { u, keep: -near as 1 | -1 } };
+  }
+
+  // wallsDown
+  const cam = siteToBuilding(fromThree(camera));
+  const walls = new Set<number>();
+  for (let i = 0; i < LOOP_B.length; i++) {
+    const threshold = prev.walls.has(i) ? -WALL_HOLD_FT : 0;
+    if (edgeMargin(i, cam) > threshold) walls.add(i);
+  }
+  const drop = new Set<number>();
+  openings.forEach((b, i) => {
+    // A bay goes with the shell wall it is a hole in, found rather than assumed. Left
+    // standing, a dropped wall's bay is an 8 x 10.75 ft slab of slate hanging in the
+    // hole it was a window in.
+    if (walls.has(nearestEdge(b))) drop.add(i);
+  });
+  return { roof: true, walls, bays: drop, half: null };
+}
+
+/**
+ * How far the camera is outside one shell edge, and how squarely, in feet.
+ *
+ * Deliberately the same two-term minimum as cutaway.ts's private outwardMargin(), and
+ * for the same two reasons: `beyond` is the distance past the wall's own face, because
+ * a camera inside the masonry is not outside the building, and `squarely` is what
+ * makes it the NEAR wall rather than any wall whose normal merely leans camera-ward.
+ * Their min is one scalar so that one hold distance covers both the plane crossing and
+ * the diagonal where a corner hands over from one face to the next.
+ *
+ * Not imported, because it is not exported and this file must not widen cutaway.ts's
+ * surface to reach it -- and it could not be used unchanged anyway. That version takes
+ * an axis-aligned band in the suite frame and reads its normal off a sign; this ring's
+ * 56 edges point every which way, so the normal comes from the edge direction and the
+ * along-edge term uses the edge's own tangent. Written that way the two agree exactly
+ * where the interior's bands are axis-aligned, which is everywhere.
+ *
+ * CONSEQUENCE, MEASURED, AND IT IS THE REASON wallsDown IS NOT THE DOLLHOUSE MODE.
+ * From the stage 3 keyframe -- 189 ft east and 151 ft south of the centroid in the
+ * building frame, which is the view the dollhouse would be edited from -- this drops the
+ * roof and 9 of the 56 edges, 97.9 ft of the 440.3 ft perimeter. Eight of them face east
+ * and the ninth faces south, and every one of them lies SOUTH of v = 19.9, because
+ * `squarely` is measured from each edge's own midpoint and the camera is 150 ft down the
+ * building from the suite. The suite's windows sit at v 33.7 to 70.9. So the shell opens
+ * along a stretch of facade with
+ * nothing behind it, the four facade bays keep their wall, and NO bay is dropped: what
+ * you get is a hole into the south half of a building whose north half is still shut.
+ * hiddenWalls() hides no interior band at all from that camera, so the interior is not
+ * open either. What opens the suite from there is section, which takes the whole east
+ * half including the facade in front of the rooms, or roofOff from above.
+ *
+ * Loosening the along-edge term for the shell alone is not the fix. It would open the
+ * shell and leave the suite's own masonry standing inside it, since hiddenWalls() would
+ * still refuse the same bands -- strictly worse than either mode as it stands.
+ * tests/weldGeometry.test.ts pins the part of this that matters, that from the stage 3
+ * keyframe every dropped edge is south of every bay and no bay comes down, so a keyframe
+ * that moved would fail there rather than leave this paragraph quietly wrong.
+ */
+function edgeMargin(i: number, cam: Building): number {
+  const a = LOOP_B[i]!;
+  const b = LOOP_B[(i + 1) % LOOP_B.length]!;
+  const du = b.u - a.u;
+  const dv = b.v - a.v;
+  const len = Math.hypot(du, dv);
+  const tu = du / len;
+  const tv = dv / len;
+  // Interior lies left of travel on a counter-clockwise ring, so outward is the
+  // right-hand perpendicular -- extrude.ts's side-wall normal and gableRoof()'s, here
+  // in the building frame. siteToBuilding is a rotation, so it preserves the winding
+  // and the same formula holds without a sign to guess.
+  const nu = tv;
+  const nv = -tu;
+  const mu = cam.u - (a.u + du / 2);
+  const mv = cam.v - (a.v + dv / 2);
+  const beyond = nu * (cam.u - a.u) + nv * (cam.v - a.v);
+  const squarely = nu * mu + nv * mv - Math.abs(tu * mu + tv * mv);
+  return Math.min(beyond, squarely);
+}
+
+/**
+ * The shell wall a bay is a hole in: the nearest ring edge that RUNS THE SAME WAY the
+ * bay's own wall does.
+ *
+ * Distance alone is not enough, and the axis term is not belt and braces -- it was put
+ * here by a measurement. The distances from a reveal centred on the suite's masonry
+ * mid-plane to its own ring edge run from 0.17 ft (bedroom A's north window) to 5.36
+ * (the common room's, out in the wing zone where the ring is 62 ft wide), but the
+ * runner-up is as close as 1.16 ft and for bedroom B's south window it is an EXACT TIE:
+ * 1.870 ft to a 17 ft facade edge and 1.870 ft to a 3.1 ft north-facing jog beside it,
+ * decided by nothing but which one the loop reached first. It reached the jog, and the
+ * consequence was visible: from the stage 4 keyframe, square on the north gable, that
+ * jog drops and took a facade window with it -- a dark 8 x 10.75 ft panel vanishing out
+ * of a facade that is still standing.
+ *
+ * The axis breaks the tie by the only thing that makes it a tie in the first place. A
+ * bay's `alongV` says which way its own wall runs, place.ts maps suite u and v onto
+ * building u and v without swapping them, so the ring edge that carries the bay is the
+ * one that runs the same way; the jog runs across it and is a different wall. Falls back
+ * to the plain nearest if no edge shares the axis, which this ring never does -- it has
+ * 56 edges in both -- and which is one comparison rather than a throw for a case a
+ * re-digitised ring could reach.
+ */
+function nearestEdge(bay: Bay): number {
+  let best = -1;
+  let bestD = Infinity;
+  let fallback = 0;
+  let fallbackD = Infinity;
+  for (let i = 0; i < LOOP_B.length; i++) {
+    const a = LOOP_B[i]!;
+    const b = LOOP_B[(i + 1) % LOOP_B.length]!;
+    const du = b.u - a.u;
+    const dv = b.v - a.v;
+    const t = Math.max(
+      0,
+      Math.min(1, ((bay.u - a.u) * du + (bay.v - a.v) * dv) / (du * du + dv * dv)),
+    );
+    const d = Math.hypot(bay.u - (a.u + t * du), bay.v - (a.v + t * dv));
+    if (d < fallbackD) {
+      fallbackD = d;
+      fallback = i;
+    }
+    const edgeAlongV = Math.abs(dv) > Math.abs(du);
+    if (edgeAlongV !== bay.alongV) continue;
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  return best < 0 ? fallback : best;
+}
+
+/**
+ * The shell: the ring extruded to the eaves, minus whatever the cut removes.
+ *
+ * One extrude() call, and then the index ranges the cut leaves standing. The header
+ * carries why it is selected rather than rebuilt, why the lid goes with the roof and
+ * why the grade cap never goes.
+ */
+function shellGeometry(cut: WeldCut): THREE.BufferGeometry | null {
+  const n = LOOP.length;
+  const ex = extrude(weld.rings[0] as number[][], WELD.eaves);
+  const capTris = n - 2;
+  // extrude.ts's documented layout, asserted rather than trusted: everything below
+  // indexes into it, and a change there would otherwise show as a shell missing an
+  // arbitrary wall rather than as an error.
+  if (ex.positions.length !== 6 * n * 3 || ex.indices.length !== (2 * capTris + 2 * n) * 3) {
+    throw new Error("weldGeometry: extrude()'s layout has moved; the shell cut indexes into it");
+  }
+
+  const pos = Array.from(ex.positions);
+  const nrm = Array.from(ex.normals);
+  const idx: number[] = [];
+  const copyTris = (from: number, count: number) => {
+    for (let k = from * 3; k < (from + count) * 3; k++) idx.push(ex.indices[k]!);
+  };
+
+  if (!cut.roof) copyTris(0, capTris);
+  copyTris(capTris, capTris);
+
+  for (let e = 0; e < n; e++) {
+    if (cut.walls.has(e)) continue;
+    const tri = 2 * capTris + 2 * e;
+    if (cut.half === null) {
+      copyTris(tri, 2);
+      continue;
+    }
+
+    const a = LOOP_B[e]!;
+    const b = LOOP_B[(e + 1) % n]!;
+    const sa = cut.half.keep * (a.u - cut.half.u);
+    const sb = cut.half.keep * (b.u - cut.half.u);
+    if (sa >= 0 && sb >= 0) {
+      copyTris(tri, 2);
+      continue;
+    }
+    if (sa <= 0 && sb <= 0) continue;
+
+    // One endpoint each side. The kept part runs from the crossing to whichever end
+    // survived, in the edge's own a-to-b order, so extrude()'s winding carries over
+    // with no sign to decide.
+    const t = sa / (sa - sb);
+    const p0 = LOOP[e]!;
+    const p1 = LOOP[(e + 1) % n]!;
+    const at: [number, number] = [p0[0] + t * (p1[0] - p0[0]), p0[1] + t * (p1[1] - p0[1])];
+    const from = sa > 0 ? p0 : at;
+    const to = sa > 0 ? at : p1;
+
+    // The whole edge's own normal, read back out of the extrusion rather than
+    // recomputed. Its first side vertex is at 2n + 4e, per the layout asserted above.
+    const nv = (2 * n + 4 * e) * 3;
+    const normal: Vec3 = [nrm[nv]!, nrm[nv + 1]!, nrm[nv + 2]!];
+    const base = pos.length / 3;
+    for (const p of [
+      toThree(from[0], from[1], 0),
+      toThree(to[0], to[1], 0),
+      toThree(to[0], to[1], WELD.eaves),
+      toThree(from[0], from[1], WELD.eaves),
+    ]) {
+      pos.push(p[0], p[1], p[2]);
+      nrm.push(normal[0], normal[1], normal[2]);
+    }
+    idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+
+  if (idx.length === 0) return null;
+
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("normal", new THREE.Float32BufferAttribute(nrm, 3));
+  g.setIndex(idx);
+  g.computeBoundingSphere();
+  return g;
 }
 
 /**
@@ -570,16 +1005,29 @@ function bays(params: SuiteParams): Bay[] {
   return out;
 }
 
-/** One reveal box per bay, cut through the wall at the suite's floor level. */
-function bayGeometry(params: SuiteParams): THREE.BufferGeometry {
+/**
+ * One reveal box per bay, cut through the wall at the suite's floor level.
+ *
+ * `drop` names the bays a cutaway has taken away, by index into the same list
+ * bayRects() reports. Skipped rather than emitted at zero size, for the reason
+ * Suite.tsx skips a hidden band: a degenerate box is a NaN normal waiting to discard
+ * the whole draw call, and this one would cost that call either way.
+ */
+function bayGeometry(
+  params: SuiteParams,
+  drop: ReadonlySet<number> = NO_PARTS,
+): THREE.BufferGeometry | null {
   const b = new Builder();
   const y0 = floorLevel(1);
-  for (const bay of bays(params)) {
+  let emitted = 0;
+  bays(params).forEach((bay, i) => {
+    if (drop.has(i)) return;
     const du = bay.alongV ? bay.through : bay.w;
     const dv = bay.alongV ? bay.w : bay.through;
     b.box({ u: bay.u, v: bay.v }, du, dv, y0, y0 + bay.h);
-  }
-  return b.build();
+    emitted++;
+  });
+  return emitted > 0 ? b.build() : null;
 }
 
 /** A building-frame direction as a unit vector in three.js space. */
