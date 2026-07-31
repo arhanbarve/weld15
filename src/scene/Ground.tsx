@@ -63,6 +63,29 @@ const TINT_MAX = 0.82;
 /** Saturation left at full tint. Desaturating alongside the tint is what stops it going purple. */
 const SAT_MIN = 0.25;
 
+/**
+ * How much of altitude.ts's tint ramp actually reaches the photograph.
+ *
+ * P10. The ramp itself still runs a clean 0 to 1 from 40,000 ft to 400 ft -- altitude.ts is
+ * untouched and tests/altitude.test.ts still asserts yard.tint === 1 -- and this is the design
+ * layer deciding how much of it to spend. Measured at the three stage altitudes the camera actually
+ * sits at (window.__cam), before and after:
+ *
+ *   stage 1, 16,332 ft   tint 0.195   was 15% desaturated / 16% blue   now  5% / 5.6%
+ *   stage 2,    815 ft   tint 0.846   was 63% / 69%                    now 22% / 24%
+ *   stage 3,    110 ft   tint 1.000   was 75% / 82%                    now 26% / 29%
+ *
+ * SCALED, NOT CLAMPED, and the difference matters. A clamp at 0.35 would plateau around 8,000 ft
+ * and the photograph would then stop changing for the last two stages of a descent whose whole
+ * subject is continuous change. Scaling shortens the ramp's reach and keeps its shape.
+ *
+ * WHAT SURVIVES AT 0.35 IS NOT A WEAKENED CYANOTYPE, IT IS AERIAL HAZE. The campus is no longer
+ * drawn as translucent blue massing over the photograph -- CampusMesh.tsx stands real brick and
+ * slate on it -- so a residual quarter-strength blue is the distance cue that stops the ground
+ * reading as a decal under the buildings. MASTER.md's photographic-layer table is amended to match.
+ */
+const TINT_SCALE = 0.35;
+
 const GROUND_VERT = /* glsl */ `
   varying vec2 vUv;
   void main() {
@@ -167,7 +190,7 @@ function Quad({
      */
     if (tex && mat.uniforms.uMap!.value !== tex) mat.uniforms.uMap!.value = tex;
     mat.uniforms.uOpacity!.value = a;
-    mat.uniforms.uTint!.value = o.tint;
+    mat.uniforms.uTint!.value = o.tint * TINT_SCALE;
   });
 
   if (!tex || !quad) return null;
