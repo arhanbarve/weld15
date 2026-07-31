@@ -504,16 +504,6 @@ export function Hud() {
           Hidden once the flight is over rather than disabled: past FLY_DOWN_END there is
           nothing left to fly to, and the camera is at stage 3's free orbit where the viewer has
           controls of their own. */}
-      {!reduced && stage < FLY_DOWN_END ? (
-        <button
-          className="fly"
-          onClick={() => setFlying(!flying)}
-          data-testid="fly-down"
-          aria-pressed={flying}
-        >
-          {flying ? "Stop" : "Fly down to Weld"}
-        </button>
-      ) : null}
 
       {/* The written description of the frame, which is the only route into this app's
           content for anyone who cannot see a canvas -- and the only one at all if WebGL
@@ -541,6 +531,16 @@ export function Hud() {
            room instead of reporting a position, and the memo it feeds depends on it. */
         firstPerson={walking ? { room: walkRoom } : null}
       />
+      {!reduced && stage < FLY_DOWN_END ? (
+        <button
+          className="fly"
+          onClick={() => setFlying(!flying)}
+          data-testid="fly-down"
+          aria-pressed={flying}
+        >
+          {flying ? "Stop" : "Fly down to Weld"}
+        </button>
+      ) : null}
 
       <div className={stage === LAST_STAGE ? "hud hud-room" : "hud"} data-testid="hud">
         <div className="hud-stage" data-testid="stage-name">
