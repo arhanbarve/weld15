@@ -98,12 +98,29 @@ async function openAtTheThreshold(page: Page): Promise<string[]> {
  * geometry rebuild that takes one.
  */
 async function statsAt(page: Page, mode: string, t: number): Promise<Perf> {
-  const slider = page.getByTestId("threshold-t");
-  await slider.fill(String(t));
+  // P10 folded the per-stage threshold-t slider into JourneyBar's single master bar, which
+  // carries `u` -- the whole descent, orbit to hall -- rather than a per-stage t. `t` here is
+  // still stage 4's own progress, so it is converted through window.__journey (JourneyBar.tsx's
+  // debug probe) rather than through a second implementation of journey.ts's mapping.
+  const slider = page.getByTestId("journey");
+  const u = await page.evaluate((tt) => {
+    const j = (window as unknown as { __journey: { boundaries: number[]; spans: number[]; total: number } })
+      .__journey;
+    // Snapped to the slider's own 0.0005 step: Playwright's fill() on a range input
+    // refuses a value that is not one of the step's own multiples ("Malformed value").
+    // FLOORED, not rounded to nearest -- BEFORE is exactly thresholdOpacity()'s own
+    // `lo` argument (0.2), the ramp's zero point, and rounding to nearest pushed the
+    // decoded t a hair past 0.2 (0.20019), which was enough for `ramp()` to read a
+    // nonzero progress and draw the sweep where the test needs shell-only. Flooring
+    // always lands at or under the target t, which the ramp resolves to exactly 0.
+    const raw = j.boundaries[4]! + (tt * j.spans[4]!) / j.total;
+    return Math.floor(raw / 0.0005) * 0.0005;
+  }, t);
+  await slider.fill(String(u));
   await slider.dispatchEvent("input");
   await expect
-    // The span immediately after the range input. Not `.hud-t .tabular`: four controls in
-    // Hud.tsx share that class.
+    // The span immediately after the range input, and it still reads stage 4's own t --
+    // JourneyBar.tsx displays the stage's t, not u -- so the assertion is unchanged.
     .poll(async () => slider.locator("+ span.tabular").textContent(), { timeout: 10_000 })
     .toBe(t.toFixed(2));
   await page.getByTestId(`cutaway-${mode}`).click();
