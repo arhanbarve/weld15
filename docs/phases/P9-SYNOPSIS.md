@@ -3,7 +3,16 @@
 **Branch:** `p9-earth-descent`
 **Worktree:** `.claude/worktrees/p9-earth/`
 **Spec:** `docs/phases/P9.md` (829 lines, on that branch)
-**Status:** active implementation. Do not edit these files on `main` until it merges.
+**Status:** implemented, 7 commits, not pushed, `main` untouched. Do not edit these files on `main`
+until it merges. `docs/phases/P9.md` §10 records every place the implementation departed from the
+spec — four numbers in the spec are wrong and the corrections are asserted in tests.
+
+**If you run the e2e suite from a worktree, read this first.** `playwright.config.ts` sets `baseURL`
+to `localhost:3000` with `reuseExistingServer: true`. If any dev server is already listening there —
+including one from another worktree or the main checkout — Playwright adopts it silently and the
+suite reports green while testing the wrong code. The first full P9 run said "46 passed" while
+testing code with none of P9 in it. Check that a file only your branch has returns 200 before
+trusting a green run.
 
 ## What P9 does, in one paragraph
 
@@ -71,9 +80,19 @@ should land them; P9 will rebase onto them rather than the other way round.
 - Mobile (already gated out by `DesktopOnly.tsx`)
 - Terrain elevation, photogrammetric buildings, live map tiles / API keys
 
-## Gates P9 will move, with measurements
+## Gates P9 moved, each with its measurement
 
-`tests/e2e/campus.spec.ts:60,61,63,81,106` and `tests/e2e/journey.spec.ts:82,83,88,89`. Expect
-roughly +5 draw calls (four ground quads + one atmosphere rim). Every moved bound ships with the
-measurement that moved it. `campus.spec.ts:81` (stage-2 vs stage-1 white pixels) will be **rebuilt**,
-not merely widened — a photographic ground changes both sides of that comparison.
+| gate | was | now | measured |
+|---|---|---|---|
+| `campus.spec.ts` draw calls, stages 1–3 | ≤ 30 | ≤ 34 | 24 / 28 / 28 |
+| `campus.spec.ts` geometries | < 20 | < 24 | 11 / 16 / 16 |
+| `campus.spec.ts` white pixels | threshold 205 | threshold 236 + floor 400 | 0 at stage 1, 1,648 at stage 2 |
+| `perf.spec.ts` §9 Campus scene calls | ≤ 10 | ≤ 13 | 11 with the composer subtracted |
+| `a11y.spec.ts` tab order | 3 stops | 4 stops | fly-down is top-centre, before the HUD |
+
+`journey.spec.ts`'s bounds did **not** need moving: worst case across the whole descent is 16.9%
+coverage against `> 8` and 50 distinct colours against `>= 5`.
+
+The white-pixel gate was **rebuilt, not widened** — a photographic ground puts bright neutral pixels
+on both sides of the old comparison, so the threshold moved to where the two populations separate
+completely.

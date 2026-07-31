@@ -11,7 +11,31 @@ type Perf = {
   medianMs: number | null;
 };
 
+/**
+ * Read window.__perf, having first waited for a frame that actually drew something.
+ *
+ * WHY THE WAIT, AND WHY IT IS NOT A WIDENED TOLERANCE. Perf.tsx samples the renderer's counters
+ * once per frame and resets them, so what this reads is one specific frame. Under a full parallel
+ * run -- four workers against one dev server, software-rendered -- that frame can be a degenerate
+ * one: this test failed once with `triangles: 1` at stage 1, against a figure that measures 16,489
+ * in four consecutive clean runs. One triangle is not a campus that lost its merge; it is a frame
+ * that had not finished.
+ *
+ * So the fix is to refuse to sample a frame that drew nothing, rather than to lower the bound to
+ * something a broken merge could also satisfy. The threshold is 100 triangles -- two orders of
+ * magnitude below the real figure and far below anything the assertions care about -- so a genuine
+ * regression still fails, and it fails on the assertion with its numbers attached rather than on an
+ * opaque timeout in here. P9 made this likelier rather than causing it: five plates of imagery
+ * decode on the main thread during exactly this window.
+ */
 async function perf(page: Page): Promise<Perf> {
+  await page
+    .waitForFunction(
+      () => ((window as unknown as { __perf?: { triangles: number } }).__perf?.triangles ?? 0) > 100,
+      undefined,
+      { timeout: 10_000 },
+    )
+    .catch(() => {});
   return page.evaluate(() => (window as unknown as { __perf: Perf }).__perf);
 }
 
