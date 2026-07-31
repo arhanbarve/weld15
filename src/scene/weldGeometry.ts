@@ -367,6 +367,40 @@ export const NO_CUT: WeldCut = { roof: false, walls: NO_PARTS, bays: NO_PARTS, h
  */
 export const ROOF_CUT: WeldCut = { roof: true, walls: NO_PARTS, bays: NO_PARTS, half: null };
 
+/** Two sets of part indices, compared by content. */
+export function sameParts(a: ReadonlySet<number>, b: ReadonlySet<number>): boolean {
+  if (a.size !== b.size) return false;
+  for (const i of a) if (!b.has(i)) return false;
+  return true;
+}
+
+/**
+ * Two cuts, compared by content rather than by identity.
+ *
+ * Beside the type rather than in the component that drives it, because it is a pure
+ * predicate over WeldCut and a cut compared wrongly is a shell rebuilt sixty times a
+ * second -- which is a claim about this type, testable here, and not about a mesh.
+ *
+ * weldCut() allocates fresh sets on every call, so identity would report a change every
+ * time it is called and rebuild the whole shell with it -- the same trap Suite.tsx's
+ * sameWalls() exists for, and the reason that one is content-compared too. The identity
+ * check on the front is not redundant: the two camera-free modes return the module
+ * constants NO_CUT and ROOF_CUT, so those two settle in one comparison.
+ *
+ * `half` is compared field by field because it is a fresh object per call as well, and
+ * because its two fields are the whole cut for section: a plane that has moved by a
+ * slider is a different section even though every set is still empty.
+ */
+export function sameCut(a: WeldCut, b: WeldCut): boolean {
+  if (a === b) return true;
+  if (a.roof !== b.roof) return false;
+  if ((a.half === null) !== (b.half === null)) return false;
+  if (a.half !== null && b.half !== null) {
+    if (a.half.u !== b.half.u || a.half.keep !== b.half.keep) return false;
+  }
+  return sameParts(a.walls, b.walls) && sameParts(a.bays, b.bays);
+}
+
 /**
  * A zero this file compares distances in feet against.
  *

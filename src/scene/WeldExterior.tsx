@@ -64,6 +64,18 @@
  * forces a second full scene render, so it doubles every call rather than adding one.
  * Nothing here has that property and nothing here uses a render target.
  *
+ * THAT 8 IS A BUDGET OF MESHES, AND THE MEASUREMENT BESIDE IT IS THE OPAQUE ONE. Reduced
+ * motion draws this shell fully opaque, and an opaque mesh is one submission; three submits
+ * a TRANSPARENT DoubleSide material twice, back faces then front, and every material here is
+ * DoubleSide and goes transparent for the whole dissolve. So those five meshes are 10 calls
+ * at the stage 4 mid-crossing and not 5. That is not the budget blown -- what the crossing
+ * is measured against is the whole frame's 30, the same ceiling campus.spec.ts gates stages
+ * 1 to 3 at. Off window.__perf at stage 4, mode none: 21 calls at t = 0.2, where the shell is
+ * still opaque and <Threshold> mounts nothing, and 27 at t = 0.35 with the sweep running --
+ * 17 for the composer and the fixtures plus 10 for five meshes at two passes each. The
+ * doubling is measured rather than assumed: roofOff takes two of those meshes off, and the
+ * difference from none is 2 calls at t = 0.2 against 4 at t = 0.35.
+ *
  * A CUTAWAY ONLY EVER LOWERS THAT. Counted off the parts buildWeldCut() returns and
  * asserted in tests/weldGeometry.test.ts rather than reasoned about. Both the stage 3
  * and the stage 4 keyframe give the same four counts, and the triangles are stage 3's:
@@ -194,6 +206,7 @@ import {
   buildWeldCut,
   NO_CUT,
   ROOF_CUT,
+  sameCut,
   TOWER_DEFAULTS,
   weldCut,
   type TowerParams,
@@ -271,36 +284,6 @@ function useShellPalette(opacity: number, progress: number, reduced: boolean) {
   return pal;
 }
 
-/** Two sets of part indices, compared by content. */
-function sameParts(a: ReadonlySet<number>, b: ReadonlySet<number>): boolean {
-  if (a.size !== b.size) return false;
-  for (const i of a) if (!b.has(i)) return false;
-  return true;
-}
-
-/**
- * Two cuts, compared by content rather than by identity.
- *
- * weldCut() allocates fresh sets on every call, so identity would report a change every
- * time it is called and rebuild the whole shell with it -- the same trap Suite.tsx's
- * sameWalls() exists for, and the reason that one is content-compared too. The identity
- * check on the front is not redundant: the two camera-free modes return the module
- * constants NO_CUT and ROOF_CUT, so those two settle in one comparison.
- *
- * `half` is compared field by field because it is a fresh object per call as well, and
- * because its two fields are the whole cut for section: a plane that has moved by a
- * slider is a different section even though every set is still empty.
- */
-function sameCut(a: WeldCut, b: WeldCut): boolean {
-  if (a === b) return true;
-  if (a.roof !== b.roof) return false;
-  if ((a.half === null) !== (b.half === null)) return false;
-  if (a.half !== null && b.half !== null) {
-    if (a.half.u !== b.half.u || a.half.keep !== b.half.keep) return false;
-  }
-  return sameParts(a.walls, b.walls) && sameParts(a.bays, b.bays);
-}
-
 /**
  * What the cutaway is currently taking off the shell, from where the camera actually is.
  *
@@ -315,6 +298,14 @@ function sameCut(a: WeldCut, b: WeldCut): boolean {
  * need `at.current` cleared again the moment the shell came back -- otherwise a parked
  * camera would show a full shell in a cutaway mode until something moved. One frame of
  * uncut brick at the stage 4/5 crossing is worse than a walk of bays() nobody sees.
+ *
+ * THE ONE ANSWER FOR THE WHOLE BUILDING. <Threshold> takes this cut as a prop rather than
+ * deriving its own, so the seam rides the geometry the shell is actually showing and the
+ * two cannot disagree -- weldCut()'s WALL_HOLD_FT hysteresis is path-dependent, so two
+ * hooks whose first sample fell at different points of the flight could hold opposite
+ * answers about a wall the camera is loitering beside. That does not make this hook the
+ * sweep's cost: the sweep gates its own GEOMETRY on being drawn, so nothing is built for it
+ * outside the crossing, and what is shared here is a cut this component computes anyway.
  */
 function useWeldCut(mode: CutawayMode, params: SuiteParams): WeldCut {
   const [cut, setCut] = useState<WeldCut>(NO_CUT);
@@ -443,9 +434,10 @@ export function WeldExterior({
       {geo.towers ? <mesh geometry={geo.towers} material={pal.roof} /> : null}
       {geo.bays ? <mesh geometry={geo.bays} material={pal.bays} /> : null}
       {/* Mounted here rather than from Experience so the seam's progress is the
-          same number the shell's alpha was derived from, and so the integrator has
-          one component to wire instead of two. */}
-      <Threshold progress={progress} />
+          same number the shell's alpha was derived from, and its cut the same cut these
+          four meshes were built from, and so the integrator has one component to wire
+          instead of two. */}
+      <Threshold progress={progress} cut={cut} />
     </group>
   );
 }

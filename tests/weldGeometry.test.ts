@@ -24,6 +24,8 @@ import {
   maxSectionLength,
   ringStations,
   narrowLobes,
+  sameCut,
+  sameParts,
   towerCentres,
   weldCut,
   MAX_SECTION_LENGTH,
@@ -1200,5 +1202,88 @@ describe("the cutaway opens the shell", () => {
         }
       }
     }
+  });
+
+  /**
+   * The two predicates a caller compares cuts with.
+   *
+   * They sit in weldGeometry beside the type rather than in the component that drives it,
+   * because what they claim is a fact about WeldCut and not about a mesh: weldCut() hands
+   * back fresh sets on every call, so anything comparing its answers by identity reports a
+   * change every frame and rebuilds 220 triangles with it. The claim was untested while it
+   * lived in a component, and it was duplicated into Threshold.tsx for as long as that
+   * component derived its own cut.
+   *
+   * Every case below is a pair that a WEAKER comparison would call equal: same content in
+   * different sets, same sets with one member exchanged, same everything but the plane.
+   */
+  describe("comparing two cuts by content", () => {
+    it("calls two answers from one camera the same cut, on fresh sets", () => {
+      const a = cutFor("wallsDown", STAGE3);
+      const b = cutFor("wallsDown", STAGE3);
+      // The trap first: nothing is shared between two calls, so identity says "changed".
+      expect(a).not.toBe(b);
+      expect(a.walls).not.toBe(b.walls);
+      expect(a.walls.size).toBeGreaterThan(0);
+      expect(sameCut(a, b)).toBe(true);
+    });
+
+    it("settles the two camera-free modes on identity, and still tells them apart", () => {
+      expect(sameCut(NO_CUT, NO_CUT)).toBe(true);
+      expect(sameCut(ROOF_CUT, ROOF_CUT)).toBe(true);
+      // Every set is empty in both and the plane is null in both, so the roof flag is the
+      // whole difference between "nothing removed" and "the roof removed".
+      expect(sameParts(NO_CUT.walls, ROOF_CUT.walls)).toBe(true);
+      expect(sameParts(NO_CUT.bays, ROOF_CUT.bays)).toBe(true);
+      expect(sameCut(NO_CUT, ROOF_CUT)).toBe(false);
+    });
+
+    it("calls a section plane a slider has moved a different section", () => {
+      const wide = weldCut("section", STAGE3, DEFAULT_PARAMS);
+      // hallWidth is sectionPlaneU()'s own second term, so a foot of hall moves the plane
+      // half a foot. From this camera nothing else about the cut moves with it, which is
+      // what the three checks after it establish -- so the plane is the only thing left for
+      // the comparison to notice.
+      const narrow = weldCut("section", STAGE3, { ...DEFAULT_PARAMS, hallWidth: 5.5 });
+      expect(wide.half!.u).not.toBe(narrow.half!.u);
+      expect(wide.roof).toBe(narrow.roof);
+      expect(sameParts(wide.walls, narrow.walls)).toBe(true);
+      expect(sameParts(wide.bays, narrow.bays)).toBe(true);
+      expect(sameCut(wide, narrow)).toBe(false);
+
+      // Which half is KEPT is part of the plane, and a mirrored one is the failure frames.ts
+      // warns about: the same numbers, the other half of the building.
+      const keep = -wide.half!.keep as 1 | -1;
+      const mirrored: WeldCut = { ...wide, half: { u: wide.half!.u, keep } };
+      expect(sameCut(wide, mirrored)).toBe(false);
+      // And a section is not roofOff, though every set is empty in both.
+      expect(sameCut(wide, { ...wide, half: null })).toBe(false);
+    });
+
+    it("notices one part exchanged for another, in either set", () => {
+      const cut = cutFor("wallsDown", STAGE4);
+      expect(cut.walls.size).toBeGreaterThan(0);
+      expect(cut.bays.size).toBeGreaterThan(0);
+      // An index no ring edge and no bay has, swapped in for one that is there: the sets
+      // keep their SIZE and only their contents differ, which is the pair a size comparison
+      // reports as equal.
+      const exchange = (s: ReadonlySet<number>) => {
+        const out = new Set(s);
+        out.delete([...s][0]!);
+        out.add(999);
+        return out;
+      };
+      expect(sameCut(cut, { ...cut, walls: exchange(cut.walls) })).toBe(false);
+      expect(sameCut(cut, { ...cut, bays: exchange(cut.bays) })).toBe(false);
+    });
+
+    it("compares part sets by their members and not just their count", () => {
+      expect(sameParts(new Set([1, 2, 3]), new Set([3, 2, 1]))).toBe(true);
+      expect(sameParts(new Set(), new Set())).toBe(true);
+      expect(sameParts(new Set([1, 2]), new Set([1, 2, 3]))).toBe(false);
+      expect(sameParts(new Set([1, 2, 3]), new Set([1, 2]))).toBe(false);
+      // Same size, no member in common: the pair a count alone calls equal.
+      expect(sameParts(new Set([1, 2]), new Set([3, 4]))).toBe(false);
+    });
   });
 });

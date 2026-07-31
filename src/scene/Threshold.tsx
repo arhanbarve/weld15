@@ -16,7 +16,7 @@
  * whole gable in a single frame and there is no sweep across it at all. The camera
  * enters through that gable, so it is the one face that must be crossed rather than
  * switched. World Y crosses it: the seam enters at the ridge, runs down the gable
- * triangle, over the eaves and down the wall. Hence `{ progress }` and no axis prop:
+ * triangle, over the eaves and down the wall. Hence a `progress` and no axis prop:
  * there is only one axis this can be.
  *
  * WHY onBeforeCompile AND NOT clippingPlanes
@@ -41,18 +41,19 @@
  *
  * WHY THE SURFACE IS REBUILT HERE
  * The line rides the walls and the roof, which is the same geometry WeldExterior
- * mounts. Taking it as a prop would save the rebuild, but the phase brief fixes this
- * component's props at `{ progress }` and a component whose only required input is a
- * number can be mounted anywhere; so the surface is built here, out of buildWeldCut(),
- * whose bays and roof features are built and thrown away -- the ugly part -- for about
- * sixty quads of duplicated vertex data. Neither is worth a looser interface.
+ * mounts. Taking those buffers as props would save the rebuild and it is not what the
+ * sweep needs: it needs them MERGED, which is what keeps this to one mesh, and a merge
+ * of two geometries this component did not allocate is two owners for one buffer. So
+ * the surface is built here, out of buildWeldCut(), whose bays and roof features are
+ * built and thrown away -- the ugly part -- for about sixty quads of duplicated vertex
+ * data. What IS taken as a prop is the cut, which is four fields and no buffers.
  *
  * It is no longer cached at module scope, and the cutaway is why. It was, on the argument
  * that neither the walls nor the roof depends on SuiteParams so nothing could invalidate
  * them; a cut can, and does. The surface is memoised on the cut instead and disposed when
  * that changes, which is what WeldExterior already does with its own four parts.
  *
- * WHY THIS READS THE CUTAWAY ITSELF, WHICH IS DUPLICATION AND IS STILL THE RIGHT CALL
+ * WHERE THE CUT COMES FROM, AND WHY IT IS A REQUIRED PROP
  * The sweep has to be built from the geometry the shell is ACTUALLY SHOWING. It was built
  * from the full buildWeld() and knew nothing about the cut, so with a cutaway active the
  * seam and its line rode a gable and walls that were not being drawn: at mode roofOff and
@@ -60,29 +61,23 @@
  * off. Cosmetic, and visible only while 0 < progress < 1, which is why it outlived the
  * commit that taught the shell about the cut.
  *
- * The clean fix is for WeldExterior to hand down the cut it has already computed: no
- * second hook, no second useFrame, and no way for the two to disagree. That is a change at
- * a call site this file may not edit, so the cut is derived here, and useWeldCut is LIFTED
- * rather than imported -- WeldExterior imports this module, so importing its hook back
- * would close a cycle, and the pattern's only other home would be weldGeometry.ts, which
- * is not a hook's file. The two copies are deliberately the same shape, down to the
- * quarter foot and the dropped position on a mode change, so they read against each other.
+ * So `cut` comes down from WeldExterior, which has already computed it for its own four
+ * meshes: one hook, one useFrame, one answer for the whole building. REQUIRED and not
+ * optional, because a fallback that quietly recomputed is a fallback that can quietly
+ * disagree, and there is no second mounter to accommodate -- WeldExterior is the only
+ * place this component appears, checked across src, app and tests.
  *
- * WHAT THE DUPLICATION COSTS, STATED RATHER THAN HIDDEN. Two hooks sample the camera on
- * their own frames, and weldCut()'s wallsDown branch is HYSTERETIC -- cutaway.ts's
- * WALL_HOLD_FT holds a dropped wall down until the camera is well back inside it -- so two
- * instances whose first sample fell at different points of the flight can disagree about a
- * wall the camera is loitering within half a foot of. That reads as one wall quad of seam
- * the shell is not showing, or one lit wall with no seam on it, for as long as the camera
- * stays in the hold band. It is strictly smaller than the defect it replaces, and handing
- * the cut down would remove it outright.
- *
- * The second cost is the SuiteParams, which are read off the store here and are a defaulted
- * PROP on WeldExterior. They agree on the current call site, because Experience.tsx passes
- * no params and that component falls back to the same store field; they would not agree for
- * a caller that passed its own, and the section plane is derived from them. The store is
- * still the right source -- a component whose only prop is a number has nowhere else to look
- * -- and this is the second reason the cut belongs to whoever already has both.
+ * The two things one answer buys, both of which a second copy of the hook could only
+ * document. weldCut()'s wallsDown branch is HYSTERETIC -- cutaway.ts's WALL_HOLD_FT holds a
+ * dropped wall down until the camera is well back inside it -- so it is PATH-DEPENDENT, and
+ * two instances whose first sample fell at different points of the flight could hold
+ * opposite answers about a wall the camera is loitering beside. And the SuiteParams the cut
+ * is derived from are WeldExterior's, which are a defaulted prop there and the store field
+ * here; they agree on the current call site and would not for a caller that passed its own.
+ * The section plane is derived from them, so that was a latent defect and not a style
+ * difference. What params still reaches from here goes to buildWeldCut() for the bays, which
+ * are thrown away: shellGeometry() and gableRoof(), the two parts the sweep actually rides,
+ * take no params at all, so the surface cannot disagree with the shell about anything.
  *
  * The merge is what keeps it to ONE draw call. walls and roof carry the same two
  * attributes (position and normal, both Float32, both indexed), which is what
@@ -121,23 +116,18 @@
  * built from a closure variable would silently get the first material's program.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useFrame } from "@react-three/fiber";
+import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 // three-stdlib exports the older name; three's own copy calls it mergeGeometries.
 import { mergeBufferGeometries } from "three-stdlib";
 import { useStore } from "@/state/store";
 import { WELD } from "@/geo/place";
 import { type SuiteParams } from "@/geo/rooms";
-import { type CutawayMode } from "./cutaway";
 import { SCAN } from "./materials";
 import {
   buildWeldCut,
-  NO_CUT,
-  ROOF_CUT,
   TOWER_CONTROLS,
   TOWER_DEFAULTS,
-  weldCut,
   type WeldCut,
 } from "./weldGeometry";
 
@@ -339,102 +329,18 @@ function scanlineSurface(params: SuiteParams, cut: WeldCut): THREE.BufferGeometr
   return merged;
 }
 
-/** Two sets of part indices, compared by content. */
-function sameParts(a: ReadonlySet<number>, b: ReadonlySet<number>): boolean {
-  if (a.size !== b.size) return false;
-  for (const i of a) if (!b.has(i)) return false;
-  return true;
-}
-
-/**
- * Two cuts, compared by content rather than by identity.
- *
- * WeldExterior's, lifted with its reasoning: weldCut() allocates fresh sets on every call,
- * so identity would report a change every time it is called and rebuild the surface with
- * it. The identity check on the front is not redundant -- the two camera-free modes return
- * the module constants NO_CUT and ROOF_CUT, so those settle in one comparison -- and `half`
- * is compared field by field because a plane a slider has moved is a different section
- * even though every set is still empty.
- */
-function sameCut(a: WeldCut, b: WeldCut): boolean {
-  if (a === b) return true;
-  if (a.roof !== b.roof) return false;
-  if ((a.half === null) !== (b.half === null)) return false;
-  if (a.half !== null && b.half !== null) {
-    if (a.half.u !== b.half.u || a.half.keep !== b.half.keep) return false;
-  }
-  return sameParts(a.walls, b.walls) && sameParts(a.bays, b.bays);
-}
-
-/**
- * What the cutaway is currently taking off the shell, from where the camera actually is.
- *
- * WeldExterior's useWeldCut, lifted -- see the header for why it is a copy and what the
- * copy costs. The camera exists only on the three.js camera object, so it has to be read
- * in a useFrame, and what must not happen per frame is a React render: hence the quarter
- * foot, which is half the drag grid, and the content comparison above it.
- *
- * `drawn` is the one thing this copy adds, and it is the opposite decision from the one
- * WeldExterior takes. That component runs its hook whatever the shell's opacity is, on the
- * grounds that a parked camera would otherwise show a full shell for a frame when the
- * cutaway came back. This one is gated, because the surface is not drawn outside the
- * crossing at all: ungated, a stage-3 orbit in wallsDown would walk bays() every quarter
- * foot to rebuild a geometry nobody sees, and under reduced motion -- where there is no
- * sweep and never a mesh -- it would do the same for the whole of stages 2 to 4. The frame
- * of staleness that buys lands where lineFade() has the line at zero alpha, which is the
- * first 6% of the sweep.
- */
-function useWeldCut(mode: CutawayMode, params: SuiteParams, drawn: boolean): WeldCut {
-  const [cut, setCut] = useState<WeldCut>(NO_CUT);
-  const live = useRef<WeldCut>(NO_CUT);
-  const at = useRef<[number, number, number]>([NaN, NaN, NaN]);
-
-  useFrame(({ camera }) => {
-    if (!drawn) return;
-
-    // The two modes that need no camera, settled without one. Both answers are module
-    // constants, so this costs one comparison per frame and allocates nothing.
-    if (mode === "none" || mode === "roofOff") {
-      const next = mode === "none" ? NO_CUT : ROOF_CUT;
-      if (live.current !== next) {
-        live.current = next;
-        setCut(next);
-      }
-      return;
-    }
-
-    const p = camera.position;
-    const [x, y, z] = at.current;
-    if (Math.abs(p.x - x) < 0.25 && Math.abs(p.y - y) < 0.25 && Math.abs(p.z - z) < 0.25) return;
-    at.current = [p.x, p.y, p.z];
-
-    const next = weldCut(mode, [p.x, p.y, p.z], params, live.current);
-    if (sameCut(next, live.current)) return;
-    live.current = next;
-    setCut(next);
-  });
-
-  // A mode change has to recompute even if the camera has not moved an inch, and so does
-  // becoming live: the remembered position is from before the sweep started.
-  useEffect(() => {
-    at.current = [NaN, NaN, NaN];
-  }, [mode, params, drawn]);
-
-  return cut;
-}
-
 /**
  * The scanline crossing Weld as its shell dissolves.
  *
  * `progress` is the dissolve's own ramp -- stages.ts's thresholdOpacity() shell
  * value read the other way up, so 0 is an intact shell and 1 a gone one. It is
  * passed down from WeldExterior rather than recomputed from the store, so the line
- * cannot be a frame out of step with the surface it is drawn on.
+ * cannot be a frame out of step with the surface it is drawn on. `cut` arrives the same
+ * way and for the same reason, one layer further out: see the header.
  */
-export function Threshold({ progress }: { progress: number }) {
+export function Threshold({ progress, cut }: { progress: number; cut: WeldCut }) {
   const reduced = useStore((s) => s.reducedMotion);
   const params = useStore((s) => s.params);
-  const mode = useStore((s) => s.cutaway);
 
   /**
    * Whether the line is drawn at all, and therefore whether its surface is worth having.
@@ -446,13 +352,13 @@ export function Threshold({ progress }: { progress: number }) {
    * that is not happening. And outside the crossing there is nothing to draw, where a
    * mounted mesh at zero alpha still costs its draw calls.
    *
-   * Hoisted above the hooks so that the cut and the geometry are skipped as well, not just
-   * the mesh. Both are the same claim: work whose only consumer is a mesh that is not
-   * mounted.
+   * Hoisted above the memos so that the GEOMETRY is skipped as well, not just the mesh,
+   * which is where the saving is: ungated, a stage-3 orbit in wallsDown would rebuild a
+   * surface nobody sees every time the cut moved, and reduced motion -- which never mounts
+   * this mesh at all -- would do it for the whole of stages 2 to 4. The cut itself is free
+   * to have, because WeldExterior computes it for its own four meshes regardless.
    */
   const drawn = !reduced && progress > 0 && progress < 1;
-
-  const cut = useWeldCut(mode, params, drawn);
 
   const { material, uniforms } = useMemo(() => {
     const u: LineUniforms = { ...sweepUniforms(), uLineFade: { value: 0 } };
