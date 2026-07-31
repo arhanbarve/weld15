@@ -277,12 +277,21 @@ export function Lighting() {
 
   const { scene } = useThree();
   const environment = useEnvironment();
+  // STAGE 5 ONLY. scene.environment is a scene-WIDE property: an unconditional
+  // assignment gives it to every PBR material in the tree, including
+  // WeldExterior's brick and slate, which have never had an ambient specular
+  // response before and are not supposed to now -- the cyanotype's whole
+  // aesthetic is controlled lighting with no bounce and no reflection. Caught
+  // by tests/e2e/threshold.spec.ts's "roofOff mid-sweep should light nothing"
+  // gate, which the env map broke by giving the dissolving shell something to
+  // reflect during the crossing.
   useEffect(() => {
+    if (stage !== 5) return;
     scene.environment = environment;
     return () => {
       if (scene.environment === environment) scene.environment = null;
     };
-  }, [scene, environment]);
+  }, [scene, environment, stage]);
 
   // Nothing here is per-frame. The store's date and hour move on a HUD event, so
   // this body runs on user input, not on render -- which is why the Colors and

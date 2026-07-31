@@ -524,24 +524,23 @@ test.describe("P7 -- somebody can stand in Weld 15 and walk it", () => {
     const walkingPerf = await perfOf(page);
 
     /*
-     * 40, which is edit.spec.ts's ceiling for the same stage, and this gate is the reason
-     * that number needs revisiting rather than a second opinion about it.
+     * 50, matching edit.spec.ts's own ceiling for the same stage (raised there in P10 for
+     * the same reason).
      *
-     * MEASURED on this build at 1280 x 720, camera settled: 38 idle at stage 5 and 37 to 38
-     * while walking. First person adds NO geometry -- `geometries` and `casters` are
-     * unchanged, it moves the camera and nothing else -- so what the walking figure shows is
-     * the frustum, not a cost.
+     * RAISED FROM 40 (P7) TO 50 (P10). MEASURED on this build at 1280 x 720, camera
+     * settled: 46 idle at stage 5, 43 while walking. First person adds NO geometry --
+     * `geometries` and `casters` are unchanged, it moves the camera and nothing else -- so
+     * what the walking figure shows is the frustum, not a cost.
      *
-     * The 38 is itself new, and it is stage 5 standing in the hall rather than in a bedroom
-     * corner: 35 calls and 1,385 triangles from the corner against 38 and 1,469 from the
-     * hall, same scene, same casters. That is P7's debt being paid, and it leaves 2 calls of
-     * headroom under 40 rather than 5 -- so edit.spec.ts's own budget gate, which adds a
-     * live drag gesture's 3, now reads 41 and fails. stages.ts records the measurement where
-     * the decision is; that file is another owner's in this phase and its ceiling is not
-     * changed from here.
+     * The 46 is itself new: real furniture (geo/pieces.ts, batched by kind AND material --
+     * 11 batches, up from 8), interior sash joinery/glazing (geo/sash.ts) and
+     * baseboard/rail/cornice (geo/trim.ts) replaced the old shared-unit-box furniture and
+     * flat window panes -- every one of those additions is what the phase set out to draw.
+     * 46 + edit.spec.ts's live-gesture headroom of 3 is 49, which is why both ceilings now
+     * agree at 50 rather than disagreeing by one call the way 38/40 and 41 did.
      */
     console.log(`draw calls: idle ${idle.calls}, walking ${walkingPerf.calls}`);
-    expect(walkingPerf.calls, `walking ${walkingPerf.calls}`).toBeLessThanOrEqual(40);
+    expect(walkingPerf.calls, `walking ${walkingPerf.calls}`).toBeLessThanOrEqual(50);
     expect(
       walkingPerf.calls - idle.calls,
       `idle ${idle.calls}, walking ${walkingPerf.calls}`,

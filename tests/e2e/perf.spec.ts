@@ -152,7 +152,13 @@ const BUDGET = [
   // triangles, and 16,888 against 120,000 is not the constraint.
   { row: "Campus", stage: 2, calls: 13, triangles: 120_000, measured: "11 calls / 16,888 tris" },
   { row: "Weld exterior", stage: 4, calls: 8, triangles: 40_000, measured: "4 calls / 416 tris" },
-  { row: "Suite", stage: 5, calls: 25, triangles: 80_000, measured: "21 calls / 1,452 tris" },
+  // RAISED FROM 25 TO 35 IN P10. Real furniture (geo/pieces.ts, batched by kind AND
+  // material -- 11 batches, up from 8), interior sash joinery and glazing (geo/sash.ts)
+  // and baseboard/rail/cornice (geo/trim.ts) replaced the old shared-unit-box furniture
+  // and flat window panes: every one of those additions is what the phase set out to
+  // draw. Measured on this build, reduced motion, stage 5: 29 calls / 10,044 tris.
+  // Triangles stay far under the existing 80,000 ceiling; only calls moved.
+  { row: "Suite", stage: 5, calls: 35, triangles: 80_000, measured: "29 calls / 10,044 tris" },
 ];
 
 /**
@@ -255,6 +261,14 @@ test("the perf probe is publishing a live frame, not a healthy-looking dead one"
    * gated, per the rule at the top of this file.
    */
   await openAt(page, 5);
+  // Extra settle time, P10: stage 5 now compiles more materials on first mount
+  // (hardware, plaster's tooth, sash joinery among them) and builds a one-time
+  // PMREM environment map, both real but one-time costs concentrated in the
+  // first few frames after navigation -- openAt's shared 2,400 ms is tuned for
+  // every other caller in this file and is not widened here, but this specific
+  // assertion (a frame count over a real-time window) needs the ring to have
+  // actually filled, not just for the app to be present.
+  await page.waitForTimeout(1500);
   const p = await perf(page);
   // Before the log line, which would otherwise throw on the field access and report a
   // TypeError instead of the reason. Verified by removing <Perf /> from Experience.tsx.
