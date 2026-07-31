@@ -17,10 +17,11 @@ import { test, expect, type Page } from "@playwright/test";
  *
  * WHY THE 120 s BUDGET
  * playwright.config.ts already allows 90 s because headless Chromium runs SwiftShader in
- * software. The first test walks all six stages, waits for each camera move to settle and
- * runs axe twice per stage -- closed and open, which are two different documents -- so it
- * is legitimately the longest gate in the suite. edit.spec.ts sets the same 120 s for the
- * same class of reason.
+ * software. Each axe test boots the app, flies to its stage, waits for the camera to settle
+ * and runs axe twice -- closed and open, which are two different documents. edit.spec.ts
+ * sets the same 120 s for the same class of reason. scanStage's docblock records why the
+ * stage loop is outside the test rather than inside it, which is the one thing here that
+ * was changed by a failure rather than designed.
  */
 test.setTimeout(120_000);
 
@@ -69,73 +70,92 @@ function describeViolations(vs: { id: string; impact?: string | null; help: stri
 
 const STAGE_NAMES = ["Orbit", "Cambridge", "Harvard Yard", "Weld Hall", "Threshold", "Weld 15"];
 
-test.describe("P8 -- the model has a text alternative", () => {
-  test("axe-core finds nothing on any of the six stages, open or closed", async ({ page }) => {
-    await open(page);
-
-    const report: string[] = [];
-    for (const stage of [0, 1, 2, 3, 4, 5]) {
-      await gotoStage(page, stage);
-
-      // TWO scans per stage, because they are two different documents and the shipping
-      // default is the closed one. Closed, the page carries the toggle and a live region
-      // whose text has just changed; open, it carries a heading tree, a scrollable
-      // region, an eight-column table of seven rooms and a second button. A gate that
-      // only scanned the expanded form would pass a broken default, and one that only
-      // scanned the default would never look at the table at all.
-      for (const state of ["closed", "open"] as const) {
-        const expanded = (await page.getByTestId("a11y-alt-toggle").getAttribute("aria-expanded")) === "true";
-        if (expanded !== (state === "open")) {
-          await page.getByTestId("a11y-alt-toggle").click();
-        }
-        // The disclosure's own state, from the DOM, before anything is measured against it.
-        await expect(page.getByTestId("a11y-alt-toggle")).toHaveAttribute(
-          "aria-expanded",
-          state === "open" ? "true" : "false",
-        );
-        if (state === "open") await page.getByTestId("a11y-alt").waitFor();
-        else await expect(page.getByTestId("a11y-alt")).toHaveCount(0);
-
-        const r = await new AxeBuilder({ page }).analyze();
-        report.push(
-          `stage ${stage} ${state}: ${r.violations.length} violations, ` +
-            `${r.passes.length} passes, ${r.incomplete.length} incomplete`,
-        );
-        expect(
-          r.violations,
-          `stage ${stage}, description ${state}:\n${describeViolations(r.violations)}`,
-        ).toEqual([]);
-
-        /*
-         * The one INCOMPLETE result, accounted for rather than ignored.
-         *
-         * Every scan reports exactly one: color-contrast, and its fourteen nodes are all
-         * in other owners' chrome -- `.hud-stage`, `.hud-num`, the six stage buttons,
-         * the two `.hud-t` rows, the sun readout, the area readout and Sources' summary.
-         * Two causes, both read out of axe's own messages: "background color could not
-         * be determined due to a background gradient", because the HUD sits on
-         * --chip-scan over .vignette's radial gradient, and "content is too short to
-         * determine if it is actual text content" for the single-digit stage buttons.
-         * Neither is a failure and neither is this owner's to fix.
-         *
-         * What IS asserted is that none of those nodes is A11yAlt's. That is not
-         * bookkeeping: it is the gate on the choice globals.css records, which is that
-         * this panel takes an opaque --void-deep ground instead of a translucent chip
-         * precisely so a contrast ratio can be determined at all. A panel axe cannot
-         * measure is a panel nobody has checked, on either of the two grounds the app
-         * crosses.
-         */
-        const unresolved = r.incomplete.flatMap((v) =>
-          v.nodes.map((n) => n.target.join(" ")).filter((t) => t.includes("a11y-alt")),
-        );
-        expect(
-          unresolved,
-          `stage ${stage} ${state}: axe could not resolve contrast on ${unresolved.join(", ")}`,
-        ).toEqual([]);
-      }
+/**
+ * Both axe scans for one stage. The stage loop is OUTSIDE the test, for a measured reason.
+ *
+ * As one test walking all six stages this took 1.2 minutes on its own and then exceeded the
+ * 120 s budget above when the whole e2e suite ran, because five other specs are driving
+ * WebGL scenes through SwiftShader on the same cores. That is the third time this project
+ * has met the same failure -- campus.spec.ts failed only under parallel load, journey.spec.ts
+ * tipped over the 30 s default as the suite grew -- and the two earlier fixes both raised a
+ * budget.
+ *
+ * Six tests is the better fix here, and not because the work is smaller: it is slightly
+ * larger, since each test boots and hydrates the app again. What changes is that each stage
+ * gets the whole 120 s instead of a sixth of it, Playwright spreads them across workers, and
+ * a failure names the stage instead of naming the loop. Trimming the scans was never an
+ * option -- twelve is what covers six stages in two states, and the states are two different
+ * documents.
+ */
+async function scanStage(page: Page, stage: number): Promise<string[]> {
+  const report: string[] = [];
+  // TWO scans per stage, because they are two different documents and the shipping
+  // default is the closed one. Closed, the page carries the toggle and a live region
+  // whose text has just changed; open, it carries a heading tree, a scrollable
+  // region, an eight-column table of seven rooms and a second button. A gate that
+  // only scanned the expanded form would pass a broken default, and one that only
+  // scanned the default would never look at the table at all.
+  for (const state of ["closed", "open"] as const) {
+    const expanded = (await page.getByTestId("a11y-alt-toggle").getAttribute("aria-expanded")) === "true";
+    if (expanded !== (state === "open")) {
+      await page.getByTestId("a11y-alt-toggle").click();
     }
-    console.log(report.join("\n"));
-  });
+    // The disclosure's own state, from the DOM, before anything is measured against it.
+    await expect(page.getByTestId("a11y-alt-toggle")).toHaveAttribute(
+      "aria-expanded",
+      state === "open" ? "true" : "false",
+    );
+    if (state === "open") await page.getByTestId("a11y-alt").waitFor();
+    else await expect(page.getByTestId("a11y-alt")).toHaveCount(0);
+
+    const r = await new AxeBuilder({ page }).analyze();
+    report.push(
+      `stage ${stage} ${state}: ${r.violations.length} violations, ` +
+        `${r.passes.length} passes, ${r.incomplete.length} incomplete`,
+    );
+    expect(
+      r.violations,
+      `stage ${stage}, description ${state}:\n${describeViolations(r.violations)}`,
+    ).toEqual([]);
+
+    /*
+     * The one INCOMPLETE result, accounted for rather than ignored.
+     *
+     * Every scan reports exactly one: color-contrast, and its fourteen nodes are all
+     * in other owners' chrome -- `.hud-stage`, `.hud-num`, the six stage buttons,
+     * the two `.hud-t` rows, the sun readout, the area readout and Sources' summary.
+     * Two causes, both read out of axe's own messages: "background color could not
+     * be determined due to a background gradient", because the HUD sits on
+     * --chip-scan over .vignette's radial gradient, and "content is too short to
+     * determine if it is actual text content" for the single-digit stage buttons.
+     * Neither is a failure and neither is this owner's to fix.
+     *
+     * What IS asserted is that none of those nodes is A11yAlt's. That is not
+     * bookkeeping: it is the gate on the choice globals.css records, which is that
+     * this panel takes an opaque --void-deep ground instead of a translucent chip
+     * precisely so a contrast ratio can be determined at all. A panel axe cannot
+     * measure is a panel nobody has checked, on either of the two grounds the app
+     * crosses.
+     */
+    const unresolved = r.incomplete.flatMap((v) =>
+      v.nodes.map((n) => n.target.join(" ")).filter((t) => t.includes("a11y-alt")),
+    );
+    expect(
+      unresolved,
+      `stage ${stage} ${state}: axe could not resolve contrast on ${unresolved.join(", ")}`,
+    ).toEqual([]);
+  }
+  return report;
+}
+
+test.describe("P8 -- the model has a text alternative", () => {
+  for (const stage of [0, 1, 2, 3, 4, 5]) {
+    test(`axe-core finds nothing at stage ${stage}, description open or closed`, async ({ page }) => {
+      await open(page);
+      await gotoStage(page, stage);
+      console.log((await scanStage(page, stage)).join("\n"));
+    });
+  }
 
   test("the live region is in the accessibility tree, and its text follows the stage", async ({
     page,
