@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { layerOpacity, type LayerOpacity } from "./altitude";
-import { GROUND_LEVELS, levelUrl, loadTexture, quadOf, type GroundLevelId } from "./imagery";
+import { GROUND_LEVELS, levelUrls, loadTexture, quadOf, type GroundLevelId } from "./imagery";
 
 /**
  * The photographed ground: four nested quads, cross-dissolved by altitude, resolving into the
@@ -122,9 +122,9 @@ function Quad({
   const quad = useMemo(() => quadOf(id), [id]);
 
   useEffect(() => {
-    const url = levelUrl(id);
-    if (!url) return;
-    return loadTexture(url, setTex);
+    const urls = levelUrls(id);
+    if (urls.length === 0) return;
+    return loadTexture(urls, setTex);
   }, [id]);
 
   const uniforms = useMemo(

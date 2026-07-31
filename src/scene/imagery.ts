@@ -61,43 +61,37 @@ export const GROUND_LEVELS = ["L1", "L2", "L3", "L4"] as const;
 export type GroundLevelId = (typeof GROUND_LEVELS)[number];
 
 /**
- * Which encoding this browser gets.
+ * The URLs to try for a level, best first.
  *
- * Decided ONCE, at module load, rather than per texture. It is a synchronous canvas capability
- * test rather than an async decode probe, because the answer is needed before the first texture
- * request and an async test would either delay every load or race the first one.
+ * A LIST RATHER THAN A CAPABILITY TEST, AND THE FIRST VERSION GOT THIS WRONG. It asked
+ * `canvas.toDataURL("image/avif")` and served WebP if that did not come back as AVIF. That tests
+ * whether the browser can ENCODE AVIF, which Chrome cannot -- it returns a PNG data URL -- while
+ * Chrome decodes AVIF perfectly well. So every Chrome user was served the WebP plates: 2.98 MB
+ * instead of 1.76 MB, for a capability they had. A false negative, and an invisible one, because
+ * the wrong answer still works.
  *
- * AVIF is supported by every browser this desktop-only app targets (DesktopOnly.tsx gates it),
- * and the WebP plates are 2.6x the bytes. They ship anyway for one release, per P9.md section
- * 8's second question answered as proposed -- a browser without AVIF must not get a blank Earth,
- * and finding that out from a bug report rather than from a fallback is not worth 3.4 MB.
+ * There is no reliable synchronous test for DECODE support, so this stops guessing. The loader
+ * tries AVIF, and if the decode fails it tries WebP -- which is what a <picture> element does, and
+ * it is correct by construction rather than by a lookup table of browser behaviour. The cost of
+ * being wrong is one failed request on a browser without AVIF, against 1.2 MB saved on every
+ * browser with it.
+ *
+ * Both formats still ship, per P9.md section 8's second question answered as proposed: a browser
+ * without AVIF must not get a blank Earth, and finding that out from a bug report is not worth the
+ * bytes saved by dropping the fallback.
  */
-function pickFormat(): "avif" | "webp" {
-  if (typeof document === "undefined") return "avif";
-  try {
-    const c = document.createElement("canvas");
-    c.width = 1;
-    c.height = 1;
-    if (c.toDataURL("image/avif").startsWith("data:image/avif")) return "avif";
-  } catch {
-    // A browser that throws on an unknown mime type is a browser without AVIF.
-  }
-  return "webp";
-}
-
-let format: "avif" | "webp" | null = null;
-
-export function imageryFormat(): "avif" | "webp" {
-  if (format === null) format = pickFormat();
-  return format;
-}
-
-/** The URL for a level in the format this browser can decode. */
-export function levelUrl(id: string): string | null {
+export function levelUrls(id: string): string[] {
   const level = manifest.levels[id];
-  if (!level) return null;
-  const entry = level.files[imageryFormat()] ?? level.files.avif ?? level.files.webp;
-  return entry ? `/imagery/${entry.file}` : null;
+  if (!level) return [];
+  return (["avif", "webp"] as const)
+    .map((fmt) => level.files[fmt]?.file)
+    .filter((f): f is string => typeof f === "string")
+    .map((f) => `/imagery/${f}`);
+}
+
+/** The preferred URL for a level, or null. Kept for callers that only want one. */
+export function levelUrl(id: string): string | null {
+  return levelUrls(id)[0] ?? null;
 }
 
 /**
@@ -135,14 +129,19 @@ export function quadOf(id: GroundLevelId): {
  * symptom, and the one that gets mistaken for a tint bug.
  */
 export function loadTexture(
-  url: string,
+  urls: string | string[],
   onReady: (t: THREE.Texture) => void,
 ): () => void {
+  const queue = typeof urls === "string" ? [urls] : [...urls];
   let live = true;
   let texture: THREE.Texture | null = null;
-  new THREE.TextureLoader().load(
-    url,
-    (t) => {
+
+  const attempt = (): void => {
+    const url = queue.shift();
+    if (url === undefined || !live) return;
+    new THREE.TextureLoader().load(
+      url,
+      (t) => {
       texture = t;
       if (!live) {
         t.dispose();
@@ -157,18 +156,26 @@ export function loadTexture(
       // CLAMP, not the default repeat. A repeating ground quad tiles Harvard Yard across
       // Massachusetts, which is both wrong and hilarious. It matters because the horizon fade
       // samples slightly outside the quad at the very edge.
-      t.wrapS = THREE.ClampToEdgeWrapping;
-      t.wrapT = THREE.ClampToEdgeWrapping;
-      onReady(t);
-    },
-    undefined,
-    () => {
-      // Swallowed on purpose: a level that fails to load leaves its quad unrendered, and the
-      // band overlaps mean something else is already covering that altitude. journey.spec.ts
-      // asserts no console errors across the descent, so a throw here would fail a gate for a
-      // condition the design already handles.
-    },
-  );
+        t.wrapS = THREE.ClampToEdgeWrapping;
+        t.wrapT = THREE.ClampToEdgeWrapping;
+        onReady(t);
+      },
+      undefined,
+      () => {
+        // FALL THROUGH TO THE NEXT FORMAT, which is what makes levelUrls() a list rather than a
+        // choice. A browser that cannot decode AVIF fails here and gets the WebP plate on the next
+        // attempt; a browser that can never reaches the second entry.
+        //
+        // When the queue is empty this returns silently, on purpose: a level that fails entirely
+        // leaves its quad unrendered, and altitude.ts's band overlaps mean something else is
+        // already covering that altitude. journey.spec.ts asserts no console errors across the
+        // descent, so throwing here would fail a gate for a condition the design handles.
+        if (live) attempt();
+      },
+    );
+  };
+
+  attempt();
   return () => {
     live = false;
     texture?.dispose();

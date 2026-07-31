@@ -40,6 +40,21 @@ import { keyframes } from "./stages";
  * 1.6 s per decade puts the full run from orbit to Weld Hall at about 9 seconds: 5.2 for stage
  * 0, 2.1 for stage 1, 1.7 for stage 2. Long enough to read as a flight rather than a cut, short
  * enough that nobody reaches for the skip control.
+ *
+ * MEASURED HEADLESS AT 17.6 s, WHICH IS 1.9x THE DESIGNED FIGURE, AND THE CONSTANT IS LEFT ALONE.
+ * Traced: orbit at 0 s, stage 0 t = 0.44 at 9.2 s, stage 2 at 15.3 s, landed at stage 3 and 110 ft
+ * at 17.6 s, no console errors and the control retires itself at FLY_DOWN_END. So the flight is
+ * correct; only its pace is off, and only in that environment.
+ *
+ * The rate is `delta / (decades * SECONDS_PER_DECADE)`, so it is framerate-independent by
+ * construction -- a slower machine takes bigger steps, not more of them. Accumulating only 2.3 s of
+ * delta over 9.2 s of wall clock therefore means frames are not being DELIVERED rather than that the
+ * rate is wrong, which is what headless SwiftShader does: perf.spec.ts records ~100 ms medians there
+ * against 2.5-2.8 ms on real hardware, a factor of 25.
+ *
+ * So this is NOT tuned against that measurement, deliberately: dividing the constant by 1.9 to make
+ * a software-rendered run land at 9 s would make every real run land at under 5, which is a cut with
+ * extra steps. Re-measure headed on real hardware before touching it.
  */
 const SECONDS_PER_DECADE = 1.6;
 

@@ -11,6 +11,7 @@ import { FlyDown } from "./FlyDown";
 import { Lighting } from "./Lighting";
 import { Globe } from "./Globe";
 import { Ground } from "./Ground";
+import { Labels } from "./Labels";
 import { Campus } from "./Campus";
 import { WeldExterior } from "./WeldExterior";
 import { Suite } from "./Suite";
@@ -135,6 +136,12 @@ export default function Experience() {
               campus, because the ground and the buildings on it arrive together. */}
           <Ground visible={vis.campus} />
           <Campus visible={vis.campus} highlightWeld={stage >= 2} />
+          {/* CONDITIONALLY MOUNTED, not merely made invisible, and that is a measured decision.
+              drei's <Html> portals a real DOM node and repositions it every frame; five of them
+              kept running at stages 4 and 5, where no place label can be on screen at all, and the
+              extra per-frame DOM work was enough to push a11y.spec.ts's throttled-announcement
+              measurement past its window. An invisible <Labels> is not free; an unmounted one is. */}
+          {vis.campus ? <Labels /> : null}
           <WeldExterior visible={vis.weld} opacity={shell} />
           <Suite
             visible={vis.interior}

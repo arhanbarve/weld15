@@ -8,7 +8,7 @@ import { subsolarPoint } from "@/geo/solar";
 import { useStore } from "@/state/store";
 import { cambridgeInstant } from "./Lighting";
 import { layerOpacity } from "./altitude";
-import { levelUrl, loadTexture } from "./imagery";
+import { levelUrls, loadTexture } from "./imagery";
 import { assertRigVisible, geoToSite, globeRig, weldBasis, type Vec3 } from "./globeRig";
 
 /**
@@ -264,9 +264,9 @@ export function Globe({ visible }: { visible: boolean }) {
    */
   const [day, setDay] = useState<THREE.Texture | null>(null);
   useEffect(() => {
-    const url = levelUrl("L0");
-    if (!url) return;
-    return loadTexture(url, setDay);
+    const urls = levelUrls("L0");
+    if (urls.length === 0) return;
+    return loadTexture(urls, setDay);
   }, []);
 
   /**

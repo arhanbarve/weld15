@@ -243,6 +243,29 @@ button,
   min-height: 44px;
 }
 
+/* ---------- progressive place labels ---------- */
+
+/* STANDS ALONE rather than riding .weld-chip, and the duplication is deliberate. These chips did
+   carry both classes, which was less CSS and broke two campus.spec.ts selectors: `.weld-chip` is
+   how the suite finds WELD's label, and it started matching five pieces of scenery too. A class
+   name that a test selects on is an interface.
+
+   Dimmer and unbordered where Weld's chip is crimson-bordered, because a place name is context and
+   Weld is the subject; giving them the same border would make scenery shout as loudly as the
+   building the whole app is about. Opacity and display are written per frame by Labels.tsx. */
+.place-chip {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  border-radius: 1px;
+  padding: 0.25rem 0.5rem;
+  background: rgba(4, 20, 38, 0.62);
+  color: var(--dim);
+}
+
 /* ---------- imagery credit ---------- */
 
 /* BOTTOM RIGHT, which is the last free corner: top-left is A11yAlt, top-centre the fly-down,
