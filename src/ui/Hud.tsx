@@ -10,6 +10,7 @@ import { keyframes, visibility } from "@/scene/stages";
 import type { NudgeDir } from "@/geo/drag";
 import { UrlSync } from "./UrlSync";
 import { Sources } from "./Sources";
+import { A11yAlt } from "./A11yAlt";
 
 /**
  * Stage scrubber, stage name, the daylight controls, the stage-3 orbit keys, and
@@ -254,6 +255,10 @@ export function Hud() {
   const setCutaway = useStore((s) => s.setCutaway);
   const occupancy = useStore((s) => s.occupancy);
   const setOccupancy = useStore((s) => s.setOccupancy);
+  // The fit-out itself, not just its length: A11yAlt lists what stands in each room, and
+  // the panel's own controls take counts. Read here rather than inside A11yAlt because
+  // that component takes every fact as a prop and imports no store -- its header says why.
+  const pieces = useStore((s) => s.pieces);
   const setParams = useStore((s) => s.setParams);
   const notice = useStore((s) => s.notice);
   const select = useStore((s) => s.select);
@@ -376,6 +381,28 @@ export function Hud() {
       <button className="skip" onClick={skip} data-testid="skip">
         Skip to the room
       </button>
+
+      {/* The written description of the frame, which is the only route into this app's
+          content for anyone who cannot see a canvas -- and the only one at all if WebGL
+          never comes up. Mounted HERE, between skip and the HUD, and both neighbours are
+          the reason: after skip so the first Tab still reaches the escape hatch, and
+          before the HUD so tab order follows visual order, since this dock is top-left
+          and the HUD is centred. A11yAlt.tsx's header carries the full account.
+
+          Every prop is a value this component already holds for its own controls, which
+          is what keeps the description and the picture from drifting: there is no second
+          source for the stage, the suite or the fit-out. */}
+      <A11yAlt
+        stage={stage}
+        stageName={STAGES[stage].name}
+        t={t}
+        suite={suite}
+        pieces={pieces}
+        occupancy={occupancy}
+        cutaway={cutaway}
+        orbit={orbit}
+        reducedMotion={reduced}
+      />
 
       <div className={stage === LAST_STAGE ? "hud hud-room" : "hud"} data-testid="hud">
         <div className="hud-stage" data-testid="stage-name">
