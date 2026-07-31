@@ -7,7 +7,6 @@ import { footprintArea } from "@/geo/walls";
 import { Panel } from "./Panel";
 import { STAGE3_CLAMP, clampOrbit, orbitOf, type Orbit } from "@/scene/orbit";
 import { keyframes, visibility } from "@/scene/stages";
-import { places } from "@/scene/route";
 import type { NudgeDir } from "@/geo/drag";
 import { UrlSync } from "./UrlSync";
 import { Sources } from "./Sources";
@@ -91,18 +90,6 @@ const ZOOM_PER_PRESS = (STAGE3_CLAMP.maxRadius / STAGE3_CLAMP.minRadius) ** (1 /
  * value you actually stopped on.
  */
 const ANNOUNCE_MS = 400;
-
-/**
- * A place's button face: the label up to its em dash.
- *
- * Only K has one -- "K — second common room" -- and six buttons in a row that is already
- * competing with the stage scrubber for the width of the HUD cannot each carry a clause.
- * The FULL label goes on the aria-label, so nothing is lost to a reader: what is shortened
- * is the face, which sits beside five others that name themselves.
- */
-function placeFace(label: string): string {
-  return label.split(" — ")[0]!;
-}
 
 /**
  * How wide the first-person row is allowed to get before it wraps, rem.
@@ -327,8 +314,6 @@ export function Hud() {
   const walking = useStore((s) => s.firstPerson !== null);
   const walkRoom = useStore((s) => s.firstPerson?.room ?? null);
   const enterFirstPerson = useStore((s) => s.enterFirstPerson);
-  const leaveFirstPerson = useStore((s) => s.leaveFirstPerson);
-  const goToPlace = useStore((s) => s.goToPlace);
 
   const [panelOpen, setPanelOpen] = useState(false);
 
@@ -389,22 +374,10 @@ export function Hud() {
    */
   const [said, setSaid] = useState(() => sayOrbit(seed));
 
-  /**
-   * The named places a viewer can be sent to, hall first.
-   *
-   * route.ts's places(), which is the REACHABLE rooms over doorways rather than every
-   * room: the 7.5 ft strip beside the bathroom has no door on purpose, and offering to
-   * send somebody somewhere they cannot walk out of would be a control that lies. Memoised
-   * on the suite because places() builds a WalkCtx, which walks a grid.
-   */
-  const spots = useMemo(() => places(suite), [suite]);
-
   /** The room the walker is in, in words, or what is true instead. */
   const walkReading = !walking
     ? "not walking"
-    : (spots.find((p) => p.id === walkRoom)?.label ??
-      suite.rooms.find((r) => r.id === walkRoom)?.label ??
-      "in a doorway");
+    : (suite.rooms.find((r) => r.id === walkRoom)?.label ?? "in a doorway");
 
   /**
    * The same reading for a reader who gets nothing from the canvas, throttled.
@@ -779,53 +752,22 @@ export function Hud() {
           >
             <span aria-hidden="true">{reduced ? "go to" : "walk"}</span>
             <div className="hud-scrub">
-              {(reduced ? ["places", "toggle"] : ["toggle", "places"]).map((part) =>
-                part === "toggle" ? (
-                  walking ? (
-                    <button
-                      key="toggle"
-                      type="button"
-                      onClick={leaveFirstPerson}
-                      aria-label="Leave first person"
-                      // Discoverable rather than folklore: the shortcut is on the control
-                      // and in the notice enterFirstPerson() writes. FirstPerson.tsx
-                      // handles the key itself, including while pointer lock is engaged.
-                      aria-keyshortcuts="Escape"
-                      data-testid="fp-leave"
-                      className="on"
-                    >
-                      leave
-                    </button>
-                  ) : (
-                    <button
-                      key="toggle"
-                      type="button"
-                      onClick={enterFirstPerson}
-                      aria-label="Stand in the suite at eye height and walk it"
-                      data-testid="fp-enter"
-                    >
-                      stand up
-                    </button>
-                  )
-                ) : (
-                  spots.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => goToPlace(p.id)}
-                      aria-label={`Go to ${p.label}`}
-                      // Structural, not a tint: which room you are standing in survives a
-                      // stylesheet that renders every button identically. cutaway.ts's
-                      // header asks for exactly this of any mode control.
-                      aria-pressed={walking && walkRoom === p.id}
-                      data-testid={`fp-go-${p.id}`}
-                      className={walking && walkRoom === p.id ? "on" : ""}
-                    >
-                      {placeFace(p.label)}
-                    </button>
-                  ))
-                ),
-              )}
+              {/* goToPlace() and leaveFirstPerson() are gone from the store (P10 step 3):
+                  standing is a property of being at stage 5, seeded automatically, not a
+                  mode entered and left by button. This "stand up" retry -- for the refusal
+                  case, where a slider left nothing in the suite standable -- is the one
+                  piece of the old toggle/places row still wired to a live action; the rest
+                  of the row's redesign is P10 step 5's. */}
+              {!walking ? (
+                <button
+                  type="button"
+                  onClick={enterFirstPerson}
+                  aria-label="Stand in the suite at eye height and walk it"
+                  data-testid="fp-enter"
+                >
+                  stand up
+                </button>
+              ) : null}
             </div>
             {/* Visible and NOT aria-hidden, unlike the orbit readout: it changes at most
                 once per doorway rather than on every frame of a drag, and the keys are

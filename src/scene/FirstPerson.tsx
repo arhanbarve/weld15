@@ -220,7 +220,6 @@ export function FirstPerson() {
   // re-render on every one of those writes; `!== null` changes twice per visit.
   const active = useStore((s) => s.firstPerson !== null) && stage === LAST_STAGE;
   const setWalk = useStore((s) => s.setWalk);
-  const leave = useStore((s) => s.leaveFirstPerson);
 
   const held = useRef(new Set<string>());
   const pendingDx = useRef(0);
@@ -264,12 +263,10 @@ export function FirstPerson() {
       return tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || !!e?.isContentEditable;
     };
     const onDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        // Not gated on the focus guard: Escape has to work from wherever focus happens to
-        // be, or "Escape leaves first person" is a promise with an exception in it.
-        leave();
-        return;
-      }
+      // Escape's own handling used to leave first person here; that action is gone --
+      // standing is a property of being at stage 5, not a mode this key stops. Step 4
+      // wires Escape to pointer lock alone; until then it falls through to the browser's
+      // own default, which is why there is no branch for it in this handler any more.
       if (isField(e.target)) return;
       if (!(e.key in FORWARD_KEYS || e.key in TURN_KEYS || e.key in STRAFE_KEYS)) return;
       // Ours now. Without this the arrow keys scroll the page on a browser whose body is
@@ -292,7 +289,7 @@ export function FirstPerson() {
       window.removeEventListener("blur", onBlur);
       held.current.clear();
     };
-  }, [active, leave]);
+  }, [active]);
 
   /**
    * Pointer lock, and the two ways it can go wrong.
@@ -332,7 +329,8 @@ export function FirstPerson() {
     };
     const onLockChange = () => {
       const now = document.pointerLockElement === el;
-      if (locked.current && !now) leave();
+      // Losing the lock used to leave first person entirely; that action is gone, so this
+      // is a no-op placeholder until Step 4 wires it to setPointerLocked() instead.
       locked.current = now;
     };
     el.addEventListener("pointerdown", onPointerDown);
@@ -346,7 +344,7 @@ export function FirstPerson() {
       locked.current = false;
       pendingDx.current = 0;
     };
-  }, [active, gl, leave]);
+  }, [active, gl]);
 
   useEffect(() => {
     if (active) frames.current = 0;

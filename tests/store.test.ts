@@ -7,7 +7,7 @@ import { buildWalls } from "@/geo/walls";
 import { CUTAWAY_MODES } from "@/scene/cutaway";
 import { OCCUPANCY_RANGE, DEFAULT_OCCUPANCY, pieceLabel, useStore } from "@/state/store";
 import { clearance, isClear, walkContext } from "@/scene/walk";
-import { places, standIn } from "@/scene/route";
+import { standIn, standingPose } from "@/scene/route";
 import { DEFAULT_SNAPSHOT, decode, encode } from "@/state/url";
 
 /**
@@ -429,7 +429,7 @@ describe("first person", () => {
   const hall = suite.rooms.find((r) => r.id === "hall")!;
   const ctx = walkContext(suite);
 
-  it("stands the viewer in the hall, clear of every wall band", () => {
+  it("stands the viewer in the hall, clear of every wall band, on the shot's own gaze", () => {
     useStore.getState().enterFirstPerson();
     const fp = useStore.getState().firstPerson;
     expect(fp, "first person is on").not.toBeNull();
@@ -441,13 +441,16 @@ describe("first person", () => {
     // of clearance, i.e. a 0.75 ft disc standing 2.25 ft from each side of a 4.5 ft hall.
     expect(isClear(fp!.p, ctx), "the seed is clear").toBe(true);
     expect(clearance(fp!.p, ctx)).toBeCloseTo(1.5, 9);
-    // Facing south down the hall, which is the direction stages.ts aims the stage-5 shot,
-    // so entering first person does not spin the camera. heading 0 faces +v and pi faces
-    // -v (walk.ts).
-    expect(fp!.heading).toBeCloseTo(Math.PI, 9);
-    // And it says how to get out, in the notice a viewer actually reads. Escape being
-    // folklore is the trap MASTER.md's "do not trap the user" is about.
-    expect(useStore.getState().notice).toMatch(/Escape/);
+    // heading and pitch come from standingPose(), the same arithmetic stages.ts's kf[5] is
+    // built from -- NOT Math.PI, which is what the seed used to hard-code and which is the
+    // 8-degree-up, 4.5-degree-yaw snap this phase exists to remove. Arrival is now
+    // continuous with the fly-down's last frame instead.
+    const pose = standingPose(suite);
+    expect(fp!.heading).toBeCloseTo(pose.heading, 9);
+    expect(fp!.pitch).toBeCloseTo(pose.pitch, 9);
+    // No notice on a successful seed (D7): the keys are in the HUD row, and a toast on
+    // every arrival at stage 5 would be noise rather than news.
+    expect(useStore.getState().notice).toBe(null);
   });
 
   it("gives the arrow keys' owner nothing to fight over", () => {
@@ -458,57 +461,58 @@ describe("first person", () => {
     expect(useStore.getState().selected).toBe(null);
   });
 
-  it("leaves, and leaves on a stage change as well", () => {
-    useStore.getState().enterFirstPerson();
-    useStore.getState().leaveFirstPerson();
-    expect(useStore.getState().firstPerson).toBe(null);
+  it("seeds on arrival at stage 5, by every path, and drops on departure", () => {
+    const standingSomewhere = () => {
+      const fp = useStore.getState().firstPerson;
+      expect(fp, "a walker is present at stage 5").not.toBeNull();
+      expect(isClear(fp!.p, walkContext(buildSuite(useStore.getState().params)))).toBe(true);
+      return fp!;
+    };
 
-    // A walker surviving a jump to stage 2 would be a viewer standing in a bedroom while
-    // the HUD said "Harvard Yard", and the control that leaves it is mounted at the last
-    // stage only, so it would be unreachable as well as wrong.
-    useStore.getState().enterFirstPerson();
+    // setStage, directly.
+    useStore.getState().setStage(5);
+    standingSomewhere();
+
+    // next(), stepping onto 5 from 4.
+    useStore.getState().setStage(4);
+    useStore.getState().next();
+    expect(useStore.getState().stage).toBe(5);
+    standingSomewhere();
+
+    // skipToSuite().
+    useStore.getState().setStage(0);
+    useStore.getState().skipToSuite();
+    standingSomewhere();
+
+    // flyStep() cannot reach 5 by itself -- it stops at FLY_DOWN_END -- so this checks
+    // both halves: no walker at the stop it does reach, one on arrival at 5 by another path.
+    useStore.getState().setStage(0);
+    useStore.getState().flyStep();
+    useStore.getState().flyStep();
+    useStore.getState().flyStep();
+    expect(useStore.getState().stage).toBe(3);
+    expect(useStore.getState().firstPerson).toBe(null);
+    useStore.getState().setStage(5);
+    standingSomewhere();
+
+    // hydrate(), a link opening at stage 5.
+    const snap = decode(encode({ ...DEFAULT_SNAPSHOT, stage: 5 }))!;
+    useStore.getState().hydrate(snap);
+    expect(useStore.getState().stage).toBe(5);
+    standingSomewhere();
+
+    // resetAll(), seeded with the params it is resetting TO, at stage 5.
+    useStore.getState().resetAll();
+    expect(useStore.getState().stage).toBe(5);
+    standingSomewhere();
+
+    // Off stage 5, by setStage and by prev(), the walker is gone again.
     useStore.getState().setStage(2);
     expect(useStore.getState().firstPerson).toBe(null);
     useStore.getState().setStage(5);
-    useStore.getState().enterFirstPerson();
+    standingSomewhere();
     useStore.getState().prev();
     expect(useStore.getState().firstPerson).toBe(null);
-  });
-
-  it("jump-cuts to a named place, which is the reduced-motion form of walking there", () => {
-    // One instantaneous change of position, to the room's own centre -- there is no
-    // intermediate state for a camera to visit, which is the same shape stages.ts's
-    // REDUCED_CUT and CameraRig's reduced branch already take.
-    for (const p of places(suite)) {
-      useStore.getState().goToPlace(p.id);
-      const fp = useStore.getState().firstPerson;
-      expect(fp, `no walker after going to ${p.id}`).not.toBeNull();
-      expect(fp!.p).toEqual(p.p);
-      expect(fp!.room).toBe(p.id);
-      expect(isClear(fp!.p, ctx), `${p.id} is standable`).toBe(true);
-      expect(useStore.getState().notice).toBe(`Standing in ${p.label}.`);
-    }
-    // It works from outside first person as well as from inside it: a reduced-motion
-    // viewer never presses "walk" at all.
-    useStore.getState().leaveFirstPerson();
-    useStore.getState().goToPlace("bedB");
-    expect(useStore.getState().firstPerson?.room).toBe("bedB");
-  });
-
-  it("refuses a room nobody can stand in, and says which and why", () => {
-    // MEASURED: bathAlong 1 is a legal suite -- the rooms still tile and nothing overlaps
-    // -- with a bathroom 8 ft deep by 1 ft along, whose centre has -0.25 ft of clearance.
-    // walk.ts is explicit that a walker seeded there never moves again, so this is the
-    // case that has to be visible rather than silent.
-    useStore.getState().setParams({ bathAlong: 1 });
-    expect(useStore.getState().params.bathAlong, "the slider was not refused").toBe(1);
-    useStore.getState().goToPlace("bath");
-    expect(useStore.getState().firstPerson).toBe(null);
-    expect(useStore.getState().notice).toMatch(/^Refused: Bathroom is narrower than the 1.5 ft/);
-    // And the rooms that are still standable are unaffected, so this is a refusal about
-    // one room rather than about first person.
-    useStore.getState().goToPlace("hall");
-    expect(useStore.getState().firstPerson?.room).toBe("hall");
   });
 
   it("skips a hall nobody can stand in, and refuses when no room will do", () => {
@@ -558,35 +562,37 @@ describe("first person", () => {
     expect(useStore.getState().notice).toMatch(/^Refused: Every room in this suite is narrower/);
   });
 
-  it("refuses an id this suite has no room for", () => {
-    useStore.getState().goToPlace("nowhere");
-    expect(useStore.getState().firstPerson).toBe(null);
-    expect(useStore.getState().notice).toMatch(/no room called nowhere/);
-  });
-
-  it("drops the walker when a slider closes a wall onto it, and says so", () => {
+  it("re-seeds the walker when a slider closes a wall onto it, and says where", () => {
     /*
-     * The viewer is furniture too, for this one purpose. Dropping rather than refusing is
-     * the same choice setParams() makes about a bed: refusing would mean a dimension the
-     * audit tags INFERRED could not be corrected while somebody happened to be standing
-     * in the way.
+     * The viewer is furniture too, for this one purpose, and re-seeding rather than
+     * dropping is the same choice setParams() makes about a bed: refusing the slider would
+     * mean a dimension the audit tags INFERRED could not be corrected while somebody
+     * happened to be standing in the way. walkerFor() is the same verified-seed loop
+     * enterFirstPerson() uses, so the viewer lands somewhere standable rather than losing
+     * the walker outright, as long as some room still is.
      *
      * MEASURED: standing at the centre of bedroom B, (8, 39), a section shortened from
-     * 44 ft to 38 ft brings the gable south past that point. Nine (room, patch) pairs out
-     * of ninety swept produce it; this is the most legible.
+     * 44 ft to 38 ft brings the gable south past that point, and the hall is still
+     * standable in the resulting suite. setWalk() places the walker directly, the way
+     * goToPlace() used to before it was deleted -- there is no other action left that
+     * jump-cuts a walker to a named room.
      */
-    useStore.getState().goToPlace("bedB");
-    expect(useStore.getState().firstPerson!.p).toEqual({ u: 8, v: 39 });
+    useStore.getState().setWalk({ p: { u: 8, v: 39 }, heading: 0, pitch: 0, room: "bedB" });
     useStore.getState().setParams({ sectionLength: 38 });
     expect(useStore.getState().params.sectionLength, "the slider was not refused").toBe(38);
-    expect(useStore.getState().firstPerson).toBe(null);
-    expect(useStore.getState().notice).toMatch(/A wall closed onto where you were standing/);
+    const fp = useStore.getState().firstPerson;
+    expect(fp, "moved rather than dropped -- another room is still standable").not.toBeNull();
+    expect(fp!.room).toBe("hall");
+    expect(isClear(fp!.p, walkContext(buildSuite(useStore.getState().params)))).toBe(true);
+    expect(useStore.getState().notice).toMatch(
+      /A wall closed onto where you were standing, so you were moved to Hall\./,
+    );
   });
 
   it("leaves a walker alone when the slider does not reach it", () => {
-    // The guard against fixing the wedge by dropping the walker on every slider move,
-    // which would make the dimensions unusable from inside the room.
-    useStore.getState().goToPlace("bedB");
+    // The guard against fixing the wedge by moving the walker on every slider move, which
+    // would make the dimensions unusable from inside the room.
+    useStore.getState().setWalk({ p: { u: 8, v: 39 }, heading: 0, pitch: 0, room: "bedB" });
     const before = useStore.getState().firstPerson;
     useStore.getState().setParams({ ceiling: 9 });
     expect(useStore.getState().firstPerson).toBe(before);

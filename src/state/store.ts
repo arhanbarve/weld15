@@ -22,7 +22,7 @@ import { CUTAWAY_MODES, type CutawayMode } from "@/scene/cutaway";
 // does not drag the renderer into the state layer -- tests/place.test.ts walks the real
 // import graph and would fail if it did.
 import { insideSuite, isClear, walkContext, RADIUS, type WalkState } from "@/scene/walk";
-import { places, standIn } from "@/scene/route";
+import { HUB, places, standingPose } from "@/scene/route";
 import type { Orbit } from "@/scene/orbit";
 import type { NudgeDir } from "@/geo/drag";
 // A value import of url.ts, and it does NOT close a cycle: url.ts imports this module
@@ -127,6 +127,21 @@ type Store = {
    * the mass fill to 0.22. Campus.tsx honours them and publishes what it used.
    */
   highContrast: boolean;
+
+  /**
+   * Whether the browser has granted pointer lock on the canvas.
+   *
+   * A FACT ABOUT THE BROWSER'S OWN INPUT STATE, on the same footing as `reducedMotion`:
+   * neither has a "share this" reading, so both are ABSENT from url.ts's wire format,
+   * from hydrate()'s parameter list, and from resetAll() -- a recipient of a link is not
+   * sent mid-drag into somebody else's mouse capture, any more than they are handed
+   * somebody else's OS preference.
+   *
+   * FirstPerson.tsx is this field's only writer, from `pointerlockchange`; Experience.tsx
+   * is its only reader, deciding whether the pointer belongs to furniture or to the
+   * walker's look.
+   */
+  pointerLocked: boolean;
 
   /**
    * Whether the automatic descent is running.
@@ -272,6 +287,8 @@ type Store = {
   flyStep: () => void;
   setReducedMotion: (v: boolean) => void;
   setHighContrast: (v: boolean) => void;
+  /** Set from `pointerlockchange`. See `pointerLocked` above for why it lives nowhere else. */
+  setPointerLocked: (v: boolean) => void;
   setParams: (p: Partial<SuiteParams>) => void;
   setDate: (d: string) => void;
   setHour: (h: number) => void;
@@ -284,12 +301,8 @@ type Store = {
 
   /** Stand up in the suite: seed the walker at the hall, or say why nobody can. */
   enterFirstPerson: () => void;
-  /** Put the camera back on the stage's own keyframe. Escape's handler, and a button's. */
-  leaveFirstPerson: () => void;
   /** One frame of walking, from FirstPerson.tsx. */
   setWalk: (s: FirstPerson) => void;
-  /** Jump-cut to a named room. The reduced-motion form of walking there. */
-  goToPlace: (roomId: string) => void;
 
   /**
    * Commit a move the pointer path has already had accepted by drag.ts.
@@ -501,12 +514,47 @@ function noRoomToStand(what: string): string {
   );
 }
 
+/**
+ * The verified seed for standing at a given stage, or null.
+ *
+ * ONE IMPLEMENTATION FOR TWO CALLERS THAT MUST NOT DISAGREE: `enterFirstPerson()` below is
+ * a thin wrapper over this, and so is every place a stage transition used to write
+ * `firstPerson: null`. Writing the seed loop twice -- once for the button, once for the
+ * seven transitions -- is exactly the kind of drift this file's own DragResult comment
+ * warns about elsewhere: two computations of one answer, and no guarantee they agree.
+ *
+ * Null for every stage but LAST_STAGE, because standing is a property of being at stage 5
+ * and not a thing any other stage has. Where it IS stage 5, this is `enterFirstPerson()`'s
+ * own seed loop: `places()`, hall first, checked with `isClear()` against the first
+ * unwedged spot, with `standingPose()`'s heading and pitch in the hub so arrival matches
+ * the stage-5 shot exactly (D3) and `arrivalHeading(room)` with the same pitch for the
+ * fall-through rooms. Null again if nothing in the suite is standable.
+ */
+function walkerFor(stage: StageId, params: SuiteParams): FirstPerson | null {
+  if (stage !== LAST_STAGE) return null;
+  const suite = buildSuite(params);
+  const ctx = walkContext(suite);
+  const pose = standingPose(suite);
+  for (const spot of places(suite)) {
+    if (!isClear(spot.p, ctx)) continue;
+    const room = suite.rooms.find((r) => r.id === spot.id)!;
+    return {
+      p: spot.p,
+      heading: spot.id === HUB ? pose.heading : arrivalHeading(room),
+      pitch: pose.pitch,
+      room: spot.id,
+    };
+  }
+  return null;
+}
+
 export const useStore = create<Store>((set, get) => ({
   stage: 0,
   t: 0,
   params: DEFAULT_PARAMS,
   reducedMotion: false,
   highContrast: false,
+  pointerLocked: false,
   flying: false,
   date: DEFAULT_DATE,
   hour: DEFAULT_HOUR,
@@ -518,16 +566,20 @@ export const useStore = create<Store>((set, get) => ({
   selected: null,
   notice: null,
 
-  // Every stage change drops the walker, and that is not tidiness. First person replaces
-  // the stage's camera, so a walker surviving a jump to stage 2 would be a viewer standing
-  // in a bedroom while the HUD said "Harvard Yard" -- and the control that leaves it is
-  // only mounted at the last stage, so it would be unreachable as well as wrong.
+  // A STAGE CHANGE NO LONGER DESTROYS THE WALKER, IT DECIDES WHETHER THERE IS ONE.
+  // First person replaces the stage's camera, so a walker surviving a jump to stage 2 would
+  // be a viewer standing in a bedroom while the HUD said "Harvard Yard" -- walkerFor() nulls
+  // it off stage 5 for exactly that reason. What is new is arrival: landing ON stage 5, by
+  // any of the seven paths below, now seeds a walker instead of leaving the field null until
+  // a control was pressed, because standing is a property of being at stage 5 and not a mode
+  // entered separately.
   // EVERY ONE OF THESE CANCELS THE FLY-DOWN, and that is the whole cancellation story rather
   // than a listener somewhere. The flight is a thing the app is doing to the camera; any
   // deliberate act by the viewer that also moves the camera has to win, or the two fight and
   // the fly-down appears to drag the viewer back. Picking a stage, stepping, skipping to the
   // suite and entering first person all qualify. setT does NOT -- see its own note.
-  setStage: (stage) => set({ stage, t: 0, firstPerson: null, flying: false }),
+  setStage: (stage) =>
+    set((s) => ({ stage, t: 0, firstPerson: walkerFor(stage, s.params), flying: false })),
   /**
    * Scrub within a stage.
    *
@@ -539,30 +591,30 @@ export const useStore = create<Store>((set, get) => ({
    */
   setT: (t) => set({ t: Math.min(1, Math.max(0, t)) }),
   next: () =>
-    set((s) => ({
-      stage: Math.min(LAST_STAGE, s.stage + 1) as StageId,
-      t: 0,
-      firstPerson: null,
-      flying: false,
-    })),
+    set((s) => {
+      const nextStage = Math.min(LAST_STAGE, s.stage + 1) as StageId;
+      return { stage: nextStage, t: 0, firstPerson: walkerFor(nextStage, s.params), flying: false };
+    }),
   prev: () =>
-    set((s) => ({
-      stage: Math.max(0, s.stage - 1) as StageId,
-      t: 0,
-      firstPerson: null,
-      flying: false,
-    })),
-  skipToSuite: () => set({ stage: LAST_STAGE, t: 1, firstPerson: null, flying: false }),
+    set((s) => {
+      const prevStage = Math.max(0, s.stage - 1) as StageId;
+      return { stage: prevStage, t: 0, firstPerson: walkerFor(prevStage, s.params), flying: false };
+    }),
+  skipToSuite: () =>
+    set((s) => ({ stage: LAST_STAGE, t: 1, firstPerson: walkerFor(LAST_STAGE, s.params), flying: false })),
   setFlying: (flying) => set({ flying }),
   flyStep: () =>
     set((s) => {
       const next = Math.min(FLY_DOWN_END, s.stage + 1) as StageId;
-      return { stage: next, t: 0, firstPerson: null, flying: next < FLY_DOWN_END };
+      return { stage: next, t: 0, firstPerson: walkerFor(next, s.params), flying: next < FLY_DOWN_END };
     }),
   setReducedMotion: (reducedMotion) => set({ reducedMotion }),
   // No validation and no notice: it is a boolean with one writer, and unlike setCutaway
   // it is not reachable from a URL -- see the field above for why a link cannot carry it.
   setHighContrast: (highContrast) => set({ highContrast }),
+  // Same footing as setHighContrast just above: one writer, no validation, no notice, and
+  // not reachable from a URL -- see `pointerLocked`'s own docblock for why.
+  setPointerLocked: (pointerLocked) => set({ pointerLocked }),
   /**
    * Move a dimension, and answer for the furniture standing on it.
    *
@@ -593,10 +645,14 @@ export const useStore = create<Store>((set, get) => ({
      * A dimension slider can close a wall onto the position somebody is standing at, and
      * walk.ts is explicit about the consequence: from a position that is not clear, step()
      * returns where it started, every frame, forever. So the walker is checked against the
-     * new suite exactly as the pieces are, and dropped with a sentence rather than left
-     * wedged -- the same choice, and for the same reason, as the pieces above: refusing
-     * the slider would mean a dimension the audit tags INFERRED could not be corrected
-     * while somebody happened to be standing in the way.
+     * new suite exactly as the pieces are, and RE-SEEDED with a sentence rather than left
+     * wedged -- walkerFor() is the same verified-seed loop enterFirstPerson() uses, so a
+     * slider that closes one room does not strand the viewer as long as another room in
+     * the suite is still standable. Only when nothing is does this fall back to the
+     * existing refusal wording and a null walker -- the same choice, and for the same
+     * reason, as the pieces above: refusing the slider itself would mean a dimension the
+     * audit tags INFERRED could not be corrected while somebody happened to be standing in
+     * the way.
      *
      * The context is built only when there is a walker to check, because this runs on
      * every pointer move of every one of the fifteen sliders.
@@ -607,18 +663,22 @@ export const useStore = create<Store>((set, get) => ({
         const ctx = walkContext(suite);
         return insideSuite(s.firstPerson!.p, ctx) && isClear(s.firstPerson!.p, ctx);
       })();
+    const reseed = wedged ? walkerFor(LAST_STAGE, params) : null;
     const dropped =
       lost.length === 0
         ? null
         : `${lost.map((q) => pieceLabel(suite, q.id)).join(", ")} no longer ` +
           `${lost.length === 1 ? "fits" : "fit"} and ${lost.length === 1 ? "was" : "were"} removed.`;
-    const stood = wedged
-      ? "A wall closed onto where you were standing, so first person is off."
-      : null;
+    const stood = !wedged
+      ? null
+      : reseed
+        ? `A wall closed onto where you were standing, so you were moved to ` +
+          `${suite.rooms.find((r) => r.id === reseed.room)?.label ?? "another room"}.`
+        : `Refused: ${noRoomToStand("Every room in this suite")}`;
     set({
       params,
       pieces: kept,
-      firstPerson: wedged ? null : s.firstPerson,
+      firstPerson: wedged ? reseed : s.firstPerson,
       selected: s.selected && kept.some((q) => q.id === s.selected) ? s.selected : null,
       notice: [dropped, stood].filter((x) => x !== null).join(" ") || null,
     });
@@ -651,83 +711,41 @@ export const useStore = create<Store>((set, get) => ({
   /**
    * Stand up in the suite.
    *
-   * SEEDED FROM places(), HUB FIRST, AND CHECKED BEFORE THE FIRST FRAME. There is no
-   * spawn() in walk.ts and step()'s guarantee is conditional on starting from a clear
-   * position, so a seed has to be verified rather than assumed -- and a dimension slider
-   * can leave the hall narrower than the walker is wide. places() already returns the
-   * reachable rooms with the hall first, which is exactly the order to try: the hall is
-   * what every room here is entered from, and any other reachable room is a worse but
-   * usable place to begin.
+   * A THIN WRAPPER OVER walkerFor(), which is the seeded-and-verified loop this shares
+   * with every stage transition below -- there is no spawn() in walk.ts and step()'s
+   * guarantee is conditional on starting from a clear position, so a seed has to be
+   * verified rather than assumed, and a dimension slider can leave the hall narrower than
+   * the walker is wide. What this adds over walkerFor() is the two things only a caller
+   * asking on purpose needs: a refusal written in words when nothing in the suite is
+   * standable, and dropping the selection, because the arrow keys change hands -- Hud.tsx
+   * gives them to the walker while first person is on, so a piece left selected would be a
+   * piece whose keyboard controls have silently stopped working.
    *
-   * If none of them has room, this REFUSES and says so, rather than seeding somewhere
-   * wedged and leaving the viewer with a camera that will not move.
-   *
-   * The selection is dropped because the arrow keys change hands: Hud.tsx gives them to
-   * the walker while first person is on, so a piece left selected would be a piece whose
-   * keyboard controls have silently stopped working.
+   * NO NOTICE ON SUCCESS (D7). The keys are written down in the HUD row already; a toast
+   * on every arrival at stage 5 -- every stage change, every `]`, every link opened there
+   * -- would be noise, not news.
    */
   enterFirstPerson: () => {
     const s = get();
-    const suite = buildSuite(s.params);
-    const ctx = walkContext(suite);
-    for (const spot of places(suite)) {
-      if (!isClear(spot.p, ctx)) continue;
-      const room = suite.rooms.find((r) => r.id === spot.id)!;
-      set({
-        firstPerson: { p: spot.p, heading: arrivalHeading(room), pitch: 0, room: spot.id },
-        selected: null,
-        // Walking and flying both own the camera. FirstPerson.tsx writes the walker and
-        // CameraRig copies it, so a fly-down still advancing t underneath would be invisible
-        // until the viewer pressed Escape and was then somewhere else entirely.
-        flying: false,
-        notice: `Standing in ${room.label}. W, A, S and D to walk; Escape to stop.`,
-      });
+    const seed = walkerFor(LAST_STAGE, s.params);
+    if (!seed) {
+      set({ notice: `Refused: ${noRoomToStand("Every room in this suite")}` });
       return;
     }
-    set({ notice: `Refused: ${noRoomToStand("Every room in this suite")}` });
+    set({
+      firstPerson: seed,
+      selected: null,
+      // Walking and flying both own the camera. FirstPerson.tsx writes the walker and
+      // CameraRig copies it, so two things must not own the camera at once.
+      flying: false,
+    });
   },
-
-  leaveFirstPerson: () => set({ firstPerson: null, notice: null }),
 
   // No clamping, no validation, and no recomputation of the room: this is the frame path,
   // and FirstPerson.tsx has the WalkCtx that walk() and roomAt() were both answered
   // against. A second opinion here would be a second WalkCtx per frame, which walk.ts's
   // header exists to forbid.
   setWalk: (firstPerson) => set({ firstPerson }),
-
-  /**
-   * Jump-cut to a named room.
-   *
-   * THIS IS THE REDUCED-MOTION ALTERNATIVE, and route.ts says so: places() returns named
-   * destinations, hall first, for exactly this. MASTER.md asks for a real alternative
-   * rather than nothing wherever an animation is switched off, and the alternative to
-   * walking somewhere is arriving there -- one instantaneous change of position, which is
-   * the same shape CameraRig's reduced branch and stages.ts's REDUCED_CUT already take.
-   *
-   * It is not gated on the media query. A jump to a named room is faster and more precise
-   * than walking for everybody, it is the only way to cross the suite without a pointer,
-   * and a control that appears only for readers who set a preference is a control nobody
-   * tests. What reduced motion changes is which of the two the HUD offers first.
-   */
-  goToPlace: (roomId) => {
-    const s = get();
-    const suite = buildSuite(s.params);
-    const room = suite.rooms.find((r) => r.id === roomId);
-    if (!room) {
-      set({ notice: `Refused: this suite has no room called ${roomId}.` });
-      return;
-    }
-    const p = standIn(room);
-    if (!isClear(p, walkContext(suite))) {
-      set({ notice: `Refused: ${noRoomToStand(room.label)}` });
-      return;
-    }
-    set({
-      firstPerson: { p, heading: arrivalHeading(room), pitch: 0, room: roomId },
-      selected: null,
-      notice: `Standing in ${room.label}.`,
-    });
-  },
 
   commit: (id, r) => {
     const s = get();
@@ -788,7 +806,10 @@ export const useStore = create<Store>((set, get) => ({
       date: DEFAULT_DATE,
       hour: DEFAULT_HOUR,
       orbit: null,
-      firstPerson: null,
+      // params are being reset too, so the seed has to use the NEW ones -- get().stage
+      // rather than a captured value, since resetAll is a plain object literal and there
+      // is no function-form set() argument to read it off.
+      firstPerson: walkerFor(get().stage, DEFAULT_PARAMS),
       selected: null,
       notice: "Back to the sourced dimensions and the shipped fit-out.",
     }),
@@ -819,10 +840,12 @@ export const useStore = create<Store>((set, get) => ({
       // every piece they moved. So the two arrive independently, exactly as they sat
       // in the sender's own store -- which is also why setOccupancy does not re-fit.
       occupancy: s.occupancy,
-      // Cleared for the reason `selected` is: a link carries the model, not where the
-      // recipient is standing in it. url.ts does not encode either field. `flying` joins them:
-      // a link is a place, and "currently moving" is not one.
-      firstPerson: null,
+      // NOT cleared for the reason `selected` is -- a link that opens at stage 5 opens
+      // standing, exactly as any other arrival there does. walkerFor() takes the
+      // INCOMING params, s.params, not the store's current ones: the suite the walker is
+      // checked against is the one the link describes, which is the whole point of `s`
+      // being a parameter here rather than get()'s own state.
+      firstPerson: walkerFor(s.stage, s.params),
       selected: null,
       flying: false,
       notice: null,
