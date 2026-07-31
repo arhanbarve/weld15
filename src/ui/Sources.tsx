@@ -61,6 +61,20 @@ export function Sources() {
           <strong>The suite itself</strong> — Harvard’s 2026 housing assignment for the occupancy, and
           a current resident’s description for the room sequence and the room sizes.
         </p>
+        <p>
+          {/* THE IMAGERY IS REDISTRIBUTED, so its attribution is not optional in the way the rest
+              of this panel arguably is. Both licences ask for acknowledgement -- NASA requests it,
+              MassGIS says it "would be appreciated" -- and this is where the app gives it, in front
+              of the person looking at the photograph rather than in a file they will never open.
+              The capture year is here as well as in the viewport chip, because the panel is where
+              someone goes to find out why the trees are bare. */}
+          <strong>The ground and the globe</strong> — NASA Earth Observatory / Blue Marble Next
+          Generation, August 2004, for the Earth at orbit and the 1,000 km plate; MassGIS (Bureau of
+          Geographic Information), Commonwealth of Massachusetts EOTSS, for the aerial imagery of
+          Cambridge, flown leaf-off in March and April 2025 at 15 cm. Both permit redistribution of
+          derived crops. The imagery is 2025 and the sun is computed for September 2026, so the trees
+          are bare under September light.
+        </p>
         <p className="sources-gap">
           <strong>No source supplied</strong> the ceiling height, the bathroom’s depth, the wall
           thicknesses, the hall’s width, which end of the section the suite occupies, or what the

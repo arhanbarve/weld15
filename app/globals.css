@@ -243,6 +243,95 @@ button,
   min-height: 44px;
 }
 
+/* ---------- progressive place labels ---------- */
+
+/* STANDS ALONE rather than riding .weld-chip, and the duplication is deliberate. These chips did
+   carry both classes, which was less CSS and broke two campus.spec.ts selectors: `.weld-chip` is
+   how the suite finds WELD's label, and it started matching five pieces of scenery too. A class
+   name that a test selects on is an interface.
+
+   Dimmer and unbordered where Weld's chip is crimson-bordered, because a place name is context and
+   Weld is the subject; giving them the same border would make scenery shout as loudly as the
+   building the whole app is about. Opacity and display are written per frame by Labels.tsx. */
+.place-chip {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  border-radius: 1px;
+  padding: 0.25rem 0.5rem;
+  background: rgba(4, 20, 38, 0.62);
+  color: var(--dim);
+}
+
+/* ---------- imagery credit ---------- */
+
+/* BOTTOM RIGHT, which is the last free corner: top-left is A11yAlt, top-centre the fly-down,
+   top-right the dimension panel, bottom-left Sources, bottom-centre the HUD. Small, dim, and
+   aria-hidden -- it is a credit, not a control, and Sources.tsx carries the reachable version. */
+.imagery-chip {
+  position: fixed;
+  right: var(--s2);
+  bottom: var(--s2);
+  z-index: var(--z-hud);
+  padding: 0.35rem 0.6rem;
+  background: var(--chip-scan);
+  border: 1px solid var(--rule-soft);
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+  pointer-events: none;
+}
+
+/* ---------- the fly-down ---------- */
+
+/* VISIBLE, unlike .skip, and that is the whole difference between them. .skip is an escape
+   hatch that lives off-screen until it is focused; this is a feature, and a feature nobody can
+   see is not offered. It sits directly above the HUD and centred on it, because the HUD is what
+   it drives -- it advances the same `t` the scrubber in there moves, and putting the two next to
+   each other is what makes that legible without a label saying so.
+
+   TOP CENTRE, AND IT STARTED AT THE BOTTOM. Placing it above the HUD put it behind the HUD:
+   the HUD's height changes with the stage, at --z-hud they are the same layer so DOM order
+   decided who won, and at stage 1 the label came out reading through the panel. Rather than
+   chase a clearance that has to hold for three different HUD heights, it moved to the top edge,
+   which is empty at stages 0 to 2 -- A11yAlt is top-LEFT and the dimension panel top-RIGHT, and
+   this is narrow enough to sit between them. --z-panel so it is never behind the HUD again. */
+.fly {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  top: var(--s2);
+  z-index: var(--z-panel);
+  background: var(--chip-scan);
+  color: var(--ink);
+  border: 1px solid var(--mark);
+  border-radius: 2px;
+  padding: 0.6rem 1rem;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  min-height: 44px;
+  cursor: pointer;
+  transition: border-color var(--dur-micro) var(--ease-out-quint);
+}
+.fly:hover {
+  border-color: var(--ink);
+}
+/* Pressed reads as pressed. aria-pressed carries it for a screen reader; this is the same
+   fact for everyone else, and it is the border rather than the fill so the control does not
+   change size when it changes state. */
+.fly[aria-pressed="true"] {
+  border-color: var(--ink);
+  color: var(--mark);
+}
+
 /* ---------- stage 3 orbit keys ---------- */
 
 /* The row reuses .hud-scrub for its buttons, so the 44 x 44 target, the border and

@@ -177,6 +177,45 @@ export function sunPosition(
 }
 
 /**
+ * Where on Earth the sun is directly overhead.
+ *
+ * The point the globe is lit from at stage 0. Its latitude is the declination, which is
+ * already exported above; its longitude is wherever it happens to be solar noon, which is
+ * the equation of time applied to the UTC clock and turned into degrees at 15 per hour.
+ *
+ * The sign of the longitude is the one thing here worth checking rather than reading. At
+ * 12:00 UTC with the equation of time at zero the sun is over Greenwich, so the expression
+ * must give 0; three hours later it must be over 45 degrees WEST, i.e. -45. Hence the
+ * leading minus: the subsolar point travels westward as the clock advances, at the rate the
+ * Earth turns eastward.
+ *
+ * THE IDENTITY THAT TESTS IT is that the sun is at exactly 90 degrees of altitude here, and
+ * tests/solar.test.ts asserts it against sunPosition() rather than against a published
+ * table. That is a real check and not a tautology: it comes out exact only because
+ * sunPosition()'s hour angle vanishes when 4 * lon cancels the clock and the equation of
+ * time, and because the zenith reduces to cos(lat - declination), which is 1 only when the
+ * latitude returned here is the declination. Either sign error breaks it.
+ *
+ * Read as an instant in UTC, like everything else in this module. Lighting.tsx's
+ * cambridgeInstant() is what converts the store's wall clock, so the globe's sun and the
+ * building's sun come from ONE conversion and cannot disagree.
+ */
+export function subsolarPoint(date: Date): { lat: number; lon: number } {
+  const t = julianCentury(date);
+  const utcHours =
+    date.getUTCHours() +
+    date.getUTCMinutes() / 60 +
+    date.getUTCSeconds() / 3600 +
+    date.getUTCMilliseconds() / 3_600_000;
+  return {
+    lat: solarDeclinationDeg(date),
+    // normalizeAngle rather than a mod, so the result lands in [-180, 180] the way every
+    // other longitude in this project does -- WELD_ORIGIN.lon is -71.1, not 288.9.
+    lon: normalizeAngle(-15 * (utcHours + equationOfTimeMin(t) / 60 - 12)),
+  };
+}
+
+/**
  * Is a facade in direct sun?
  *
  * `facadeAzimuthDeg` is the outward normal of the wall, degrees clockwise from

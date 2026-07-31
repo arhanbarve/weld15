@@ -385,18 +385,39 @@ test.describe("P8 -- the model has a text alternative", () => {
      * arbitrary one: the dock is top-left, directly under where skip appears, and the
      * HUD's stage buttons are centred. Tab has to walk top-left before centre.
      */
+    /*
+     * FOUR STOPS SINCE P9, NOT THREE, and the addition is placed by the same visual-order rule
+     * this test already argues from rather than appended for convenience. P9 adds a fly-down
+     * control, and it sits at the TOP CENTRE of the viewport -- above the HUD, which is bottom
+     * centre. So the walk is top-left, top-left, top-centre, bottom-centre: skip, the description
+     * toggle, the fly-down, then the stage buttons.
+     *
+     * The claim this test exists to make is unchanged and is still the first two entries: skip is
+     * first, and the description toggle is second. The tail is what pins the new control's place
+     * so that a later control cannot quietly insert itself ahead of the description.
+     *
+     * The fly-down is not mounted under reduced motion or at stage 3 and beyond, and this test
+     * runs at stage 0 with motion on, so it is present here.
+     */
     const stops: (string | null)[] = [];
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 4; i++) {
       await page.keyboard.press("Tab");
       stops.push(
         await page.evaluate(() => document.activeElement?.getAttribute("data-testid") ?? null),
       );
     }
-    expect(stops, `tab stops: ${stops.join(" -> ")}`).toEqual(["skip", "a11y-alt-toggle", "stage-0"]);
+    expect(stops, `tab stops: ${stops.join(" -> ")}`).toEqual([
+      "skip",
+      "a11y-alt-toggle",
+      "fly-down",
+      "stage-0",
+    ]);
 
     // The focus ring is REAL, measured on the focused element. A keyboard user who cannot
     // see where they are has no tab order at all. Focus arrived by Tab above, so this is
     // :focus-visible rather than :focus.
+    // TWO presses back, because the walk above is now four stops and ends on the HUD.
+    await page.keyboard.press("Shift+Tab");
     await page.keyboard.press("Shift+Tab");
     await expect(page.getByTestId("a11y-alt-toggle")).toBeFocused();
     const ring = await page.getByTestId("a11y-alt-toggle").evaluate((el) => {

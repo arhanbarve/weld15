@@ -52,6 +52,18 @@ export default defineConfig({
   webServer: {
     command: "npm run dev",
     url: "http://localhost:3000",
+    /**
+     * REUSING AN EXISTING SERVER IS A TRAP WHEN THERE IS MORE THAN ONE CHECKOUT, and it cost a
+     * full P9 run before it was noticed. If any dev server is already listening on 3000 --
+     * including one started from a different worktree or from the main checkout -- Playwright
+     * adopts it and says nothing. The suite then reports green while testing code that has none
+     * of your changes in it: the run that caught this reported 46 passed, and the give-away was
+     * that /imagery/l4.avif returned 404 on 3000 and 200 on the worktree's own server.
+     *
+     * Kept true, because for a single checkout it is the right behaviour and turning it off makes
+     * every local run pay a cold Next start. BEFORE TRUSTING A GREEN RUN FROM A WORKTREE, check
+     * that the server on 3000 is the one you think it is -- request a file only your branch has.
+     */
     reuseExistingServer: true,
     timeout: 120_000,
   },

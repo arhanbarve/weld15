@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sunPosition, solarDeclinationDeg, isFacadeLit } from "@/geo/solar";
+import { sunPosition, solarDeclinationDeg, isFacadeLit, subsolarPoint } from "@/geo/solar";
 import {
   WELD_ORIGIN,
   WELD_AXIS_DEG,
@@ -536,5 +536,123 @@ describe("the east facade, which the suite's rooms face", () => {
     const december = litMinutes(WINTER, EAST_AZ);
     expect(december).toBeGreaterThan(280);
     expect(december).toBeLessThan(350);
+  });
+});
+
+/**
+ * The subsolar point, added in P9 so the globe can be lit by the real sun.
+ *
+ * Same rule as the rest of this file: every fixture is an identity, not a table. Three do
+ * all the work here.
+ *
+ *   the sun is at altitude 90 exactly at the subsolar point
+ *   at 12:00 UTC the subsolar longitude is minus a quarter of the equation of time
+ *   the subsolar latitude IS the declination, so it is capped at the obliquity
+ *
+ * The first is the strong one, and it is not circular even though both sides come out of
+ * solar.ts: sunPosition() computes an hour angle from the clock, the equation of time and
+ * the longitude, and a zenith from that hour angle and the latitude. It returns 90 only if
+ * the longitude subsolarPoint() produced cancels the first three terms AND the latitude it
+ * produced equals the declination. Either sign flipped, and the altitude comes out wrong by
+ * tens of degrees.
+ */
+describe("the subsolar point", () => {
+  /** A year of instants, deliberately not on the hour and not on the solstices. */
+  const YEAR = Array.from(
+    { length: 73 },
+    (_, i) => new Date(Date.UTC(2026, 0, 1 + i * 5, (i * 7) % 24, (i * 13) % 60)),
+  );
+
+  it("is the point at which the sun is exactly overhead", () => {
+    // FIVE PLACES AND NOT MORE, AND THE REASON IS acos, NOT THE ASTRONOMY. At the subsolar
+    // point cosZenith is 1 by construction, and acos is at its worst exactly there: an error
+    // of one double ulp in the cosine, 2.2e-16, comes out as sqrt(2 * 2.2e-16) = 2.1e-8 rad
+    // of zenith angle, i.e. 1.2e-6 degrees. The worst case over a year of instants measures
+    // 8.5e-7 degrees, which is three milliarcseconds and a factor of two inside that bound.
+    // It is the classic cancellation in acos near 1, it is not an error in either function,
+    // and tightening this assertion would be pinning a float artefact.
+    for (const d of YEAR) {
+      const { lat, lon } = subsolarPoint(d);
+      expect(sunPosition(d, lat, lon).altitudeDeg, d.toISOString()).toBeCloseTo(90, 5);
+    }
+  });
+
+  it("sits a quarter degree west of Greenwich per minute the sun is early, at 12:00 UTC", () => {
+    // WHERE THE SIGN OF THE LONGITUDE IS PINNED, and the fixtures are the equation of time's
+    // own extremes, which are textbook and independent of this codebase:
+    //
+    //   ~11 Feb   EoT about -14.2 min (apparent noon LATE)   so the sun is EAST,  lon > 0
+    //   ~14 May   EoT about  +3.7 min                        slightly west
+    //   ~3 Nov    EoT about +16.4 min (apparent noon EARLY)   so the sun is WEST,  lon < 0
+    //
+    // lon = -EoT/4 degrees. The three expected values are +3.55, -0.93 and -4.10. Getting the
+    // sign of the term backwards would swap February and November, which is a 7.6 degree
+    // error in the terminator's position -- half an hour of daylight, and visible.
+    const cases: [string, number][] = [
+      ["2026-02-11T12:00:00Z", +3.55],
+      ["2026-05-14T12:00:00Z", -0.93],
+      ["2026-11-03T12:00:00Z", -4.1],
+    ];
+    for (const [iso, expected] of cases) {
+      const { lon } = subsolarPoint(new Date(iso));
+      // Within a quarter degree, i.e. within a minute of the equation of time, which is the
+      // precision the published extremes are quoted to.
+      expect(lon, iso).toBeGreaterThan(expected - 0.25);
+      expect(lon, iso).toBeLessThan(expected + 0.25);
+    }
+  });
+
+  it("travels west at fifteen degrees an hour", () => {
+    const a = subsolarPoint(new Date("2026-09-15T12:00:00Z"));
+    const b = subsolarPoint(new Date("2026-09-15T15:00:00Z"));
+    // Three hours later, 45 degrees further west -- but NOT exactly 45, and the residual is
+    // the physics rather than the arithmetic. Measured: -45.0111 degrees. The equation of
+    // time drifts while the clock runs, and 0.0111 degrees is 0.045 minutes of it over three
+    // hours, which is the right order for mid-September when EoT is moving fastest (about
+    // 20 seconds a day). A test that demanded exactly -45 would be asserting that apparent
+    // and mean solar time advance together, which is the one thing the equation of time
+    // exists to say they do not.
+    expect(normalizeAngle(b.lon - a.lon)).toBeCloseTo(-45, 1);
+    expect(Math.abs(normalizeAngle(b.lon - a.lon) + 45)).toBeLessThan(0.05);
+    expect(b.lat).toBeCloseTo(a.lat, 1);
+  });
+
+  it("crosses the tropics and no further", () => {
+    const lats = YEAR.map((d) => subsolarPoint(d).lat);
+    expect(Math.max(...lats)).toBeGreaterThan(23);
+    expect(Math.max(...lats)).toBeLessThan(23.44);
+    expect(Math.min(...lats)).toBeLessThan(-23);
+    expect(Math.min(...lats)).toBeGreaterThan(-23.44);
+  });
+
+  it("agrees with the exported declination, which is the same number", () => {
+    for (const d of YEAR) {
+      expect(subsolarPoint(d).lat).toBe(solarDeclinationDeg(d));
+    }
+  });
+
+  it("stays in [-180, 180], like every other longitude in the project", () => {
+    for (const d of YEAR) {
+      const { lon } = subsolarPoint(d);
+      expect(lon, d.toISOString()).toBeGreaterThan(-180.0000001);
+      expect(lon, d.toISOString()).toBeLessThanOrEqual(180);
+    }
+  });
+
+  it("puts the sun over the Pacific at Cambridge's default 9am, not over Cambridge", () => {
+    // The store's default is 2026-09-15 at 09:00 local, which is 13:00 UTC on daylight time.
+    // Solar noon at Weld's longitude is about 16:50 UTC, so at 13:00 the sun is still well
+    // to the east of it -- over the Atlantic, around 16 degrees west. What this rules out is
+    // a globe lit as though the store's wall clock were already UTC, which would put the
+    // terminator four hours wrong and is exactly the mistake solar.ts's header warns about.
+    const { lat, lon } = subsolarPoint(new Date("2026-09-15T13:00:00Z"));
+    expect(lat).toBeGreaterThan(2);
+    expect(lat).toBeLessThan(4);
+    expect(lon).toBeGreaterThan(-20);
+    expect(lon).toBeLessThan(-12);
+    // And Weld is therefore in daylight but not at noon.
+    const atWeld = sunPosition(new Date("2026-09-15T13:00:00Z"));
+    expect(atWeld.altitudeDeg).toBeGreaterThan(20);
+    expect(atWeld.azimuthDeg).toBeLessThan(180); // still east of south
   });
 });

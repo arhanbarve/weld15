@@ -7,6 +7,7 @@ import { LAST_STAGE, useStore, type StageId } from "@/state/store";
 import { keyframes, cameraKeyframe } from "./stages";
 import { firstPersonPose } from "./FirstPerson";
 import { clampOrbit, orbitKeyframe, orbitOf, STAGE3_CLAMP } from "./orbit";
+import { nearFar } from "./altitude";
 
 /**
  * Drives the camera from the stage machine, and gives stage 3 a free orbit.
@@ -93,6 +94,19 @@ type CamProbe = {
   position: [number, number, number];
   target: [number, number, number];
   fov: number;
+  /**
+   * Altitude above Weld's grade, ft, and the near and far planes it produced.
+   *
+   * On the probe because altitude is THE parameter of the descent since P9 -- altitude.ts's
+   * header sets that out -- and a gate that wants to know which ground quad should be up, or
+   * whether the globe should still be visible, needs the number the scene actually used
+   * rather than one recomputed from a keyframe it hopes the camera reached. `alt` is
+   * camera.position.y by definition, and it is published anyway because a reader of
+   * window.__cam should not have to know that.
+   */
+  alt: number;
+  near: number;
+  far: number;
   /**
    * Whether the pose came from the walker rather than from a keyframe.
    *
@@ -302,6 +316,35 @@ export function CameraRig() {
 
     camera.lookAt(target.current);
 
+    /**
+     * The near and far planes, from the altitude the camera actually ended up at.
+     *
+     * AFTER the position is settled or eased, not before, so the planes match the frame being
+     * drawn rather than the frame requested. Experience.tsx's <Canvas camera={...}> still
+     * supplies the initial values; from the first frame onward they come from here.
+     *
+     * Both are held constant below 200 ft by altitude.ts's schedule, so stages 3, 4 and 5 get
+     * exactly the 0.5 and 25,000 they have always had -- including while somebody walks, which
+     * is the case that matters, since stages.ts:161-177 records a measured clip at 0.40 ft
+     * from a wall band at the low end of the hallWidth slider. This must not become a
+     * function of anything but altitude, or that guarantee stops being one.
+     *
+     * updateProjectionMatrix() is called only when a plane actually moves. It is not free --
+     * it rebuilds the projection matrix and dirties the frustum -- and during a dwell nothing
+     * moves at all, so the common case does no work. The 1e-6 is well under any change a
+     * single frame of the ease can produce and well over float noise in recomputing the same
+     * logarithm twice.
+     */
+    const wantPlanes = nearFar(camera.position.y);
+    if (
+      Math.abs(camera.near - wantPlanes.near) > 1e-6 ||
+      Math.abs(camera.far - wantPlanes.far) > 1e-6
+    ) {
+      camera.near = wantPlanes.near;
+      camera.far = wantPlanes.far;
+      camera.updateProjectionMatrix();
+    }
+
     const p = path.current;
     const last = p[p.length - 1];
     if (
@@ -320,6 +363,9 @@ export function CameraRig() {
       position: [camera.position.x, camera.position.y, camera.position.z],
       target: [target.current.x, target.current.y, target.current.z],
       fov: camera.fov,
+      alt: camera.position.y,
+      near: camera.near,
+      far: camera.far,
       firstPerson: walker !== null,
       path: p,
     };

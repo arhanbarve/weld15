@@ -55,6 +55,59 @@ slivers, three of them, all Smith Campus Center.
   furniture dimension in the model with a source behind it. Everything else about the fit-out is
   tagged ASSUMED in `src/geo/furniture.ts`.
 
+## Aerial and satellite imagery (P9)
+
+The descent from orbit stands on photography, and everything under `public/imagery/` is a derived
+work. `scripts/fetch-imagery.mjs` is the executable version of this section: it records each source
+URL, the bounding box, the projection, the resampling, and a SHA-256 of what it downloaded.
+
+- **NASA Blue Marble Next Generation**, topography and bathymetry, August 2004 composite, MODIS at
+  500 m — the globe at stage 0 (`l0`, 4096 × 2048) and the 1,000 km plate (`l1`). A US federal work
+  and therefore not subject to copyright in the United States; acknowledgement is requested rather
+  than required, and it is given here and in the Sources panel. **August and not December**: the
+  December plate carries heavy snow over New England.
+  NASA ships no 2048 × 1024 or 8192 × 4096 BMNG — the sizes that exist are 5400 × 2700,
+  21600 × 10800, and eight 21600 × 21600 tiles. Every other figure in circulation is a third-party
+  rescale, so our levels are downsamples we produced and are documented as such.
+
+- **MassGIS 2025 Aerial Imagery** (Commonwealth of Massachusetts, EOTSS Bureau of Geographic
+  Information) — the 50 km, 5 km and 1,600 ft plates (`l2`, `l3`, `l4`). Flown 18 March to
+  23 April 2025, **leaf-off**, statewide at 15 cm. The licence is unambiguous: *"No restrictions
+  apply to these data. Acknowledgement of MassGIS would be appreciated for products derived from
+  these data."*
+
+  **The OpenStreetMap wiki says MassGIS imagery cannot be redistributed. That warning is about the
+  2015 WorldView layer, which carries a DigitalGlobe licence, and not about these state-funded
+  orthos.** Both licence strings were read from their ArcGIS item metadata. This paragraph exists
+  because the next person to check will find that wiki page first.
+
+  Taken from the cached tile service (EPSG:3857) rather than the JP2 originals (EPSG:6348, UTM
+  19N). The reason is in the fetch script's header at length, and it is not convenience: UTM grid
+  north is not true north, the convergence at Weld is −1.4269°, and over the Yard's 1,269 ft extent
+  that is **31.6 ft** of misalignment against `campus.json` if the rotation is missed or signed
+  wrongly. Web Mercator's convergence is identically zero, so the error cannot be made. Verified on
+  a committed overlay — `design/renders/p9-georef-overlay.png` and `p9-georef-weld.png` — which
+  draws all 36 `campus.json` footprints and `weld.json` onto the deepest plate.
+
+  z20 is the deepest level published; z21 returns 404. Its 0.362 ft grid is **finer than the
+  0.492 ft the imagery was flown at**, so the extra density is interpolation and not information.
+  The manifest records the native figure as the resolution and the grid separately, because
+  claiming 0.362 ft would be claiming detail nobody captured.
+
+**Rejected, recorded so nobody re-proposes them:** MassGIS 2015 WorldView (*"The image files may not
+be distributed to the general public"*); EOX Sentinel-2 cloudless (CC BY-**NC**-SA 4.0 — the
+non-commercial and share-alike terms both fail here); Google Maps and Google Earth (Maps Platform
+Terms §3.2.3(a) bars exporting, scraping, pre-fetching, storing, resharing, rehosting and bulk tile
+download).
+
+**The seasons do not match, and that is disclosed rather than hidden.** The imagery is leaf-off
+March–April 2025; the model's default instant is 15 September 2026, and the sun is computed for that
+date. So the trees in the photograph are bare while the simulated light is September's. It is
+arguably a feature — bare trees mean Weld's fabric is visible from above instead of buried under
+canopy — and `src/ui/ImageryChip.tsx` names the dataset and the capture year in the viewport so a
+viewer can see the discrepancy for themselves. A second leaf-on plate was considered and not taken:
+it doubles the deepest level's budget and adds a second capture date to keep honest.
+
 ## What no source supplied
 
 Recorded here because an absence is a source-level fact and the sliders exist because of it: the

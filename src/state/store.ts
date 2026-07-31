@@ -48,6 +48,21 @@ export type StageId = 0 | 1 | 2 | 3 | 4 | 5;
 export const LAST_STAGE: StageId = 5;
 
 /**
+ * Where the fly-down stops.
+ *
+ * STAGE 3 AND NOT STAGE 5, which is P9.md section 8's third open question answered as it
+ * proposed. The threshold is the payoff of the whole piece and walking through a wall should be
+ * something the viewer does, not something that happens to them while they watch. Stopping at
+ * Weld Hall also leaves the camera somewhere with a control -- stage 3 is the free orbit -- so
+ * the flight ends by handing over rather than by stopping dead.
+ *
+ * Lives here rather than in stages.ts because stages.ts imports StageId from this module and
+ * the reverse import would be a real cycle. It is a policy about stages, which is this file's
+ * subject anyway.
+ */
+export const FLY_DOWN_END: StageId = 3;
+
+/**
  * Where the viewer is standing, in the suite's own frame, while first person is on.
  *
  * walk.ts's WalkState -- a position and a bearing -- plus the room the position falls in.
@@ -75,7 +90,19 @@ const DEFAULT_HOUR = 9;
 
 type Store = {
   stage: StageId;
-  /** Progress within the current stage, 0..1. Only stage 4 uses it. */
+  /**
+   * Progress within the current stage, 0..1.
+   *
+   * USED BY FOUR STAGES SINCE P9, not one. It read "only stage 4 uses it" when stage 4's
+   * threshold was the only stage that travelled rather than sat; the descent from orbit is now
+   * a flight too, so stages 0, 1 and 2 carry paths and scrub on this same number. Stages 3 and
+   * 5 are still places and ignore it. stages.ts cameraKeyframe() is where that is decided, and
+   * it decides it by asking whether the stage has a path rather than by naming stages.
+   *
+   * Already in the wire format for every stage: url.ts:184-185 encodes it in thousandths
+   * unconditionally and :560 range-checks it 0..1, so giving three more stages a path cost no
+   * format change and no VERSION bump.
+   */
   t: number;
   params: SuiteParams;
   /** Set once from the media query; a branch, not a duration. */
@@ -100,6 +127,15 @@ type Store = {
    * the mass fill to 0.22. Campus.tsx honours them and publishes what it used.
    */
   highContrast: boolean;
+
+  /**
+   * Whether the automatic descent is running.
+   *
+   * NOT CARRIED BY A LINK, on the same argument `selected` and `firstPerson` are not: a link is
+   * a place, and "currently moving" is not a place. A recipient of a shared URL should arrive at
+   * the stop, not two seconds into a flight toward it.
+   */
+  flying: boolean;
 
   /**
    * The civil date the sun is computed for, "YYYY-MM-DD", Cambridge local.
@@ -215,6 +251,25 @@ type Store = {
   next: () => void;
   prev: () => void;
   skipToSuite: () => void;
+  /**
+   * Start or stop the fly-down: the automatic descent from wherever the camera is to
+   * FLY_DOWN_END.
+   *
+   * A single boolean rather than a duration or a target, because the animation itself lives in
+   * FlyDown.tsx where there is a frame loop to run it on. This is the switch, and every control
+   * that could contradict it turns it off -- see the actions below.
+   */
+  setFlying: (v: boolean) => void;
+  /**
+   * The flight's own stage advance: on to the next stop, and stop flying at FLY_DOWN_END.
+   *
+   * Separate from setStage() because setStage() CANCELS the flight -- it is what a viewer
+   * pressing a stage button calls, and that has to win. The flight needs the same stage
+   * transition without the cancellation, and expressing that as "setStage then setFlying(true)"
+   * would mean the flag was briefly false, which is exactly the sort of one-frame inconsistency
+   * that turns into a flight that stutters at every stage boundary.
+   */
+  flyStep: () => void;
   setReducedMotion: (v: boolean) => void;
   setHighContrast: (v: boolean) => void;
   setParams: (p: Partial<SuiteParams>) => void;
@@ -452,6 +507,7 @@ export const useStore = create<Store>((set, get) => ({
   params: DEFAULT_PARAMS,
   reducedMotion: false,
   highContrast: false,
+  flying: false,
   date: DEFAULT_DATE,
   hour: DEFAULT_HOUR,
   orbit: null,
@@ -466,13 +522,43 @@ export const useStore = create<Store>((set, get) => ({
   // the stage's camera, so a walker surviving a jump to stage 2 would be a viewer standing
   // in a bedroom while the HUD said "Harvard Yard" -- and the control that leaves it is
   // only mounted at the last stage, so it would be unreachable as well as wrong.
-  setStage: (stage) => set({ stage, t: 0, firstPerson: null }),
+  // EVERY ONE OF THESE CANCELS THE FLY-DOWN, and that is the whole cancellation story rather
+  // than a listener somewhere. The flight is a thing the app is doing to the camera; any
+  // deliberate act by the viewer that also moves the camera has to win, or the two fight and
+  // the fly-down appears to drag the viewer back. Picking a stage, stepping, skipping to the
+  // suite and entering first person all qualify. setT does NOT -- see its own note.
+  setStage: (stage) => set({ stage, t: 0, firstPerson: null, flying: false }),
+  /**
+   * Scrub within a stage.
+   *
+   * Does NOT cancel the flight, because the flight's own animation is written through this
+   * action -- cancelling here would stop it on its first frame. The scrubber in the HUD calls
+   * cancelFlight() itself before scrubbing, which is the honest place for it: the slider is the
+   * viewer's hand on the same control the animation is using, and only the caller can tell the
+   * two apart.
+   */
   setT: (t) => set({ t: Math.min(1, Math.max(0, t)) }),
   next: () =>
-    set((s) => ({ stage: Math.min(LAST_STAGE, s.stage + 1) as StageId, t: 0, firstPerson: null })),
+    set((s) => ({
+      stage: Math.min(LAST_STAGE, s.stage + 1) as StageId,
+      t: 0,
+      firstPerson: null,
+      flying: false,
+    })),
   prev: () =>
-    set((s) => ({ stage: Math.max(0, s.stage - 1) as StageId, t: 0, firstPerson: null })),
-  skipToSuite: () => set({ stage: LAST_STAGE, t: 1, firstPerson: null }),
+    set((s) => ({
+      stage: Math.max(0, s.stage - 1) as StageId,
+      t: 0,
+      firstPerson: null,
+      flying: false,
+    })),
+  skipToSuite: () => set({ stage: LAST_STAGE, t: 1, firstPerson: null, flying: false }),
+  setFlying: (flying) => set({ flying }),
+  flyStep: () =>
+    set((s) => {
+      const next = Math.min(FLY_DOWN_END, s.stage + 1) as StageId;
+      return { stage: next, t: 0, firstPerson: null, flying: next < FLY_DOWN_END };
+    }),
   setReducedMotion: (reducedMotion) => set({ reducedMotion }),
   // No validation and no notice: it is a boolean with one writer, and unlike setCutaway
   // it is not reachable from a URL -- see the field above for why a link cannot carry it.
@@ -590,6 +676,10 @@ export const useStore = create<Store>((set, get) => ({
       set({
         firstPerson: { p: spot.p, heading: arrivalHeading(room), room: spot.id },
         selected: null,
+        // Walking and flying both own the camera. FirstPerson.tsx writes the walker and
+        // CameraRig copies it, so a fly-down still advancing t underneath would be invisible
+        // until the viewer pressed Escape and was then somewhere else entirely.
+        flying: false,
         notice: `Standing in ${room.label}. W, A, S and D to walk; Escape to stop.`,
       });
       return;
@@ -730,9 +820,11 @@ export const useStore = create<Store>((set, get) => ({
       // in the sender's own store -- which is also why setOccupancy does not re-fit.
       occupancy: s.occupancy,
       // Cleared for the reason `selected` is: a link carries the model, not where the
-      // recipient is standing in it. url.ts does not encode either field.
+      // recipient is standing in it. url.ts does not encode either field. `flying` joins them:
+      // a link is a place, and "currently moving" is not one.
       firstPerson: null,
       selected: null,
+      flying: false,
       notice: null,
     }),
 }));

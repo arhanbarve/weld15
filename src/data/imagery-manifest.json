@@ -1,0 +1,188 @@
+{
+  "generatedBy": "scripts/fetch-imagery.mjs",
+  "origin": {
+    "lat": 42.3739244,
+    "lon": -71.1171195
+  },
+  "frame": "site feet, x east, y north, origin at Weld Hall's centroid (src/geo/frames.ts)",
+  "levels": {
+    "L0": {
+      "px": [
+        4096,
+        2048
+      ],
+      "global": true,
+      "files": {
+        "avif": {
+          "file": "l0.avif",
+          "bytes": 449424
+        },
+        "webp": {
+          "file": "l0.webp",
+          "bytes": 573022
+        }
+      },
+      "provenance": {
+        "dataset": "NASA Blue Marble Next Generation, topography and bathymetry, August 2004",
+        "instrument": "MODIS, 500 m",
+        "url": "https://assets.science.nasa.gov/content/dam/science/esd/eo/images/bmng/bmng-topography-bathymetry/august/world.topo.bathy.200408.3x21600x10800.jpg",
+        "licence": "US federal work, not subject to copyright in the United States. Acknowledgement requested, not required.",
+        "attribution": "NASA Earth Observatory / Blue Marble Next Generation",
+        "sourceSha256": "05d984f723776f3d44fc473cc3d9eb67a48c425e82a56d7133e3761b2e231e86",
+        "projection": "equirectangular (plate carree), 360 x 180 degrees",
+        "processing": [
+          "lanczos3 downsample from 21600 x 10800 to the output grid",
+          "AUGUST composite, not December: the December plate carries heavy snow over New England"
+        ]
+      }
+    },
+    "L1": {
+      "px": [
+        2048,
+        1524
+      ],
+      "extentFt": {
+        "minX": -1640000,
+        "maxX": 1640000,
+        "minY": -1220390.625,
+        "maxY": 1220390.625
+      },
+      "ftPerTexel": 1601.5625,
+      "files": {
+        "avif": {
+          "file": "l1.avif",
+          "bytes": 55965
+        },
+        "webp": {
+          "file": "l1.webp",
+          "bytes": 70642
+        }
+      },
+      "provenance": {
+        "dataset": "NASA Blue Marble Next Generation, topography and bathymetry, August 2004",
+        "instrument": "MODIS, 500 m",
+        "url": "https://assets.science.nasa.gov/content/dam/science/esd/eo/images/bmng/bmng-topography-bathymetry/august/world.topo.bathy.200408.3x21600x10800.jpg",
+        "licence": "US federal work, not subject to copyright in the United States. Acknowledgement requested, not required.",
+        "attribution": "NASA Earth Observatory / Blue Marble Next Generation",
+        "sourceSha256": "05d984f723776f3d44fc473cc3d9eb67a48c425e82a56d7133e3761b2e231e86",
+        "processing": [
+          "equirectangular crop about Weld's origin",
+          "lanczos3 downsample to the output grid"
+        ]
+      }
+    },
+    "L2": {
+      "px": [
+        2048,
+        2048
+      ],
+      "extentFt": {
+        "minX": -82000,
+        "maxX": 82000,
+        "minY": -82000,
+        "maxY": 82000
+      },
+      "ftPerTexel": 80.0781,
+      "files": {
+        "avif": {
+          "file": "l2.avif",
+          "bytes": 557706
+        },
+        "webp": {
+          "file": "l2.webp",
+          "bytes": 931510
+        }
+      },
+      "provenance": {
+        "dataset": "MassGIS 2025 Aerial Imagery (Massachusetts_Aerial_Imagery_2025)",
+        "flown": "2025-03-18/2025-04-23, leaf-off",
+        "nativeResolutionFt": 0.492,
+        "sampledGridFt": 46.3163,
+        "zoom": 13,
+        "url": "https://tiles.arcgis.com/tiles/hGdibHYSPO59RG1h/arcgis/rest/services/Massachusetts_Aerial_Imagery_2025/MapServer/tile/{z}/{y}/{x}",
+        "licence": "No restrictions apply to these data. Acknowledgement of MassGIS would be appreciated for products derived from these data.",
+        "attribution": "MassGIS (Bureau of Geographic Information), Commonwealth of Massachusetts EOTSS",
+        "processing": [
+          "EPSG:3857 (Web Mercator) source; grid north IS true north, so no convergence rotation is applied or needed",
+          "per-output-pixel inverse mapping into the site frame, bilinear",
+          "composited over an upsampled Blue Marble crop, so no-data outside the state boundary receives ocean rather than black"
+        ],
+        "oceanBase": "NASA Earth Observatory / Blue Marble Next Generation"
+      }
+    },
+    "L3": {
+      "px": [
+        2048,
+        2048
+      ],
+      "extentFt": {
+        "minX": -8200,
+        "maxX": 8200,
+        "minY": -8200,
+        "maxY": 8200
+      },
+      "ftPerTexel": 8.0078,
+      "files": {
+        "avif": {
+          "file": "l3.avif",
+          "bytes": 603820
+        },
+        "webp": {
+          "file": "l3.webp",
+          "bytes": 1081582
+        }
+      },
+      "provenance": {
+        "dataset": "MassGIS 2025 Aerial Imagery (Massachusetts_Aerial_Imagery_2025)",
+        "flown": "2025-03-18/2025-04-23, leaf-off",
+        "nativeResolutionFt": 0.492,
+        "sampledGridFt": 5.7895,
+        "zoom": 16,
+        "url": "https://tiles.arcgis.com/tiles/hGdibHYSPO59RG1h/arcgis/rest/services/Massachusetts_Aerial_Imagery_2025/MapServer/tile/{z}/{y}/{x}",
+        "licence": "No restrictions apply to these data. Acknowledgement of MassGIS would be appreciated for products derived from these data.",
+        "attribution": "MassGIS (Bureau of Geographic Information), Commonwealth of Massachusetts EOTSS",
+        "processing": [
+          "EPSG:3857 (Web Mercator) source; grid north IS true north, so no convergence rotation is applied or needed",
+          "per-output-pixel inverse mapping into the site frame, bilinear"
+        ]
+      }
+    },
+    "L4": {
+      "px": [
+        3072,
+        3072
+      ],
+      "extentFt": {
+        "minX": -800,
+        "maxX": 800,
+        "minY": -800,
+        "maxY": 800
+      },
+      "ftPerTexel": 0.5208,
+      "files": {
+        "avif": {
+          "file": "l4.avif",
+          "bytes": 640445
+        },
+        "webp": {
+          "file": "l4.webp",
+          "bytes": 970018
+        }
+      },
+      "provenance": {
+        "dataset": "MassGIS 2025 Aerial Imagery (Massachusetts_Aerial_Imagery_2025)",
+        "flown": "2025-03-18/2025-04-23, leaf-off",
+        "nativeResolutionFt": 0.492,
+        "sampledGridFt": 0.3618,
+        "zoom": 20,
+        "url": "https://tiles.arcgis.com/tiles/hGdibHYSPO59RG1h/arcgis/rest/services/Massachusetts_Aerial_Imagery_2025/MapServer/tile/{z}/{y}/{x}",
+        "licence": "No restrictions apply to these data. Acknowledgement of MassGIS would be appreciated for products derived from these data.",
+        "attribution": "MassGIS (Bureau of Geographic Information), Commonwealth of Massachusetts EOTSS",
+        "processing": [
+          "EPSG:3857 (Web Mercator) source; grid north IS true north, so no convergence rotation is applied or needed",
+          "per-output-pixel inverse mapping into the site frame, bilinear"
+        ]
+      }
+    }
+  }
+}

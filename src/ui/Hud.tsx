@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { LAST_STAGE, STAGES, pieceLabel, useStore, type StageId } from "@/state/store";
+import { FLY_DOWN_END, LAST_STAGE, STAGES, pieceLabel, useStore, type StageId } from "@/state/store";
 import { buildSuite } from "@/geo/rooms";
 import { footprintArea } from "@/geo/walls";
 import { Panel } from "./Panel";
@@ -11,6 +11,7 @@ import { places } from "@/scene/route";
 import type { NudgeDir } from "@/geo/drag";
 import { UrlSync } from "./UrlSync";
 import { Sources } from "./Sources";
+import { ImageryChip } from "./ImageryChip";
 import { A11yAlt } from "./A11yAlt";
 
 /**
@@ -279,12 +280,24 @@ export function Hud() {
   const reduced = useStore((s) => s.reducedMotion);
   const high = useStore((s) => s.highContrast);
   const setHighContrast = useStore((s) => s.setHighContrast);
+  const flying = useStore((s) => s.flying);
+  const setFlying = useStore((s) => s.setFlying);
+
   const date = useStore((s) => s.date);
   const hour = useStore((s) => s.hour);
   const setDate = useStore((s) => s.setDate);
   const setHour = useStore((s) => s.setHour);
   const selected = useStore((s) => s.selected);
   const params = useStore((s) => s.params);
+  /**
+   * Does this stage travel, or is it a place?
+   *
+   * Asked of the keyframe rather than answered with a list of stage numbers, so that this and
+   * stages.ts cameraKeyframe() cannot come to different conclusions -- cameraKeyframe() tests
+   * exactly the same property to decide whether to walk a path or return a pose. keyframes() is
+   * memoised on the params object's identity, so this is a map lookup.
+   */
+  const travels = keyframes(params)[stage].path !== undefined;
   const orbit = useStore((s) => s.orbit);
   const setOrbit = useStore((s) => s.setOrbit);
   const cutaway = useStore((s) => s.cutaway);
@@ -562,9 +575,25 @@ export function Hud() {
   return (
     <>
       <UrlSync />
+      <ImageryChip />
       <button className="skip" onClick={skip} data-testid="skip">
         Skip to the room
       </button>
+
+      {/* THE FLY-DOWN, and it comes AFTER skip in the DOM because journey.spec.ts:120-130
+          asserts that the skip control is the first thing reachable by keyboard. That gate is
+          about an escape hatch being reachable before anything else, so a new control in front
+          of it would fail it -- correctly.
+
+          NOT OFFERED UNDER REDUCED MOTION AT ALL, rather than offered and ignored.
+          MASTER.md:93 asks for jump cuts there, and a nine-second automatic descent through
+          three decades of altitude is the most motion-heavy thing in this app. A control that
+          is present but declines to work is a control a keyboard user has to press to discover
+          is dead, which is the argument the stage-3 orbit keys are mounted by stage for.
+
+          Hidden once the flight is over rather than disabled: past FLY_DOWN_END there is
+          nothing left to fly to, and the camera is at stage 3's free orbit where the viewer has
+          controls of their own. */}
 
       {/* The written description of the frame, which is the only route into this app's
           content for anyone who cannot see a canvas -- and the only one at all if WebGL
@@ -592,6 +621,16 @@ export function Hud() {
            room instead of reporting a position, and the memo it feeds depends on it. */
         firstPerson={walking ? { room: walkRoom } : null}
       />
+      {!reduced && stage < FLY_DOWN_END ? (
+        <button
+          className="fly"
+          onClick={() => setFlying(!flying)}
+          data-testid="fly-down"
+          aria-pressed={flying}
+        >
+          {flying ? "Stop" : "Fly down to Weld"}
+        </button>
+      ) : null}
 
       <div className={stage === LAST_STAGE ? "hud hud-room" : "hud"} data-testid="hud">
         <div className="hud-stage" data-testid="stage-name">
@@ -620,18 +659,34 @@ export function Hud() {
           ))}
         </div>
 
-        {stage === 4 ? (
+        {/* THE SCRUBBER IS NOW ON EVERY STAGE THAT TRAVELS, not only on the threshold.
+            Stages 0, 1 and 2 became flights in P9, and a stage whose camera moves with `t`
+            and offers no way to move `t` is a stage a keyboard user cannot see the middle of.
+            Asked of the keyframe rather than by naming stages, so it cannot disagree with
+            cameraKeyframe(), which decides the same thing the same way.
+
+            data-testid stays "threshold-t" ON PURPOSE. tests/e2e/threshold.spec.ts and
+            journey.spec.ts both drive it by that name, and renaming it would be a rename of
+            other owners' files for no gain. The label and the wording do change with the stage,
+            because "through the wall" is not what dragging it does at stage 0. */}
+        {travels ? (
           <label className="hud-t">
-            through the wall
+            {stage === 4 ? "through the wall" : "descend"}
             <input
               type="range"
               min={0}
               max={1}
               step={0.01}
               value={t}
-              onChange={(e) => setT(Number(e.target.value))}
+              onChange={(e) => {
+                // The viewer's hand wins over the flight. setT() deliberately does not cancel
+                // -- FlyDown drives the same action -- so the cancellation is here, where the
+                // two can be told apart.
+                if (flying) setFlying(false);
+                setT(Number(e.target.value));
+              }}
               data-testid="threshold-t"
-              aria-label="Threshold progress"
+              aria-label={stage === 4 ? "Threshold progress" : "Descent progress"}
             />
             <span className="tabular">{t.toFixed(2)}</span>
           </label>

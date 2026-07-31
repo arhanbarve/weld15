@@ -7,8 +7,11 @@ import { LAST_STAGE, useStore } from "@/state/store";
 import { visibility, thresholdOpacity } from "./stages";
 import { CameraRig } from "./CameraRig";
 import { FirstPerson } from "./FirstPerson";
+import { FlyDown } from "./FlyDown";
 import { Lighting } from "./Lighting";
 import { Globe } from "./Globe";
+import { Ground } from "./Ground";
+import { Labels } from "./Labels";
 import { Campus } from "./Campus";
 import { WeldExterior } from "./WeldExterior";
 import { Suite } from "./Suite";
@@ -115,10 +118,30 @@ export default function Experience() {
               a permanent 0.07 ft of lag and, on a slow frame, a visible one. */}
           <FirstPerson />
           <CameraRig />
+          {/* AFTER CameraRig, on the mirror image of the argument that puts FirstPerson before
+              it. FlyDown writes `t` to the store and CameraRig reads it, so running it after
+              means the camera uses THIS frame's t on the NEXT frame -- one frame of lag, at a
+              rate of about a fiftieth of a stage per frame, which is invisible. Running it
+              first would be worse than lagging: setT triggers a React render, and a render
+              between FlyDown and CameraRig in the same frame would have CameraRig read a t that
+              had already moved on, so the flight would advance twice per frame and run at
+              double speed. */}
+          <FlyDown />
           <Perf />
 
           <Globe visible={vis.globe} />
+          {/* AFTER the globe and BEFORE the campus, which is the order they occlude in: the
+              globe is a depth-less backdrop behind everything, the ground is a real depth-tested
+              surface, and the massing stands on the ground. Mounted on the same stages as the
+              campus, because the ground and the buildings on it arrive together. */}
+          <Ground visible={vis.campus} />
           <Campus visible={vis.campus} highlightWeld={stage >= 2} />
+          {/* CONDITIONALLY MOUNTED, not merely made invisible, and that is a measured decision.
+              drei's <Html> portals a real DOM node and repositions it every frame; five of them
+              kept running at stages 4 and 5, where no place label can be on screen at all, and the
+              extra per-frame DOM work was enough to push a11y.spec.ts's throttled-announcement
+              measurement past its window. An invisible <Labels> is not free; an unmounted one is. */}
+          {vis.campus ? <Labels /> : null}
           <WeldExterior visible={vis.weld} opacity={shell} />
           <Suite
             visible={vis.interior}

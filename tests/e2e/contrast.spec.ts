@@ -60,6 +60,8 @@ type Campus = {
   lineWidth: number;
   weldLineWidth: number;
   massOpacity: number;
+  /** Added in P9: the fill now ramps with altitude, and this is the other end of the ramp. */
+  massCeiling: number;
 };
 
 type Perf = { calls: number; triangles: number; lines: number };
@@ -322,18 +324,61 @@ test("it changes the picture and costs no draw calls", async ({ page }) => {
   );
   expect(after.lines, `lines ${before.lines} -> ${after.lines}`).toBe(before.lines);
 
-  // Thicker strokes cover more of the frame. Measured 3,045 -> 5,620 near-white pixels at
-  // 1280 x 720, a factor of 1.85; gated at 1.4 so the bloom pass and the mass pulse have
-  // room. This is the assertion that the flag reaches the GPU rather than only the probe.
+  /*
+   * Thicker strokes cover more of the frame, and this is the assertion that the flag reaches the
+   * GPU rather than only the probe.
+   *
+   * RE-MEASURED AND THE BOUND MOVED FROM 1.4 TO 1.25 WHEN P9 LANDED. Originally 3,045 -> 5,620
+   * near-white pixels, a factor of 1.85. P9 put a photograph under the campus and made the mass
+   * fill ramp with altitude, and both compress this ratio without touching the strokes:
+   *
+   *   run 1   2,399 -> 3,238   1.350
+   *   run 2   2,401 -> 3,284   1.368
+   *   run 3   2,392 -> 3,256   1.361
+   *
+   * Tight across runs, so this is a moved baseline and not noise. The MECHANISM is worth naming
+   * because it is not obvious: `white` requires b - r < 40 to isolate neutral line work, and the
+   * mass is #96c8f5 where b - r is 95. A denser mass therefore bleeds into the anti-aliased edge of
+   * every stroke and pushes those pixels OUT of the neutral bucket -- so the count falls in both
+   * states, and falls further in high contrast where the mass is densest. Nothing about the strokes
+   * changed: window.__campus still reports 2.5 CSS px, asserted separately above.
+   *
+   * 1.25 keeps a real margin under the measured 1.35 while staying far above 1.0.
+   */
   expect(after.white, `white ${before.white} -> ${after.white}`).toBeGreaterThan(
-    before.white * 1.4,
+    before.white * 1.25,
   );
-  // And the masses are denser, measured on the one statistic that moves for the mass and
-  // not for the strokes -- see pixels() above for the three-build table that establishes
-  // that. Measured 55.13 -> 69.92, a factor of 1.268, against 1.021 on a build where the
-  // strokes thickened and the mass did not; gated at 1.12, between the two.
+  /*
+   * AND THE MASSES ARE DENSER -- but p75 CANNOT SEE THAT ANY MORE, so the assertion moved to the
+   * probe and the pixel check was demoted rather than quietly loosened.
+   *
+   * The original was p75 luminance 55.13 -> 69.92, a factor of 1.268, gated at 1.12 against 1.021
+   * on a build where the strokes thickened and the mass did not. That worked because the frame was
+   * mostly dark void, so the 75th percentile sat inside the massing. P9's photograph covers 100% of
+   * the frame at this stage, which moves p75 from 55 to 101 and makes it a statistic about the
+   * PHOTOGRAPH: measured now, 101.08 -> 103.30, a factor of 1.022.
+   *
+   * 1.022 is indistinguishable from the 1.021 this gate was built to catch, and the mass is in fact
+   * far denser than before -- the ramp runs 0.12 to 0.34 normally and 0.22 to 0.62 in high contrast,
+   * against the flat 0.12/0.22 this test was written for. So lowering the bound to 1.01 would make
+   * the gate vacuous: it would pass on exactly the broken build it exists to reject.
+   *
+   * A blue-channel population count (b - r > 70) does move properly, 33,323 -> 52,137 or 1.565 --
+   * but the campus edge colour #8fc4f2 has b - r of 99, so it counts strokes as well as mass and
+   * cannot make the discrimination p75's three-build table established. Rather than swap in a metric
+   * whose selectivity is unverified, the exact claim now comes from the probe, which reports the
+   * alpha actually handed to the material at both ends of the ramp.
+   */
+  const c = await campus(page);
+  expect(c.massOpacity, "high contrast must put the fill on MASTER's 0.22").toBeCloseTo(0.22, 6);
+  expect(c.massCeiling, "and raise the ramp's ceiling in the same proportion").toBeCloseTo(
+    0.34 * (0.22 / 0.12),
+    6,
+  );
+  // The pixel check survives as a direction rather than a magnitude: the frame must not get
+  // DARKER when the masses densify, which is the one thing p75 can still tell us.
   expect(after.p75, `p75 luminance ${before.p75.toFixed(2)} -> ${after.p75.toFixed(2)}`).toBeGreaterThan(
-    before.p75 * 1.12,
+    before.p75,
   );
 });
 

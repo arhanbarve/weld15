@@ -447,12 +447,34 @@ describe("the geometry and state layers stay three-free", () => {
     return out;
   };
 
-  const layers = [...sources(join(SRC, "geo")), ...sources(join(SRC, "state"))];
+  /**
+   * The two P9 modules under src/scene that are held to the same rule.
+   *
+   * src/scene is where the renderer lives, so it cannot be swept wholesale. But altitude.ts
+   * and globeRig.ts are declared three-free in their own headers for the same reason walk.ts
+   * and route.ts are -- they are the pure maths of the descent, they are unit-tested in plain
+   * node, and altitude.ts is what a script would import to ask what is visible at a given
+   * height. A `import * as THREE` added to either for one Vector3 would be invisible to tsc
+   * and would break those callers at runtime, which is exactly the failure this whole
+   * describe block exists to catch. Named individually rather than by directory because the
+   * rest of src/scene is legitimately full of three.
+   */
+  const PURE_SCENE = ["altitude.ts", "globeRig.ts"].map((f) => join(SRC, "scene", f));
+
+  const layers = [...sources(join(SRC, "geo")), ...sources(join(SRC, "state")), ...PURE_SCENE];
 
   it("has found the modules it is meant to be walking", () => {
     expect(layers.length).toBeGreaterThan(8);
     expect(layers).toContain(join(SRC, "geo", "place.ts"));
     expect(layers).toContain(join(SRC, "state", "url.ts"));
+    // The P9 pair really is on the list and really is on disk, so a rename cannot quietly
+    // drop it from the sweep.
+    for (const f of PURE_SCENE) {
+      expect(layers).toContain(f);
+      expect(existsSync(f), `${f} is missing`).toBe(true);
+    }
+    // and globeRig is reaching geo through a real edge
+    expect(loads(join(SRC, "scene", "globeRig.ts"))).toContain("@/geo/frames");
     // and it is reading real edges out of them, not an empty regex
     expect(loads(join(SRC, "state", "url.ts"))).toContain("@/geo/place");
   });
@@ -468,7 +490,10 @@ describe("the geometry and state layers stay three-free", () => {
     expect(Math.max(...routes.map((r) => r.split(" -> ").length))).toBeGreaterThan(2);
   });
 
-  it("reaches three from no module under src/geo or src/state", () => {
+  it("reaches three from no module under src/geo or src/state, nor from the pure scene pair", () => {
+    // Verified to have teeth rather than assumed: adding `import * as THREE from "three"` to
+    // altitude.ts fails this and nothing else in the suite, which is the whole point -- tsc
+    // is happy with it and so is every other test.
     expect(routesToThree(layers)).toEqual([]);
   });
 });
