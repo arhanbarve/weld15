@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect, useMemo } from "react";
 import * as THREE from "three";
+import { useThree } from "@react-three/fiber";
 import { useStore } from "@/state/store";
 import { isFacadeLit, sunPosition, type SunPosition } from "@/geo/solar";
 import { facadeAzimuth, gableAzimuth } from "@/geo/place";
@@ -208,6 +210,63 @@ export function skyDirection(alt: SunPosition): THREE.Vector3 {
   return new THREE.Vector3(flat * Math.sin(z), Math.sin(a), -flat * Math.cos(z));
 }
 
+/**
+ * A one-off scene for PMREMGenerator to bake: a large sphere, vertex-coloured
+ * sky-to-ground, seen from inside with BackSide. This is materials.ts:399's
+ * cheap next step, finally taken -- what glazing and the hardware pull's
+ * metalness had nothing to reflect. No texture file, consistent with this
+ * project's rule: the gradient is per-vertex colour, computed once.
+ */
+function buildEnvScene(): THREE.Scene {
+  const scene = new THREE.Scene();
+  const radius = 50;
+  const geometry = new THREE.SphereGeometry(radius, 24, 16);
+  const position = geometry.getAttribute("position");
+  const colors = new Float32Array(position.count * 3);
+  const sky = new THREE.Color(DAY.sky);
+  const ground = new THREE.Color(DAY.edge);
+  for (let i = 0; i < position.count; i++) {
+    const t = clamp01((position.getY(i) / radius + 1) / 2);
+    const c = ground.clone().lerp(sky, t);
+    colors[i * 3] = c.r;
+    colors[i * 3 + 1] = c.g;
+    colors[i * 3 + 2] = c.b;
+  }
+  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  const material = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide });
+  scene.add(new THREE.Mesh(geometry, material));
+  return scene;
+}
+
+/**
+ * The environment map, built once per renderer and shared as scene.environment.
+ *
+ * PMREMGenerator.fromScene() is a real render pass, so this runs once (empty
+ * deps beyond `gl`, which does not change) rather than per frame -- the same
+ * once-per-mount discipline useSuitePalette() and useFurniturePalette() use
+ * for their clones. Disposed on unmount: the prefiltered cube map and the
+ * one-off scene's geometry and material all hold GPU memory.
+ */
+function useEnvironment(): THREE.Texture | null {
+  const { gl } = useThree();
+  const [envMap] = useMemo(() => {
+    const pmrem = new THREE.PMREMGenerator(gl);
+    const envScene = buildEnvScene();
+    const rt = pmrem.fromScene(envScene, 0.04);
+    const mesh = envScene.children[0] as THREE.Mesh;
+    mesh.geometry.dispose();
+    (mesh.material as THREE.Material).dispose();
+    pmrem.dispose();
+    return [rt.texture];
+  }, [gl]);
+
+  useEffect(() => {
+    return () => envMap.dispose();
+  }, [envMap]);
+
+  return envMap;
+}
+
 export function Lighting() {
   const date = useStore((s) => s.date);
   const hour = useStore((s) => s.hour);
@@ -215,6 +274,15 @@ export function Lighting() {
   const stage = useStore((s) => s.stage);
   const t = useStore((s) => s.t);
   const reduced = useStore((s) => s.reducedMotion);
+
+  const { scene } = useThree();
+  const environment = useEnvironment();
+  useEffect(() => {
+    scene.environment = environment;
+    return () => {
+      if (scene.environment === environment) scene.environment = null;
+    };
+  }, [scene, environment]);
 
   // Nothing here is per-frame. The store's date and hour move on a HUD event, so
   // this body runs on user input, not on render -- which is why the Colors and
@@ -253,10 +321,12 @@ export function Lighting() {
    * on the threshold's own interior ramp, which costs one Color lerp per HUD event
    * and no draw calls at all.
    *
-   * Not transmission, and not an environment map. materials.ts records that
-   * transmission was removed because it forces a second full scene render, and an
-   * envMap would be a PMREM to build and hold; a background colour is the cheap
-   * answer the palette was already asking for.
+   * Not transmission, and not this component's OWN environment map -- two
+   * different jobs. materials.ts records transmission was removed because it
+   * forces a second full scene render; `scene.environment` below (P10) is a
+   * reflection source for specular response, not a backdrop, and painting it
+   * through the glass would show the render's own gradient sphere rather
+   * than sky. A background colour is still the cheap, correct answer here.
    */
   const { interior } = thresholdOpacity(stage, t, reduced);
   const background = new THREE.Color(SCAN.void).lerp(new THREE.Color(DAY.sky), interior);
