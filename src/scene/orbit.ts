@@ -31,6 +31,7 @@
 
 import weld from "@/data/weld.json";
 import { normalizeAngle } from "@/geo/frames";
+import type { Vec3 } from "@/geo/frames";
 import { WELD } from "@/geo/place";
 import type { Keyframe } from "./stages";
 
@@ -65,7 +66,7 @@ export const WELD_FOOTPRINT_RADIUS = (weld.rings[0] as number[][]).reduce(
  * of the envelope IS the camera's clearance, and there is no separate clearance
  * figure to invent.
  */
-const MASS_RADIUS = Math.hypot(WELD_FOOTPRINT_RADIUS, WELD.ridge);
+export const MASS_RADIUS = Math.hypot(WELD_FOOTPRINT_RADIUS, WELD.ridge);
 
 /**
  * Stage 3's orbit limits: 114.9 to 344.7 ft, 15 to 88 degrees off vertical.
@@ -171,5 +172,83 @@ export function orbitOf(kf: Keyframe): Orbit {
     azimuthDeg: Math.atan2(east, north) / DEG,
     polarDeg: Math.acos(within(up / radius, -1, 1)) / DEG,
     radius,
+  };
+}
+
+/**
+ * The actual centre of the sphere MASS_RADIUS bounds: Weld's centroid, at grade.
+ *
+ * NOT a keyframe's look-at target. kf[3].target sits at [0, 42, 0] -- partway up the
+ * building, chosen for framing -- while MASS_RADIUS above is derived from a sphere
+ * centred at height 0: the farthest footprint vertex, carried up to the ridge, is
+ * hypot(WELD_FOOTPRINT_RADIUS, WELD.ridge) from a centre at grade, not from a centre 42
+ * ft up. Centring a clearance guarantee on the look-at target instead only holds within
+ * STAGE3_CLAMP's own polar range (see the comment on minRadius above); this is the point
+ * a guarantee has to be centred on to hold everywhere.
+ */
+export const MASSING_CENTER: Vec3 = [0, 0, 0];
+
+/** An OrbitClamp that clamps nothing, for transitPose below. */
+const NO_CLAMP: OrbitClamp = {
+  minRadius: -Infinity,
+  maxRadius: Infinity,
+  minPolarDeg: -Infinity,
+  maxPolarDeg: Infinity,
+};
+
+/**
+ * Interpolate two poses in SPHERICAL coordinates about `center`, not in cartesian space.
+ *
+ * A straight line between two points outside a sphere is not guaranteed to stay outside
+ * it -- the chord can cut through the middle even when both ends clear it. That is
+ * exactly what a raw position blend() did for the stage 3 -> 4 transit: it dipped to 108
+ * ft against MASS_RADIUS's 114.9 ft, despite both ends sitting at 195-251 ft from
+ * MASSING_CENTER. Lerping the RADIUS about `center` instead of lerping cartesian position
+ * keeps every point on the path at a radius between radius(from) and radius(to) --
+ * never outside that range, because radius and the two angles are independent
+ * coordinates -- so the path's closest approach to `center` is
+ * min(radius(from), radius(to)), which is >= MASS_RADIUS whenever both ends already are.
+ *
+ * `center` MUST be the real centre MASS_RADIUS is measured from -- MASSING_CENTER above,
+ * not either keyframe's own look-at target -- or the guarantee this function exists for
+ * does not hold.
+ *
+ * The look-at target and fov are plain linear lerps, unaffected by `center`: only the
+ * camera's POSITION needs the clearance guarantee, and constraining where the camera
+ * LOOKS to a sphere would be answering a question nobody asked.
+ *
+ * Reuses orbitOf/orbitKeyframe rather than reimplementing the spherical maths: orbitOf
+ * extracts (azimuth, polar, radius) of a position about an arbitrary target -- here
+ * `center` rather than the keyframe's own target -- and orbitKeyframe is its exact
+ * inverse. NO_CLAMP is passed through because STAGE3_CLAMP's polar/radius ranges are a
+ * stage-3-orbit framing decision that this transit deliberately leaves (kf[4] sits
+ * nowhere near them), and clamping here would corrupt the interpolation and break the
+ * exact-endpoint guarantee at t = 1.
+ */
+export function transitPose(from: Keyframe, to: Keyframe, center: Vec3, t: number): Keyframe {
+  const k = Math.min(1, Math.max(0, t));
+  const a = orbitOf({ position: from.position, target: center, fov: from.fov });
+  const b = orbitOf({ position: to.position, target: center, fov: to.fov });
+  const radius = a.radius + (b.radius - a.radius) * k;
+  const polarDeg = a.polarDeg + (b.polarDeg - a.polarDeg) * k;
+  // Shortest way round, same reasoning as wrapAzimuth above: a straight lerp from an
+  // azimuth of -170 to one of 170 would swing 340 degrees the long way rather than the
+  // 20 degrees actually between them.
+  const dAz = wrapAzimuth(b.azimuthDeg - a.azimuthDeg);
+  const azimuthDeg = a.azimuthDeg + dAz * k;
+  const { position } = orbitKeyframe(
+    { position: center, target: center, fov: 0 },
+    { azimuthDeg, polarDeg, radius },
+    NO_CLAMP,
+  );
+  const mix = (p: number, q: number) => p + (q - p) * k;
+  return {
+    position,
+    target: [
+      mix(from.target[0], to.target[0]),
+      mix(from.target[1], to.target[1]),
+      mix(from.target[2], to.target[2]),
+    ],
+    fov: mix(from.fov, to.fov),
   };
 }

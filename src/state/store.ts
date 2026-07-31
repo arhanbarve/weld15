@@ -246,8 +246,39 @@ type Store = {
    */
   notice: string | null;
 
+  /**
+   * How many CUTS have happened. A counter, not a boolean, and not the stage.
+   *
+   * CameraRig un-settles on this rather than on `stage`, and that one change is what deletes
+   * every boundary jump in the descent. The poses either side of a stage boundary are already
+   * identical -- descentPath() pins each leg's last stop to the next stage's keyframe OBJECT
+   * -- so the jump was never geometry. It was `settled.current = false` firing on a stage
+   * change and making the next frame COPY the new pose instead of easing into it.
+   *
+   * Bumped by the five actions that are genuinely a jump: setStage, next, prev, skipToSuite,
+   * and entering or leaving first person. NOT bumped by setT, setJourney or flyStep -- those
+   * three are continuous motion, and flyStep's exclusion is precisely what turns the
+   * fly-down from three moves with two pops into one nine-second descent.
+   */
+  cuts: number;
+
+  /**
+   * Whether a pointer is currently down on the master scrubber.
+   *
+   * CameraRig copies rather than eases while this is true, on the same argument it copies for
+   * the walker: a dragged control must track the hand. The exponential approach at k = 3.2/s
+   * lags by about 0.3 s, which on a scrubber reads as the camera fighting the slider.
+   *
+   * A separate flag rather than inferring it from rapid setJourney calls, because "rapid" is
+   * a guess about event rates and pointerdown/pointerup are facts.
+   */
+  scrubbing: boolean;
+
   setStage: (s: StageId) => void;
   setT: (t: number) => void;
+  /** Stage and t together, with no cut and no reset. The master scrubber's only writer. */
+  setJourney: (stage: StageId, t: number) => void;
+  setScrubbing: (v: boolean) => void;
   next: () => void;
   prev: () => void;
   skipToSuite: () => void;
@@ -517,6 +548,8 @@ export const useStore = create<Store>((set, get) => ({
   firstPerson: null,
   selected: null,
   notice: null,
+  cuts: 0,
+  scrubbing: false,
 
   // Every stage change drops the walker, and that is not tidiness. First person replaces
   // the stage's camera, so a walker surviving a jump to stage 2 would be a viewer standing
@@ -527,7 +560,8 @@ export const useStore = create<Store>((set, get) => ({
   // deliberate act by the viewer that also moves the camera has to win, or the two fight and
   // the fly-down appears to drag the viewer back. Picking a stage, stepping, skipping to the
   // suite and entering first person all qualify. setT does NOT -- see its own note.
-  setStage: (stage) => set({ stage, t: 0, firstPerson: null, flying: false }),
+  setStage: (stage) =>
+    set((s) => ({ stage, t: 0, firstPerson: null, flying: false, cuts: s.cuts + 1 })),
   /**
    * Scrub within a stage.
    *
@@ -538,12 +572,19 @@ export const useStore = create<Store>((set, get) => ({
    * two apart.
    */
   setT: (t) => set({ t: Math.min(1, Math.max(0, t)) }),
+  setJourney: (stage, t) =>
+    // NOT setStage-then-setT: setStage resets t to 0 and cancels the flight, and a scrubber
+    // that reset the very number it is writing would snap to the start of each leg as it
+    // crossed into it. One set(), so no render ever sees the half-applied pair.
+    set({ stage, t: Math.min(1, Math.max(0, t)), firstPerson: null, flying: false }),
+  setScrubbing: (scrubbing) => set({ scrubbing }),
   next: () =>
     set((s) => ({
       stage: Math.min(LAST_STAGE, s.stage + 1) as StageId,
       t: 0,
       firstPerson: null,
       flying: false,
+      cuts: s.cuts + 1,
     })),
   prev: () =>
     set((s) => ({
@@ -551,8 +592,10 @@ export const useStore = create<Store>((set, get) => ({
       t: 0,
       firstPerson: null,
       flying: false,
+      cuts: s.cuts + 1,
     })),
-  skipToSuite: () => set({ stage: LAST_STAGE, t: 1, firstPerson: null, flying: false }),
+  skipToSuite: () =>
+    set((s) => ({ stage: LAST_STAGE, t: 1, firstPerson: null, flying: false, cuts: s.cuts + 1 })),
   setFlying: (flying) => set({ flying }),
   flyStep: () =>
     set((s) => {
@@ -681,13 +724,15 @@ export const useStore = create<Store>((set, get) => ({
         // until the viewer pressed Escape and was then somewhere else entirely.
         flying: false,
         notice: `Standing in ${room.label}. W, A, S and D to walk; Escape to stop.`,
+        cuts: s.cuts + 1,
       });
       return;
     }
     set({ notice: `Refused: ${noRoomToStand("Every room in this suite")}` });
   },
 
-  leaveFirstPerson: () => set({ firstPerson: null, notice: null }),
+  leaveFirstPerson: () =>
+    set((s) => ({ firstPerson: null, notice: null, cuts: s.cuts + 1 })),
 
   // No clamping, no validation, and no recomputation of the room: this is the frame path,
   // and FirstPerson.tsx has the WalkCtx that walk() and roomAt() were both answered
@@ -791,6 +836,8 @@ export const useStore = create<Store>((set, get) => ({
       firstPerson: null,
       selected: null,
       notice: "Back to the sourced dimensions and the shipped fit-out.",
+      cuts: 0,
+      scrubbing: false,
     }),
 
   /**

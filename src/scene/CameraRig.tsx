@@ -4,10 +4,11 @@ import { useEffect, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { LAST_STAGE, useStore, type StageId } from "@/state/store";
-import { keyframes, cameraKeyframe } from "./stages";
+import { keyframes, cameraKeyframe, REDUCED_CUT } from "./stages";
 import { firstPersonPose } from "./FirstPerson";
-import { clampOrbit, orbitKeyframe, orbitOf, STAGE3_CLAMP } from "./orbit";
+import { clampOrbit, orbitKeyframe, orbitOf, STAGE3_CLAMP, transitPose, MASSING_CENTER } from "./orbit";
 import { nearFar } from "./altitude";
+import { toJourney } from "./journey";
 
 /**
  * Drives the camera from the stage machine, and gives stage 3 a free orbit.
@@ -115,6 +116,19 @@ type CamProbe = {
    */
   firstPerson: boolean;
   /**
+   * Journey parameter, 0 at orbit to 1 standing in the hall. journey.ts's toJourney(stage, t,
+   * params) -- the same projection the master scrubber reads and writes, published here so a
+   * gate can watch it move continuously without importing the mapping itself.
+   */
+  u: number;
+  /**
+   * The cut counter this file's un-settle effect now watches instead of `stage`.
+   *
+   * On the probe so a continuity gate can assert it did NOT change across a scrub -- the whole
+   * point of this step -- without reconstructing store.ts's bookkeeping in test code.
+   */
+  cuts: number;
+  /**
    * Distinct camera positions since the last stage change, oldest first.
    *
    * This is the whole reduced-motion hook, and it exists because the gate in
@@ -137,6 +151,8 @@ export function CameraRig() {
   const setReduced = useStore((s) => s.setReducedMotion);
   const orbit = useStore((s) => s.orbit);
   const setOrbit = useStore((s) => s.setOrbit);
+  const cuts = useStore((s) => s.cuts);
+  const scrubbing = useStore((s) => s.scrubbing);
 
   const target = useRef(new THREE.Vector3());
   const settled = useRef(false);
@@ -159,21 +175,30 @@ export function CameraRig() {
   const walking = useStore((s) => s.firstPerson !== null);
 
   /**
-   * Un-settle on a stage change AND on entering or leaving first person, so the next frame
-   * places the camera rather than easing toward it.
+   * Un-settle on a CUT, not on a stage change, and on entering or leaving first person, so the
+   * next frame places the camera rather than easing toward it.
    *
-   * The first-person half is the interesting one, and it is not bookkeeping. An eased
+   * `stage` alone stopped being the right trigger once the master scrubber arrived: a scrubbed
+   * stage change (setJourney, which does NOT bump `cuts`) is meant to be continuous, because the
+   * poses on either side of every stage boundary are already geometrically identical --
+   * descentPath() pins each leg's last stop to the next stage's keyframe object, so there was
+   * never a geometry gap to paper over. The old jump was never about geometry; it was this
+   * effect force-restarting the ease on every tick of a drag that was already smooth. `cuts`
+   * only increments on a genuine jump -- setStage, next, prev, skipToSuite, enterFirstPerson,
+   * leaveFirstPerson (see store.ts) -- so watching it instead leaves a scrub alone.
+   *
+   * The first-person half of the original reasoning is unchanged and still holds. An eased
    * return from wherever the viewer walked to the stage-5 keyframe would be a straight
    * line through whatever stands in between -- which is precisely the defect P7 paid back:
    * stages.ts recorded a straight camera path from bedroom B to the hall passing through
    * the partition and standing half a foot off it, at the near plane, with the frame going
    * empty. A viewer who walks into bedroom A and presses Escape would fly the same line.
-   * So leaving is a cut, on purpose.
+   * So leaving is a cut, on purpose -- and enterFirstPerson/leaveFirstPerson both bump `cuts`.
    */
   useEffect(() => {
     settled.current = false;
     path.current = [];
-  }, [stage, walking]);
+  }, [cuts, walking]);
 
   /**
    * Pointer drag and wheel, at stage 3 only.
@@ -281,11 +306,25 @@ export function CameraRig() {
      * Experience.tsx -- so what is read here was written this frame, not last.
      */
     const walker = stage === LAST_STAGE ? useStore.getState().firstPerson : null;
+    // Reduced motion for the stage 3 -> 4 transit below: cameraKeyframe's own reduced
+    // branch does not fire for stage 3, since stage 3 has no path of its own to jump
+    // within. This gives the transit the same jump-at-midpoint shape stage 4's crossing
+    // already has, so under reduced motion stage 3 is either exactly the orbit or exactly
+    // kf[4] and nothing geometrically between.
+    const transit = reduced ? (t < REDUCED_CUT ? 0 : 1) : t;
     const want =
       walker !== null
         ? { ...firstPersonPose(walker, params), fov: kf[LAST_STAGE].fov }
         : stage === 3
-          ? orbitKeyframe(kf[3], orbit ?? orbitOf(kf[3]))
+          ? // Stage 3 is a PLACE at t = 0 and a TRANSIT above it. The transit starts from
+            // whatever the viewer orbited to rather than from a fixed pose, so scrubbing on
+            // from stage 3 leaves from where they were standing; at t = 1 it is kf[4]
+            // exactly, the first stop of stage 4's own path, so the next boundary is not a
+            // cut either. Interpolated in SPHERICAL coordinates about MASSING_CENTER
+            // (orbit.ts's transitPose), not cartesian: a straight position blend dipped
+            // inside MASS_RADIUS at t ~= 0.58 even though both ends clear it, since a chord
+            // between two points outside a sphere can still cut through the middle.
+            transitPose(orbitKeyframe(kf[3], orbit ?? orbitOf(kf[3])), kf[4], MASSING_CENTER, transit)
           : cameraKeyframe(kf, stage, t, reduced);
 
     const wantPos = new THREE.Vector3(...want.position);
@@ -296,7 +335,11 @@ export function CameraRig() {
     // which reads as walking on ice rather than as a smooth camera. It is also what makes
     // goToPlace() a jump cut -- the reduced-motion alternative to walking is one change of
     // position, and an ease would put a fly back in between.
-    if (walker !== null || reduced || !settled.current) {
+    //
+    // `scrubbing` joins this branch for the same reason: while the master scrubber is
+    // held, the control being dragged IS the camera, and an exponential approach to it
+    // would lag the hand by the same fraction of a second the walker would be lagged by.
+    if (walker !== null || reduced || scrubbing || !settled.current) {
       camera.position.copy(wantPos);
       target.current.copy(wantTarget);
       camera.fov = want.fov;
@@ -311,7 +354,11 @@ export function CameraRig() {
         camera.fov += (want.fov - camera.fov) * k;
         camera.updateProjectionMatrix();
       }
-      if (stage === 3) keepOutsideMassing(camera.position, target.current);
+      // Only while stage 3 IS a place, i.e. t === 0. Above that the pose is the transit to
+      // kf[4], which deliberately leaves STAGE3_CLAMP's envelope on its way to a stand-off
+      // 124 ft out, and forcing the radius back inside it would pin the camera to the orbit
+      // sphere and stall the move.
+      if (stage === 3 && t === 0) keepOutsideMassing(camera.position, target.current);
     }
 
     camera.lookAt(target.current);
@@ -367,6 +414,8 @@ export function CameraRig() {
       near: camera.near,
       far: camera.far,
       firstPerson: walker !== null,
+      u: toJourney(stage, t, params),
+      cuts,
       path: p,
     };
     (window as unknown as { __cam?: CamProbe }).__cam = probe;

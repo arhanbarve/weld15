@@ -459,7 +459,7 @@ describe("the geometry and state layers stay three-free", () => {
    * describe block exists to catch. Named individually rather than by directory because the
    * rest of src/scene is legitimately full of three.
    */
-  const PURE_SCENE = ["altitude.ts", "globeRig.ts"].map((f) => join(SRC, "scene", f));
+  const PURE_SCENE = ["altitude.ts", "globeRig.ts", "journey.ts"].map((f) => join(SRC, "scene", f));
 
   const layers = [...sources(join(SRC, "geo")), ...sources(join(SRC, "state")), ...PURE_SCENE];
 
