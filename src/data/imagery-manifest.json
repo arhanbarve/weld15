@@ -15,7 +15,7 @@
       "files": {
         "avif": {
           "file": "l0.avif",
-          "bytes": 449424
+          "bytes": 411768
         },
         "webp": {
           "file": "l0.webp",
@@ -51,7 +51,7 @@
       "files": {
         "avif": {
           "file": "l1.avif",
-          "bytes": 55965
+          "bytes": 40387
         },
         "webp": {
           "file": "l1.webp",
@@ -86,26 +86,28 @@
       "files": {
         "avif": {
           "file": "l2.avif",
-          "bytes": 557706
+          "bytes": 986586
         },
         "webp": {
           "file": "l2.webp",
-          "bytes": 931510
+          "bytes": 1123854
         }
       },
       "provenance": {
-        "dataset": "MassGIS 2025 Aerial Imagery (Massachusetts_Aerial_Imagery_2025)",
-        "flown": "2025-03-18/2025-04-23, leaf-off",
-        "nativeResolutionFt": 0.492,
-        "sampledGridFt": 46.3163,
+        "dataset": "USDA NAIP (National Agriculture Imagery Program), USDA_CONUS_PRIME mosaic",
+        "flown": "2023-07-07",
+        "leafState": "leaf-on",
+        "nativeResolutionFt": 0.9842519685,
+        "sampledGridFt": 80.0781,
         "zoom": 13,
-        "url": "https://tiles.arcgis.com/tiles/hGdibHYSPO59RG1h/arcgis/rest/services/Massachusetts_Aerial_Imagery_2025/MapServer/tile/{z}/{y}/{x}",
-        "licence": "No restrictions apply to these data. Acknowledgement of MassGIS would be appreciated for products derived from these data.",
-        "attribution": "MassGIS (Bureau of Geographic Information), Commonwealth of Massachusetts EOTSS",
+        "url": "https://gis.apfo.usda.gov/arcgis/rest/services/NAIP/USDA_CONUS_PRIME/ImageServer/exportImage?bbox={bbox}&bboxSR=3857&imageSR=3857&size={w},{h}&format=png&f=image",
+        "licence": "Work of the US Department of Agriculture, Farm Service Agency. Public domain in the United States; no permission required and no attribution required.",
+        "attribution": "USDA Farm Service Agency, National Agriculture Imagery Program",
         "processing": [
-          "EPSG:3857 (Web Mercator) source; grid north IS true north, so no convergence rotation is applied or needed",
+          "EPSG:3857 (Web Mercator) request; grid north IS true north, so no convergence rotation is applied or needed",
           "per-output-pixel inverse mapping into the site frame, bilinear",
-          "composited over an upsampled Blue Marble crop, so no-data outside the state boundary receives ocean rather than black"
+          "fetched as a 3x3 grid of exportImage sub-requests, not one request -- see naipRasterTiled()'s header comment: the ImageServer's maxMosaicImageCount (50) is smaller than the ~79 source scenes this footprint intersects, so a single request came back ~37.6% no-data",
+          "composited over an upsampled Blue Marble crop, so no-data outside NAIP's CONUS land coverage receives ocean rather than black"
         ],
         "oceanBase": "NASA Earth Observatory / Blue Marble Next Generation"
       }
@@ -163,11 +165,11 @@
       "files": {
         "avif": {
           "file": "l4.avif",
-          "bytes": 640445
+          "bytes": 453943
         },
         "webp": {
           "file": "l4.webp",
-          "bytes": 970018
+          "bytes": 706748
         }
       },
       "provenance": {
@@ -178,11 +180,17 @@
         "zoom": 20,
         "url": "https://tiles.arcgis.com/tiles/hGdibHYSPO59RG1h/arcgis/rest/services/Massachusetts_Aerial_Imagery_2025/MapServer/tile/{z}/{y}/{x}",
         "licence": "No restrictions apply to these data. Acknowledgement of MassGIS would be appreciated for products derived from these data.",
-        "attribution": "MassGIS (Bureau of Geographic Information), Commonwealth of Massachusetts EOTSS",
+        "attribution": "MassGIS (Bureau of Geographic Information), Commonwealth of Massachusetts EOTSS (detail); USDA Farm Service Agency, National Agriculture Imagery Program (colour)",
         "processing": [
           "EPSG:3857 (Web Mercator) source; grid north IS true north, so no convergence rotation is applied or needed",
           "per-output-pixel inverse mapping into the site frame, bilinear"
-        ]
+        ],
+        "composite": {
+          "luminance": "MassGIS 2025 Aerial Imagery, leaf-off, 0.492 ft native",
+          "chrominance": "USDA NAIP, leaf-on, 0.9842519685 ft native",
+          "method": "Per-pixel YCbCr recombination. Chrominance is always NAIP's. Luminance is MassGIS's except under vegetation, where a blurred green-excess mask takes luminance from NAIP too -- the leaf-off plate shows the ground through bare canopy, so its detail there is detail of the wrong subject. src/imagery/hybrid.ts carries the reasoning and the tuned thresholds.",
+          "resolutionCaveat": "nativeResolutionFt describes the luminance channel. The colour is NAIP's and is coarser."
+        }
       }
     }
   }
