@@ -131,6 +131,31 @@ const FP_ROW_MAX = "18rem";
 type Nudge = { az?: number; polar?: number; zoom?: number };
 
 /**
+ * Arrow, page and plus/minus keys to an orbit nudge.
+ *
+ * ORBIT_CONTROLS and its six buttons are gone (step 5); this is only the mapping that
+ * survives them. SIGNS follow CameraRig's drag exactly, the same choice ORBIT_CONTROLS'
+ * own docblock recorded: right increases azimuth, up increases polar, because polar is
+ * measured from straight up, so a rising polar tilts the view UP toward the horizon --
+ * which is what an up arrow should do.
+ *
+ * `=` and `_` stay for the reason they always did: on a US layout `+` and `-` share keys
+ * with them, and an unshifted press reports the unshifted character.
+ */
+const NUDGE_BY_KEY: Record<string, Nudge> = {
+  ArrowLeft: { az: -STEP_DEG },
+  ArrowRight: { az: STEP_DEG },
+  ArrowUp: { polar: STEP_DEG },
+  ArrowDown: { polar: -STEP_DEG },
+  PageUp: { zoom: 1 / ZOOM_PER_PRESS },
+  "+": { zoom: 1 / ZOOM_PER_PRESS },
+  "=": { zoom: 1 / ZOOM_PER_PRESS },
+  PageDown: { zoom: ZOOM_PER_PRESS },
+  "-": { zoom: ZOOM_PER_PRESS },
+  _: { zoom: ZOOM_PER_PRESS },
+};
+
+/**
  * Arrow keys to a piece move, in the SUITE frame.
  *
  * u is inward from the facade and v is north along the section, so the mapping to
@@ -302,6 +327,8 @@ export function Hud() {
 
   /** The orbit stage 3 opens on: the keyframe stages.ts chose, read back as angles. */
   const seed = useMemo(() => orbitOf(keyframes(params)[3]), [params]);
+  /** The orbit to read: the store's, once a press or a drag has set one, else the seed. */
+  const here = orbit ?? seed;
 
   /**
    * What the live region currently holds.
@@ -464,6 +491,43 @@ export function Hud() {
   }, [walking]);
 
   /**
+   * The orbit keys, on the window, at stage 3 only.
+   *
+   * ON THE WINDOW because the six buttons that used to carry them are gone -- P10 took every
+   * on-screen control off the canvas at this stage -- and the canvas cannot hold focus
+   * meaningfully: there is nothing inside it to focus. Which is what makes the guards
+   * load-bearing rather than defensive, exactly as they are on the two handlers above:
+   *
+   *   the stage gate   arrow keys belong to the walker at stage 5 and to a selected piece
+   *                    at stage 5; mounting by stage rather than branching inside keeps one
+   *                    owner per key per stage.
+   *   the target gate  every dimension in the panel is a range input, the master scrubber is
+   *                    one, and both sun controls are. Claiming an arrow while one has focus
+   *                    would make them unusable by keyboard, which is the exact failure this
+   *                    project keeps finding.
+   *   no modifiers     Cmd+Arrow and Alt+Arrow are platform navigation.
+   *
+   * STEP_DEG, ZOOM_PER_PRESS and nudgeOrbit are unchanged from when buttons called them. The
+   * derivation in their docblocks -- 15 presses end to end on both the polar span and the
+   * radius, matched to one wheel notch and to 14 px of drag -- is why the keys still feel
+   * like the pointer, and none of it moved.
+   */
+  useEffect(() => {
+    if (stage !== 3) return;
+    const onKey = (e: KeyboardEvent) => {
+      const n = NUDGE_BY_KEY[e.key];
+      if (!n || e.ctrlKey || e.metaKey || e.altKey) return;
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || el?.isContentEditable) return;
+      e.preventDefault();
+      nudgeOrbit(n, seed, setOrbit);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [stage, seed, setOrbit]);
+
+  /**
    * The master scrubber's only writer.
    *
    * u is JourneyBar's own coordinate -- the whole descent, orbit to hall -- and
@@ -567,6 +631,33 @@ export function Hud() {
               </button>
             ) : null}
           </div>
+
+          {/* THE ORBIT'S KEYBOARD HALF, stage 3 only -- and stage-3-only by MOUNT, the same
+              way the window handler above is: every other stage is a fixed shot, and a group
+              that is present but does nothing is a control a keyboard user has to press to
+              discover is dead. No buttons here; the six that used to carry the keys are gone
+              (step 5), and the window handler above carries the interaction now. What is left
+              is the readout, the hint that the keys still work, and the live region.
+
+              `data-testid="orbit-keys"` stays on the group even though it holds no buttons,
+              because it is the group the `aria-keyshortcuts` are advertised on. */}
+          {stage === 3 ? (
+            <div
+              className="dock-orbit"
+              role="group"
+              aria-label="Orbit the camera around Weld"
+              aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown PageUp PageDown"
+              data-testid="orbit-keys"
+            >
+              <span className="tabular" data-testid="orbit-readout" aria-hidden="true">
+                {readOrbit(here)}
+              </span>
+              <span className="dock-hint">drag to orbit · scroll to zoom · arrows and +/− also work</span>
+              <span className="hud-sr" aria-live="polite" aria-atomic="true" data-testid="orbit-live">
+                {said}
+              </span>
+            </div>
+          ) : null}
 
           {/* FIRST PERSON, at the last stage only -- and stage-5-only by MOUNT, for the
               reason a stage-3 orbit row would be: a control that is present but declines to

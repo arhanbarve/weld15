@@ -448,6 +448,28 @@ button,
   color: var(--mark);
 }
 
+/* ---------- P10 step 8: stage 3 orbit keys, no buttons ---------- */
+
+/* The window handler in Hud.tsx carries the interaction now; this group is only the
+   readout, the hint and the live region -- the six buttons P10 step 5 took off the
+   canvas are gone, not replaced. */
+.dock-orbit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  color: var(--dim);
+}
+
+/* --faint at 0.6875rem: the same pairing Panel.module.css's ledger measures at 5.03:1
+   on --void-deep (its .deflt rule is the identical pair) -- .dock-card is that same
+   opaque ground, so the ratio carries over unchanged, over MASTER's 4.5:1 floor. */
+.dock-hint {
+  margin: 0;
+  font-size: 0.6875rem;
+  color: var(--faint);
+}
+
 /* ---------- stage 3 orbit keys ---------- */
 
 /* The row reuses .hud-scrub for its buttons, so the 44 x 44 target, the border and
