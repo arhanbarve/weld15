@@ -69,10 +69,20 @@ const MASSGIS_TILES =
 const BMNG =
   "https://assets.science.nasa.gov/content/dam/science/esd/eo/images/bmng/bmng-topography-bathymetry/august/world.topo.bathy.200408.3x21600x10800.jpg";
 
+const NAIP =
+  "https://gis.apfo.usda.gov/arcgis/rest/services/NAIP/USDA_CONUS_PRIME/ImageServer/exportImage";
+
+// Pinned by scripts/probe-naip.mjs against the mosaic catalog. See P10-EXTERIOR-PLAN Task 1.
+const NAIP_FLOWN = "2023-07-07";
+// 0.3 metres native GSD, expressed in feet -- this file's other resolution figures (e.g.
+// sampledGridFt below) are all in feet, hence the non-integer literal.
+const NAIP_NATIVE_FT = 0.3 * 3.280839895;
+
 const ATTRIBUTION = {
   bmng: "NASA Earth Observatory / Blue Marble Next Generation",
   massgis:
     "MassGIS (Bureau of Geographic Information), Commonwealth of Massachusetts EOTSS",
+  naip: "USDA Farm Service Agency, National Agriculture Imagery Program",
 };
 
 /**
@@ -108,7 +118,7 @@ const LEVELS = [
     px: [2048, 1524],
   },
   { id: "L2", source: "massgis", extentFt: 164_000, px: [2048, 2048], zoom: 13, ocean: true },
-  { id: "L3", source: "massgis", extentFt: 16_400, px: [2048, 2048], zoom: 16 },
+  { id: "L3", source: "naip", extentFt: 16_400, px: [2048, 2048], zoom: 16 },
   { id: "L4", source: "massgis", extentFt: 1_600, px: [3072, 3072], zoom: 20 },
 ];
 
@@ -263,6 +273,85 @@ function mosaicSampler(mosaic, mosaicW, mosaicH, originX, originY) {
       }
     }
     return [r, g, b, a];
+  };
+}
+
+/**
+ * NAIP over a level's footprint, as a raw RGBA raster in Web Mercator pixels at zoom `z`.
+ *
+ * WHY NAIP AND NOT MASSGIS, WHICH IS THE WHOLE OF P10 PART A. Every MassGIS layer is flown
+ * LEAF-OFF -- state orthos are, on purpose, because bare canopy is what planimetric mapping wants.
+ * Measured over Weld at z19, mean green excess (G - (R+B)/2) per source: MassGIS 2025 +3.0,
+ * orthos2023 +7.4, orthos2021 +3.9, USGS 2019 -1.5, DigitalGlobe 2011/12 +7.7. NAIP is +9.7 and
+ * Esri World Imagery is +11.1. Those last two are the only leaf-on options, and Esri's basemap
+ * terms do not allow caching derived plates into a repository. So: NAIP.
+ *
+ * NAIP is a work of the US Department of Agriculture, Farm Service Agency, and is in the public
+ * domain. No permission is needed and no attribution is required; both are recorded anyway,
+ * because this project records where things came from.
+ *
+ * REQUESTED IN EPSG:3857 ON THE LEVEL'S OWN MERCATOR WINDOW, so the raster that comes back is in
+ * the same coordinate system the tile mosaic would have been and resampleInverse() cannot tell the
+ * difference. That is the entire reason Task 2 split the resampler.
+ */
+async function naipRaster(level, z) {
+  const half = level.extentFt / 2;
+  const corners = [
+    siteToLatLon(-half, half),
+    siteToLatLon(half, half),
+    siteToLatLon(-half, -half),
+    siteToLatLon(half, -half),
+  ];
+  const mercs = corners.map((c) => merc(c.lat, c.lon, z));
+  const minX = Math.floor(Math.min(...mercs.map((m) => m.x)));
+  const maxX = Math.ceil(Math.max(...mercs.map((m) => m.x)));
+  const minY = Math.floor(Math.min(...mercs.map((m) => m.y)));
+  const maxY = Math.ceil(Math.max(...mercs.map((m) => m.y)));
+  const W = maxX - minX;
+  const H = maxY - minY;
+  if (W > 4096 || H > 4096) throw new Error(`${level.id}: NAIP window ${W}x${H} exceeds 4096`);
+
+  // Web Mercator pixel -> EPSG:3857 metres. The world is 256 * 2^z pixels across and
+  // 2 * PI * R metres across, so one is a scale and an offset from the other.
+  const SPAN = 2 * Math.PI * 6378137;
+  const n = 256 * Math.pow(2, z);
+  const toM = (px, py) => [(px / n) * SPAN - SPAN / 2, SPAN / 2 - (py / n) * SPAN];
+  const [x0, y1] = toM(minX, minY);
+  const [x1, y0] = toM(maxX, maxY);
+
+  const bbox = [x0, y0, x1, y1].join(",");
+  const url =
+    `${NAIP}?bbox=${bbox}&bboxSR=3857&imageSR=3857&size=${W},${H}` +
+    `&format=png&interpolation=RSP_BilinearInterpolation&f=image`;
+  const buf = await cached(`naip-${level.id}-z${z}-${W}x${H}.png`, url);
+  const { data } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  console.log(`  ${level.id}: NAIP ${W}x${H} at z${z}`);
+  return { data, width: W, height: H, originX: minX, originY: minY };
+}
+
+/**
+ * NAIP's provenance block.
+ *
+ * NAIP_FLOWN and NAIP_NATIVE_FT come from the mosaic catalog and are pinned by
+ * scripts/probe-naip.mjs (P10-EXTERIOR-PLAN Task 1). They are NOT the ImageServer's advertised
+ * `pixelSizeX`, which is a mosaic default of 1 and says nothing about what was flown.
+ */
+function naipProvenance(level) {
+  return {
+    dataset: "USDA NAIP (National Agriculture Imagery Program), USDA_CONUS_PRIME mosaic",
+    flown: NAIP_FLOWN,
+    leafState: "leaf-on",
+    nativeResolutionFt: NAIP_NATIVE_FT,
+    sampledGridFt: +(level.extentFt / level.px[0]).toFixed(4),
+    zoom: level.zoom,
+    url: `${NAIP}?bbox={bbox}&bboxSR=3857&imageSR=3857&size={w},{h}&format=png&f=image`,
+    licence:
+      "Work of the US Department of Agriculture, Farm Service Agency. Public domain in the United States; no permission required and no attribution required.",
+    attribution: ATTRIBUTION.naip,
+    processing: [
+      "EPSG:3857 (Web Mercator) request; grid north IS true north, so no convergence rotation is applied or needed",
+      "per-output-pixel inverse mapping into the site frame, bilinear",
+    ],
   };
 }
 
@@ -440,6 +529,14 @@ async function main() {
           "lanczos3 downsample to the output grid",
         ],
       };
+    } else if (level.source === "naip") {
+      const r = await naipRaster(level, level.zoom);
+      raw = resampleInverse(
+        level,
+        level.zoom,
+        mosaicSampler(r.data, r.width, r.height, r.originX, r.originY),
+      );
+      provenance = naipProvenance(level);
     } else {
       raw = await resampleMassGIS(level);
       const processing = [

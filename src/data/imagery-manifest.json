@@ -125,24 +125,25 @@
       "files": {
         "avif": {
           "file": "l3.avif",
-          "bytes": 603820
+          "bytes": 911181
         },
         "webp": {
           "file": "l3.webp",
-          "bytes": 1081582
+          "bytes": 1078644
         }
       },
       "provenance": {
-        "dataset": "MassGIS 2025 Aerial Imagery (Massachusetts_Aerial_Imagery_2025)",
-        "flown": "2025-03-18/2025-04-23, leaf-off",
-        "nativeResolutionFt": 0.492,
-        "sampledGridFt": 5.7895,
+        "dataset": "USDA NAIP (National Agriculture Imagery Program), USDA_CONUS_PRIME mosaic",
+        "flown": "2023-07-07",
+        "leafState": "leaf-on",
+        "nativeResolutionFt": 0.9842519685,
+        "sampledGridFt": 8.0078,
         "zoom": 16,
-        "url": "https://tiles.arcgis.com/tiles/hGdibHYSPO59RG1h/arcgis/rest/services/Massachusetts_Aerial_Imagery_2025/MapServer/tile/{z}/{y}/{x}",
-        "licence": "No restrictions apply to these data. Acknowledgement of MassGIS would be appreciated for products derived from these data.",
-        "attribution": "MassGIS (Bureau of Geographic Information), Commonwealth of Massachusetts EOTSS",
+        "url": "https://gis.apfo.usda.gov/arcgis/rest/services/NAIP/USDA_CONUS_PRIME/ImageServer/exportImage?bbox={bbox}&bboxSR=3857&imageSR=3857&size={w},{h}&format=png&f=image",
+        "licence": "Work of the US Department of Agriculture, Farm Service Agency. Public domain in the United States; no permission required and no attribution required.",
+        "attribution": "USDA Farm Service Agency, National Agriculture Imagery Program",
         "processing": [
-          "EPSG:3857 (Web Mercator) source; grid north IS true north, so no convergence rotation is applied or needed",
+          "EPSG:3857 (Web Mercator) request; grid north IS true north, so no convergence rotation is applied or needed",
           "per-output-pixel inverse mapping into the site frame, bilinear"
         ]
       }
