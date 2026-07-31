@@ -12,9 +12,9 @@ import {
 import { pointInPolygon } from "@/geo/collide";
 import { fromThree } from "@/geo/frames";
 import { cameraInSuite } from "@/scene/cutaway";
-import { clearance, insideSuite, walkContext, type Vec2 } from "@/scene/walk";
-import { HUB } from "@/scene/route";
-import { floorLevel } from "@/geo/place";
+import { clearance, insideSuite, walkContext, EYE, type Vec2 } from "@/scene/walk";
+import { HUB, standingPose } from "@/scene/route";
+import { floorLevel, suiteToThree } from "@/geo/place";
 import weld from "@/data/weld.json";
 import type { StageId } from "@/state/store";
 
@@ -68,6 +68,24 @@ describe("keyframes", () => {
   it("stands the interior camera at eye height on the first floor", () => {
     // 12 ft floor-to-floor, plus 5 ft 10 in of person.
     expect(kf[5].position[1]).toBeCloseTo(12 + 5 + 10 / 12, 6);
+  });
+
+  it("builds kf[5] from the same standing pose the walker will use", () => {
+    // The regression pin for the standingPose() refactor: kf[5] must equal
+    // suiteToThree() of standingPose()'s own p/aim, component by component, or the
+    // shot and the walker have drifted apart. Exact equality, not toBeCloseTo -- the
+    // whole point of the refactor is that the two are the same float, not merely close.
+    const suite = buildSuite(DEFAULT_PARAMS);
+    const floor = floorLevel(1);
+    const pose = standingPose(suite);
+    const position = suiteToThree(pose.p.u, pose.p.v, floor + EYE, DEFAULT_PARAMS);
+    const target = suiteToThree(pose.aim.u, pose.aim.v, floor + EYE - pose.drop, DEFAULT_PARAMS);
+    expect(kf[5].position[0]).toBe(position[0]);
+    expect(kf[5].position[1]).toBe(position[1]);
+    expect(kf[5].position[2]).toBe(position[2]);
+    expect(kf[5].target[0]).toBe(target[0]);
+    expect(kf[5].target[1]).toBe(target[1]);
+    expect(kf[5].target[2]).toBe(target[2]);
   });
 
   it("moves the threshold keyframe when the room it aims at moves", () => {
