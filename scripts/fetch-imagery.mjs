@@ -202,6 +202,71 @@ async function pool(items, limit, fn) {
 }
 
 /**
+ * The inverse per-output-pixel mapping, with the source abstracted behind a sampler.
+ *
+ * SPLIT OUT IN P10 BECAUSE THERE ARE NOW TWO SOURCES. This is the half of the old
+ * resampleMassGIS() that is not about tiles: for each pixel of the quad, work out where on Earth
+ * it is, convert to Web Mercator pixels at the working zoom, and ask the sampler for the colour
+ * there. The other direction -- walk the source and scatter -- leaves holes wherever the scale is
+ * not exactly 1 and is the classic way to get a moire.
+ *
+ * `sample(fx, fy)` takes FRACTIONAL Web Mercator pixel coordinates at zoom `z` and returns
+ * [r, g, b, a]. Bilinear is the sampler's business, not this function's, because the tile mosaic
+ * and the single NAIP raster have different edge behaviour: the mosaic must let alpha go to zero
+ * outside coverage so the ocean composite shows through, and a single raster must clamp.
+ *
+ * j = 0 is the TOP of the quad, which is NORTH, which is +y in the site frame. Getting this upside
+ * down flips the photograph north-for-south, and a mirrored Yard is exactly the class of error
+ * frames.ts's header warns is invisible.
+ */
+function resampleInverse(level, z, sample) {
+  const [W, H] = level.px;
+  const half = level.extentFt / 2;
+  const out = Buffer.alloc(W * H * 4);
+  for (let j = 0; j < H; j++) {
+    const sy = half - ((j + 0.5) / H) * level.extentFt;
+    for (let i = 0; i < W; i++) {
+      const sx = -half + ((i + 0.5) / W) * level.extentFt;
+      const { lat, lon } = siteToLatLon(sx, sy);
+      const m = merc(lat, lon, z);
+      const [r, g, b, a] = sample(m.x, m.y);
+      const o = (j * W + i) * 4;
+      out[o] = r;
+      out[o + 1] = g;
+      out[o + 2] = b;
+      out[o + 3] = a;
+    }
+  }
+  return { data: out, width: W, height: H };
+}
+
+/** Bilinear sampler over a raw RGBA buffer laid out in Web Mercator pixels at zoom z. */
+function mosaicSampler(mosaic, mosaicW, mosaicH, originX, originY) {
+  return (fx, fy) => {
+    const px = fx - originX;
+    const py = fy - originY;
+    const x0 = Math.floor(px - 0.5);
+    const y0 = Math.floor(py - 0.5);
+    const ax = px - 0.5 - x0;
+    const ay = py - 0.5 - y0;
+    let r = 0, g = 0, b = 0, a = 0;
+    for (let dy = 0; dy < 2; dy++) {
+      for (let dx = 0; dx < 2; dx++) {
+        const cx = Math.min(mosaicW - 1, Math.max(0, x0 + dx));
+        const cy = Math.min(mosaicH - 1, Math.max(0, y0 + dy));
+        const w = (dx ? ax : 1 - ax) * (dy ? ay : 1 - ay);
+        const k = (cy * mosaicW + cx) * 4;
+        r += mosaic[k] * w;
+        g += mosaic[k + 1] * w;
+        b += mosaic[k + 2] * w;
+        a += mosaic[k + 3] * w;
+      }
+    }
+    return [r, g, b, a];
+  };
+}
+
+/**
  * Resample a MassGIS level into the site frame.
  *
  * PER OUTPUT PIXEL, INVERSELY -- for each pixel of the quad, work out where on Earth it is and
@@ -251,45 +316,7 @@ async function resampleMassGIS(level) {
   });
   console.log(`  ${level.id}: ${got}/${jobs.length} tiles had coverage`);
 
-  const out = Buffer.alloc(W * H * 4);
-  const originX = minX * 256;
-  const originY = minY * 256;
-  for (let j = 0; j < H; j++) {
-    // j = 0 is the TOP of the quad, which is NORTH, which is +y in the site frame. Getting this
-    // upside down flips the photograph north-for-south, and a mirrored Yard is exactly the class
-    // of error frames.ts's header warns is invisible.
-    const sy = half - ((j + 0.5) / H) * level.extentFt;
-    for (let i = 0; i < W; i++) {
-      const sx = -half + ((i + 0.5) / W) * level.extentFt;
-      const { lat, lon } = siteToLatLon(sx, sy);
-      const m = merc(lat, lon, z);
-      const fx = m.x - originX;
-      const fy = m.y - originY;
-      const x0 = Math.floor(fx - 0.5);
-      const y0 = Math.floor(fy - 0.5);
-      const ax = fx - 0.5 - x0;
-      const ay = fy - 0.5 - y0;
-      let r = 0, g = 0, b = 0, a = 0;
-      for (let dy = 0; dy < 2; dy++) {
-        for (let dx = 0; dx < 2; dx++) {
-          const px = Math.min(mosaicW - 1, Math.max(0, x0 + dx));
-          const py = Math.min(mosaicH - 1, Math.max(0, y0 + dy));
-          const w = (dx ? ax : 1 - ax) * (dy ? ay : 1 - ay);
-          const k = (py * mosaicW + px) * 4;
-          r += mosaic[k] * w;
-          g += mosaic[k + 1] * w;
-          b += mosaic[k + 2] * w;
-          a += mosaic[k + 3] * w;
-        }
-      }
-      const o = (j * W + i) * 4;
-      out[o] = r;
-      out[o + 1] = g;
-      out[o + 2] = b;
-      out[o + 3] = a;
-    }
-  }
-  return { data: out, width: W, height: H };
+  return resampleInverse(level, z, mosaicSampler(mosaic, mosaicW, mosaicH, minX * 256, minY * 256));
 }
 
 /**
