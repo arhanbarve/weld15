@@ -74,8 +74,8 @@ const NAIP =
 
 // Pinned by scripts/probe-naip.mjs against the mosaic catalog. See P10-EXTERIOR-PLAN Task 1.
 const NAIP_FLOWN = "2023-07-07";
-// 0.3 metres native GSD, expressed in feet -- this file's other resolution figures (e.g.
-// sampledGridFt below) are all in feet, hence the non-integer literal.
+// Same probe, same pin: 0.3 metres native GSD, expressed in feet -- this file's other resolution
+// figures (e.g. sampledGridFt below) are all in feet, hence the non-integer literal.
 const NAIP_NATIVE_FT = 0.3 * 3.280839895;
 
 const ATTRIBUTION = {
