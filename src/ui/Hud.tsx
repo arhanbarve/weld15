@@ -374,9 +374,16 @@ export function Hud() {
    */
   const [said, setSaid] = useState(() => sayOrbit(seed));
 
-  /** The room the walker is in, in words, or what is true instead. */
+  /**
+   * The room the walker is in, in words, or what is true instead.
+   *
+   * `!walking` means the refusal case and nothing else now: this row is mounted only at
+   * stage 5 (below), and every arrival there seeds a walker automatically (P10 step 3)
+   * except when a slider has left nothing in the suite standable. There is no "first
+   * person is off" state left to read here.
+   */
   const walkReading = !walking
-    ? "not walking"
+    ? "nowhere to stand"
     : (suite.rooms.find((r) => r.id === walkRoom)?.label ?? "in a doorway");
 
   /**
@@ -392,13 +399,13 @@ export function Hud() {
    * -- a room id, so at most once per doorway -- so the throttle is protection against a
    * viewer standing in a doorway with a key held rather than against a per-frame flood.
    */
-  const [saidWalk, setSaidWalk] = useState("First person is off.");
+  const [saidWalk, setSaidWalk] = useState("Nowhere in the suite is wide enough to stand in.");
   useEffect(() => {
-    const sentence = walking
-      ? walkRoom === null
+    const sentence = !walking
+      ? "Nowhere in the suite is wide enough to stand in."
+      : walkRoom === null
         ? "In a doorway between two rooms."
-        : `Standing in ${walkReading}.`
-      : "First person is off. The camera is back on the stage's own view.";
+        : `Standing in ${walkReading}.`;
     const id = window.setTimeout(() => setSaidWalk(sentence), ANNOUNCE_MS);
     return () => window.clearTimeout(id);
   }, [walking, walkRoom, walkReading]);
@@ -474,13 +481,13 @@ export function Hud() {
    * names "keyboard path is an afterthought" and this is the mitigation it asks for.
    */
   useEffect(() => {
-    // The third guard is P7's, and it is the same kind as the other two: FirstPerson.tsx
-    // claims the arrow keys to turn the walker while first person is on, so two handlers
-    // on ArrowLeft would turn the viewer AND slide a bed on one press. The walker's
-    // handler cannot be the one that yields, because turning is how a keyboard-only
-    // viewer leaves the room they are standing in; enterFirstPerson() drops the selection
-    // as well, so in practice this is belt and brace.
-    if (stage !== LAST_STAGE || !selected || walking) return;
+    // NO walking guard, and this is D6's rule, not an oversight: FirstPerson.tsx also
+    // claims the arrow keys at stage 5, but Step 4 made IT yield -- it reads `selected`
+    // from the store at frame time and skips the arrows itself when a piece is selected.
+    // So `selected` is the single arbiter of which handler owns an arrow press, not a
+    // `walking` boolean here; keyboard nudge and walking coexist without conflict because
+    // there is exactly one place that decides, and this effect does not need to be it.
+    if (stage !== LAST_STAGE || !selected) return;
     const onKey = (e: KeyboardEvent) => {
       const dir = PIECE_KEYS[e.key];
       if (!dir) return;
@@ -493,7 +500,7 @@ export function Hud() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [stage, selected, walking]);
+  }, [stage, selected]);
 
   /**
    * `[` and `]` step the stage, which MASTER.md asks for by name.
@@ -512,10 +519,15 @@ export function Hud() {
    *                    `[` typed into a field must never move the camera. The stage-4
    *                    threshold slider and the two sun controls are all <input>, and a
    *                    date field genuinely takes typed characters.
-   *   first person     P7's guard, and it applies harder here than to a nudge: setStage
-   *                    drops the walker, so an unguarded bracket would eject somebody
-   *                    mid-stride from a stage they never asked to leave. Mounted by the
-   *                    flag rather than branched inside, like the piece handler.
+   *   NO first-person  removed on purpose (P10 step 5), where a P7-era guard used to sit.
+   *   gate             Before step 3 a stage change NULLED the walker, so an unguarded
+   *                    bracket mid-stride would eject somebody from a stage they never
+   *                    asked to leave. Since step 3, `setStage`/`prev`/`next` DECIDE
+   *                    whether stage 5 has a walker on every transition rather than
+   *                    destroying one, so there is nothing left here to guard against --
+   *                    and keeping the guard anyway would have made `[` and `]`
+   *                    permanently dead at stage 5, which was itself a P9-era bug this
+   *                    step fixes, not a safety net worth preserving.
    *   no modifiers     Cmd+[ and Ctrl+[ are the browser's own Back on more than one
    *                    platform. Claiming the unmodified key only means a viewer going
    *                    back through history does not also lose their stage on the way.
@@ -526,7 +538,6 @@ export function Hud() {
    * ORBIT_CONTROLS carries both because the UNSHIFTED press is the one people make.
    */
   useEffect(() => {
-    if (walking) return;
     const onKey = (e: KeyboardEvent) => {
       const step = e.key === "[" ? -1 : e.key === "]" ? 1 : 0;
       if (step === 0 || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -543,7 +554,7 @@ export function Hud() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [walking]);
+  }, []);
 
   return (
     <>
@@ -615,8 +626,8 @@ export function Hud() {
         {/* aria-keyshortcuts on the GROUP rather than on each button, because the two keys
             step through the group and do not activate any one of its six members. It is
             here so the shortcut is discoverable from the control it drives instead of
-            being folklore -- the same reason fp-leave carries aria-keyshortcuts="Escape".
-            The handler is the window keydown above; this attribute only advertises it. */}
+            being folklore. The handler is the window keydown above; this attribute only
+            advertises it. */}
         <div className="hud-scrub" role="group" aria-label="Stage" aria-keyshortcuts="[ ]">
           {STAGES.map((s) => (
             <button
@@ -720,18 +731,18 @@ export function Hud() {
         {/* FIRST PERSON, at the last stage only -- and stage-5-only by MOUNT, for the
             reason the orbit row above is stage-3-only by mount: a control that is present
             but declines to work is a control a keyboard user has to press to discover is
-            dead. store.ts drops the walker on every stage change to match.
+            dead. store.ts seeds a walker on every arrival at stage 5 to match (P10 step 3).
 
             THE ROW REUSES .hud-orbit AND .hud-scrub, so the 44 x 44 targets, the borders,
             the hover and the wrapping all come from the stage-3 row's rules rather than
             from a new block in app/globals.css -- which belongs to another owner in this
             phase, and which already carries a note saying that reuse is the intent.
 
-            THE PLACES ARE NOT A NICE-TO-HAVE. docs/phases/P7-P8.md requires a real
-            alternative wherever an animation is switched off, and route.ts's places()
-            exists for exactly this: a jump cut to a named room is the reduced-motion form
-            of walking there. So the buttons come FIRST under reduced motion and second
-            otherwise, and both orders are real controls rather than one being a fallback.
+            NO REDUCED-MOTION BRANCH, unlike the fly-down button above. That control skips
+            an animation; standing at stage 5 is not one -- the walker is seeded once, on
+            arrival, and the pose sits still until a key moves it. There was a jump-cut
+            "places" row here for exactly this reason before P10 step 3 made standing
+            automatic; it and its reduced-motion ordering are gone along with `goToPlace()`.
 
             WHAT THIS ROW OWES THE LIVE REGION, AND WHY. A11yAlt.tsx announces which room
             the camera is in at stage 5, which is the natural home for this sentence -- but
@@ -750,14 +761,13 @@ export function Hud() {
             data-testid="fp-controls"
             style={{ maxWidth: FP_ROW_MAX }}
           >
-            <span aria-hidden="true">{reduced ? "go to" : "walk"}</span>
+            <span aria-hidden="true">walk</span>
             <div className="hud-scrub">
               {/* goToPlace() and leaveFirstPerson() are gone from the store (P10 step 3):
                   standing is a property of being at stage 5, seeded automatically, not a
-                  mode entered and left by button. This "stand up" retry -- for the refusal
-                  case, where a slider left nothing in the suite standable -- is the one
-                  piece of the old toggle/places row still wired to a live action; the rest
-                  of the row's redesign is P10 step 5's. */}
+                  mode entered and left by button. This "stand up" retry is for the one
+                  case standing can still fail -- a slider has left nothing in the suite
+                  wide enough -- and it is the only button this row has left. */}
               {!walking ? (
                 <button
                   type="button"
@@ -775,9 +785,14 @@ export function Hud() {
             <span className="tabular hud-orbit-read" data-testid="fp-readout">
               {walkReading}
             </span>
-            {walking ? (
-              <span data-testid="fp-keys">W A S D walk and turn · Q E sidestep · Esc leaves</span>
-            ) : null}
+            {/* Unconditional now: there is no "first person is off" state left to hide
+                this behind, since standing at stage 5 is automatic (P10 step 3). A viewer
+                who has been refused a place to stand still benefits from knowing what the
+                keys would do once a dimension is widened back out. */}
+            <span data-testid="fp-keys">
+              W A S D walk and turn · Q E sidestep · R F look up and down · double-click to look
+              with the mouse, Esc to release
+            </span>
             <span className="hud-sr" aria-live="polite" aria-atomic="true" data-testid="fp-live">
               {saidWalk}
             </span>
