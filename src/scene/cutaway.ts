@@ -61,6 +61,107 @@ export const CUTAWAY_MODES: readonly CutawayMode[] = [
   "section",
 ];
 
+/** The four registers a cutaway mode has to be said in. All four are required. */
+export type CutawayWords = {
+  /**
+   * The mode's WORD, as a control's visible face.
+   *
+   * The first of the four obligations in this file's header, and the shortest thing
+   * that can carry it: two words at most, lower case, no sentence and no full stop,
+   * because it is rendered inside a button 44 px high beside three others.
+   */
+  word: string;
+  /**
+   * One or two clauses, for a control's hint and its live-region announcement.
+   *
+   * The wording of this file's own header, deliberately -- "Nothing hidden. The room
+   * as built." is the line above, and a control that describes the mode in different
+   * words from the module that implements it is how the two start disagreeing.
+   */
+  brief: string;
+  /**
+   * The mode's contribution to the canvas's accessible NAME. One sentence, no more.
+   *
+   * Short because of what it is: a name, not a description. A11yAlt.tsx's header
+   * states the division -- the canvas can carry a sentence and the written
+   * description carries the rest -- so this cannot be `prose` and cannot be `brief`
+   * either, which is a fragment rather than a sentence and reads as one when a
+   * reader meets it appended to "...the interior of Weld 15."
+   */
+  alt: string;
+  /**
+   * The long form, for the written description: complete sentences, past tense.
+   *
+   * A reader who gets no picture at all is the only audience here, so this is the
+   * one register that can afford to say what CHANGES as the camera moves. It is
+   * followed at the call site by a further sentence about whether the interior is
+   * mounted yet, so it has to end on a full stop and stand as prose beside it.
+   */
+  prose: string;
+};
+
+/**
+ * The four modes in words: one table, read by all three call sites.
+ *
+ * THIS WAS THREE TABLES, none of them exported -- CUTAWAY_ALT in Experience.tsx for
+ * the canvas label, MODES in Panel.tsx for the radio faces, CUTAWAY_SAYS in
+ * A11yAlt.tsx for the written description. A11yAlt.tsx's own comment recorded the
+ * duplication and asked for exactly this move, on the grounds that a fourth copy is
+ * how the three start disagreeing about what "section" does. Here because this is
+ * where the modes are defined and where the four obligations above are written down;
+ * the accessibility requirement is that each mode carries its WORD, and a word that
+ * lives in a component the mode's own module cannot see is a word that can go missing
+ * for one of the four without anything failing to compile.
+ *
+ * FOUR FIELDS AND NOT ONE STRING. The three call sites are three registers -- a
+ * button face, a clause a live region reads out, a sentence appended to the canvas's
+ * accessible name, and a paragraph for someone who cannot see the canvas at all --
+ * and none of them can be spelled with another's text without either the UI being
+ * reworded to fit or the wording going wrong. So the shared thing is the TABLE, not
+ * the string: one row per mode, four named registers, nothing flattened. Each field's
+ * docblock says what the constraint on that register is, which is the part a fifth
+ * mode's author needs.
+ *
+ * Plain data, so this module stays three.js-free: strings only, no JSX, no component,
+ * nothing that would drag a renderer into a file whose header explains at length why
+ * it has none. tests/cutaway.test.ts asserts the keys are exactly CUTAWAY_MODES and
+ * that no register is blank -- a Record over the union catches a missing MODE at
+ * compile time, but not a field left as "" by a merge, and a blank word is a button
+ * with no face.
+ */
+export const CUTAWAY_WORDS: Record<CutawayMode, CutawayWords> = {
+  none: {
+    word: "none",
+    brief: "Nothing hidden. The room as built.",
+    alt: "The suite is shown closed, as built.",
+    prose: "Nothing is cut away. Every wall and the ceiling are in place, as built.",
+  },
+  roofOff: {
+    word: "roof off",
+    brief: "The ceiling plate goes; every wall stays. Read the plan from above.",
+    alt: "The ceiling is removed, so the plan can be read from above.",
+    prose:
+      "The ceiling plate has been removed and every wall is still standing, so the " +
+      "plan can be read from above.",
+  },
+  wallsDown: {
+    word: "walls down",
+    brief: "The wall between the camera and the room it is looking into drops.",
+    alt: "The wall between the camera and the room it faces is removed.",
+    prose:
+      "The wall between the camera and the room it is looking into has been removed. " +
+      "Which wall that is changes as the camera moves.",
+  },
+  section: {
+    word: "section",
+    brief: "One vertical plane; everything on the camera's side of it goes.",
+    alt: "The model is cut on the hall's centreline and the near half removed.",
+    prose:
+      "The model is cut on one vertical plane -- the hall's centreline -- and " +
+      "everything on the camera's side of it has been removed.",
+  },
+};
+
 /**
  * How far past a wall the camera must travel before a dropped wall comes back, ft.
  *

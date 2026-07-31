@@ -5,6 +5,7 @@ import { suiteToThree } from "@/geo/place";
 import type { Vec3 } from "@/geo/frames";
 import {
   CUTAWAY_MODES,
+  CUTAWAY_WORDS,
   WALL_HOLD_FT,
   cameraInSuite,
   ceilingVisible,
@@ -420,5 +421,45 @@ describe("invariants every mode owes", () => {
     for (const mode of CUTAWAY_MODES) {
       expect(hiddenWalls([], mode, sides.facade, P).size).toBe(0);
     }
+  });
+});
+
+/**
+ * The wording table, which is the one thing in this module that is not geometry.
+ *
+ * It is asserted here rather than in a component test because it is the shared thing:
+ * Experience.tsx's canvas label, Panel.tsx's radio faces and A11yAlt.tsx's written
+ * description were three copies of these words and are now three readers of this one
+ * table. What that consolidation buys is a single place a mode can go missing from, so
+ * this is the block that watches that place.
+ *
+ * Record<CutawayMode, ...> already refuses a missing MODE at compile time. What it does
+ * not refuse is a register left empty or a word shared between two modes, and both of
+ * those are silent: a blank word is a radio button with no face, which is exactly the
+ * "colour is never the only indicator" failure cutaway.ts's header is about, and a
+ * duplicated word is two buttons a reader cannot tell apart.
+ */
+describe("CUTAWAY_WORDS", () => {
+  const registers = ["word", "brief", "alt", "prose"] as const;
+
+  it("covers exactly CUTAWAY_MODES, no mode missing and nothing extra", () => {
+    // Sorted both sides, because the table's key order is a reading order and not a
+    // wire format -- url.ts is the file where an order is load-bearing, not this one.
+    expect(Object.keys(CUTAWAY_WORDS).sort()).toEqual([...CUTAWAY_MODES].sort());
+  });
+
+  it("fills every register for every mode", () => {
+    for (const mode of CUTAWAY_MODES) {
+      for (const r of registers) {
+        // The pair, not the bare string: a failure has to say WHICH mode and which
+        // register, or it sends the reader back to the table to find out.
+        expect([mode, r, CUTAWAY_WORDS[mode][r].trim().length > 0]).toEqual([mode, r, true]);
+      }
+    }
+  });
+
+  it("gives each mode its own word, so no two buttons read alike", () => {
+    const words = CUTAWAY_MODES.map((m) => CUTAWAY_WORDS[m].word);
+    expect(new Set(words).size, words.join(" / ")).toBe(CUTAWAY_MODES.length);
   });
 });

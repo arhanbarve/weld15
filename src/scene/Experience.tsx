@@ -14,7 +14,7 @@ import { Suite } from "./Suite";
 import { Effects } from "./Effects";
 import { Perf } from "./Perf";
 import { Hud } from "@/ui/Hud";
-import type { CutawayMode } from "./cutaway";
+import { CUTAWAY_WORDS } from "./cutaway";
 
 /**
  * The whole journey, from orbit to a bedroom in Weld 15.
@@ -35,19 +35,6 @@ import type { CutawayMode } from "./cutaway";
  * three was silently substituting anyway -- same rendering, no warning, and no
  * dependency on how long the fallback stays in place.
  */
-
-/**
- * What each cutaway mode has done to the model, in a sentence.
- *
- * A Record over the union rather than a lookup with a fallback, so a fifth mode fails
- * to compile here instead of shipping a canvas that describes the wrong thing.
- */
-const CUTAWAY_ALT: Record<CutawayMode, string> = {
-  none: "The suite is shown closed, as built.",
-  roofOff: "The ceiling is removed, so the plan can be read from above.",
-  wallsDown: "The wall between the camera and the room it faces is removed.",
-  section: "The model is cut on the hall's centreline and the near half removed.",
-};
 
 /**
  * Put the accessible name on the CANVAS, which is the one place it works.
@@ -92,9 +79,13 @@ export default function Experience() {
   // screen. cutaway.ts's header asks for the active mode to be named here, and this is
   // that: the mode changes the geometry, and a viewer who cannot see that a wall is
   // missing still has to be told.
+  //
+  // `.alt` and not `.prose`, because what this builds is an accessible NAME. The table
+  // carries a register per call site for that reason; the sentence is the same one this
+  // file used to hold, moved rather than reworded.
   const canvasLabel =
     `Three-dimensional descent from orbit to the interior of Weld 15. ` +
-    CUTAWAY_ALT[cutaway];
+    CUTAWAY_WORDS[cutaway].alt;
 
   return (
     <>

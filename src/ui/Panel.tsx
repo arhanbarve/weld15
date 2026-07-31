@@ -52,7 +52,7 @@ import { useRef, type JSX } from "react";
 // is invisible. rooms.ts is pure and three-free, so the import costs nothing.
 import { DEFAULT_PARAMS, type SuiteParams } from "@/geo/rooms";
 import type { NudgeDir } from "@/geo/drag";
-import { CUTAWAY_MODES, type CutawayMode } from "@/scene/cutaway";
+import { CUTAWAY_MODES, CUTAWAY_WORDS, type CutawayMode } from "@/scene/cutaway";
 import { Chip, type Prov } from "./Provenance";
 import { Slider } from "./Slider";
 import s from "./Panel.module.css";
@@ -314,20 +314,14 @@ const GROUPS: { id: Group; legend: string; hint?: string }[] = [
   { id: "fabric", legend: "The fabric" },
 ];
 
-/**
- * What each cutaway mode is, in the words src/scene/cutaway.ts's own header uses.
- *
- * A Record over CutawayMode rather than a lookup with a fallback, so F3 adding a
- * fifth mode breaks the build here instead of shipping a button with no label.
- * The face is the mode's WORD, rendered, which is the first of the four things
- * cutaway.ts says the UI owes these modes.
+/*
+ * The cutaway wording is NOT a table in this file. It was -- a local MODES record of a
+ * face and a sentence -- and it is now CUTAWAY_WORDS in src/scene/cutaway.ts, whose
+ * header is already where the four obligations on a cutaway UI are written down and
+ * which was one of three files holding the same words. This panel reads `.word` for
+ * the button faces and `.brief` for the hint and the announcement; both strings are
+ * the ones this file used to hold, moved rather than reworded.
  */
-const MODES: Record<CutawayMode, { face: string; says: string }> = {
-  none: { face: "none", says: "Nothing hidden. The room as built." },
-  roofOff: { face: "roof off", says: "The ceiling plate goes; every wall stays. Read the plan from above." },
-  wallsDown: { face: "walls down", says: "The wall between the camera and the room it is looking into drops." },
-  section: { face: "section", says: "One vertical plane; everything on the camera's side of it goes." },
-};
 
 /**
  * The four nudges, and what u and v mean in words.
@@ -477,7 +471,7 @@ export function Panel(props: PanelProps): JSX.Element {
     onReset,
   } = props;
 
-  const mode = MODES[cutaway];
+  const mode = CUTAWAY_WORDS[cutaway];
 
   return (
     <div className={s.dock}>
@@ -524,7 +518,7 @@ export function Panel(props: PanelProps): JSX.Element {
       */}
       <span className={s.sr} aria-live="polite" aria-atomic="true" data-testid="cutaway-live">
         {cutawayEnabled
-          ? `Cutaway ${mode.face}. ${mode.says}`
+          ? `Cutaway ${mode.word}. ${mode.brief}`
           : "Cutaway unavailable until the interior is reached."}
       </span>
 
@@ -571,13 +565,13 @@ export function Panel(props: PanelProps): JSX.Element {
             disabled={!cutawayEnabled}
             options={CUTAWAY_MODES.map((m) => ({
               value: m,
-              face: MODES[m].face,
+              face: CUTAWAY_WORDS[m].word,
               testid: `cutaway-${m}`,
             }))}
           />
           <p className={s.hint}>
             {cutawayEnabled
-              ? mode.says
+              ? mode.brief
               : "Unavailable out here: there is no interior mounted to cut away from yet. Reach the room — stage 3 or later — and these come back."}
           </p>
         </fieldset>

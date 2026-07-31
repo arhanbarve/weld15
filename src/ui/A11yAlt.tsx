@@ -65,7 +65,7 @@ import { footprintArea } from "@/geo/walls";
 import { floorLevel } from "@/geo/place";
 import type { Rect, Suite } from "@/geo/rooms";
 import type { FurnitureKind, Piece } from "@/geo/furniture";
-import { cameraInSuite, type CutawayMode } from "@/scene/cutaway";
+import { cameraInSuite, CUTAWAY_WORDS, type CutawayMode } from "@/scene/cutaway";
 import { cameraKeyframe, keyframes, thresholdOpacity } from "@/scene/stages";
 import { orbitOf, type Orbit } from "@/scene/orbit";
 import type { StageId } from "@/state/store";
@@ -130,32 +130,16 @@ function ft(v: number): string {
 
 /* ------------------------------------------------------------------- content */
 
-/**
- * The cutaway modes in words.
- *
- * THIS IS THE THIRD COPY IN THE REPO and that is worth naming rather than
- * quietly adding to: Experience.tsx has CUTAWAY_ALT for the canvas label,
- * Panel.tsx has MODES for the radio faces, and this is a third phrasing for a
- * reader who gets no picture at all. None of the three is exported. They should
- * be one exported table in src/scene/cutaway.ts, whose header is already the
- * place the four obligations on a cutaway UI are written down. Recorded here
- * because a fourth copy is how they start disagreeing about what "section" does.
- *
- * A Record over the union, so a fifth mode fails to compile rather than
- * describing the wrong thing.
+/*
+ * THE THIRD COPY OF THE CUTAWAY WORDING IS GONE, which is what the note that stood
+ * here asked for. It read: Experience.tsx has CUTAWAY_ALT for the canvas label,
+ * Panel.tsx has MODES for the radio faces, this is a third phrasing for a reader who
+ * gets no picture at all, none of the three is exported, and they should be one
+ * exported table in src/scene/cutaway.ts. They now are -- CUTAWAY_WORDS, one row per
+ * mode with a register per call site -- and this component reads `.prose`, the long
+ * form, which is the register that exists for exactly this audience. The strings are
+ * the ones this file used to hold, moved rather than reworded.
  */
-const CUTAWAY_SAYS: Record<CutawayMode, string> = {
-  none: "Nothing is cut away. Every wall and the ceiling are in place, as built.",
-  roofOff:
-    "The ceiling plate has been removed and every wall is still standing, so the " +
-    "plan can be read from above.",
-  wallsDown:
-    "The wall between the camera and the room it is looking into has been removed. " +
-    "Which wall that is changes as the camera moves.",
-  section:
-    "The model is cut on one vertical plane -- the hall's centreline -- and " +
-    "everything on the camera's side of it has been removed.",
-};
 
 /**
  * Plural forms, declared rather than derived.
@@ -463,7 +447,7 @@ export function A11yAlt(props: A11yAltProps): JSX.Element {
 
             <h3>What has been cut away</h3>
             <p data-testid="a11y-alt-cutaway">
-              {CUTAWAY_SAYS[cutaway]}{" "}
+              {CUTAWAY_WORDS[cutaway].prose}{" "}
               {stage < 3
                 ? "It changes nothing at this stage in any case: the interior is not mounted until stage 3, so there is nothing yet to cut away from."
                 : "The interior is mounted, so this is what the frame actually shows."}
