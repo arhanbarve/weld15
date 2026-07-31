@@ -710,3 +710,43 @@ tests/e2e/a11y.spec.ts tests/e2e/smoke.spec.ts` — **12 passed**, zero axe viol
 stages in both description states, and the stage-5 box geometry `a11y.spec.ts` asserts is
 unchanged: dock [14, 430, 66, 644], HUD [481, 799, 14, 360], sources [14, 95, 660, 706], no
 intersection with either.
+
+---
+
+## Scope decisions on the six handed-over items, 31 July 2026
+
+Recorded because the alternative to a decision here is a silent drop. Each of the six above is
+either fixed, or declined with a reason — none is left implicit.
+
+**1. `Panel.module.css` line-height 1.45 → FIXED.** Three declarations raised to 1.5, MASTER's
+floor for body text. `.title`'s 1.3 is deliberately left: MASTER's 1.5–1.75 is a body-text rule
+and that is a 1 rem serif heading, where 1.3 is correct.
+
+**2. `--line` on `--void` stated ~6.5:1 → FIXED in MASTER.** Measured 8.82:1. The correction
+matters in the direction it went: an understated ratio gets used to reject a legal pairing.
+
+**6. `--chip-day` painted on nothing → DOCUMENTED, not struck.** Kept as a declared token with
+a note in MASTER saying it is unused, because the daylight stages currently have no chrome
+needing a translucent chip and deleting it would lose the pairing the table describes. What was
+wrong was that its presence read as evidence it had been checked.
+
+**4. `[` and `]` do not change stage → IN SCOPE, assigned.** MASTER asks for them, the seam
+exists (`Hud.tsx` already owns a window `keydown` with three documented guards), and the fix
+needs a fourth guard of the same kind plus a gate. Handed to the owner of `Hud.tsx` rather than
+done here, to avoid two writers in one file.
+
+**3. No high-contrast toggle → IN SCOPE, assigned.** This was the one item where declining was
+tempting and the reasoning did not survive contact: the objection would be that a second palette
+is a design decision nobody should invent at ship time, but MASTER *specifies* it — strokes to
+2.5 px, `--mass` opacity to 0.22. So it is a build, not a design, and it is a genuine
+accessibility feature rather than conformance paperwork. Assigned with the bracket keys, since
+both touch `Hud.tsx` and `store.ts`.
+
+**5. Zero `<svg>`; four text arrows stand in → DECLINED, and MASTER should be amended.** The
+four nudge buttons render `←` `→` `↑` `↓` as labelled text. MASTER §Icons asks for Lucide at
+24 × 24, and the checklist itself records this as "a design-system conformance gap, not an
+accessibility one" — the buttons are `aria-label`led and reachable. Swapping four labelled
+characters for four SVGs on ship night is aesthetic churn with no accessibility gain and a new
+dependency or four hand-authored paths to maintain. The honest resolution is the one the
+checklist offers as its alternative: §Icons should say text arrows are the set. Declining the
+swap, not the conformance question.

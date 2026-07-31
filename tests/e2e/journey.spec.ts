@@ -88,6 +88,20 @@ test("every stage renders lit geometry, and there are no console errors", async 
       expect(s.warmPct, `stage 5 shows no floor: ${JSON.stringify(s)}`).toBeGreaterThan(2);
       expect(s.palePct, `stage 5 shows no wall: ${JSON.stringify(s)}`).toBeGreaterThan(2);
     }
+    /*
+     * A side effect, not an assertion, and it writes into a TRACKED directory on purpose.
+     *
+     * This dirties the working tree on every run, which looks like a wart and is the
+     * deliberate choice. The alternative is writing to test-results/ or gitignoring these,
+     * and both cost the thing they are for: in a project whose whole output is pixels, a
+     * render that shows up in `git diff` is how a change to the picture becomes reviewable
+     * at all. It has already paid for itself once -- P7 moved the stage-5 shot from a corner
+     * of bedroom B into the hall, and the committed p2-stage-5.png was the only artifact
+     * that showed the new framing rather than describing it.
+     *
+     * So the convention is: these are refreshed and committed alongside whatever changed the
+     * picture, and a dirty tree after a test run is expected rather than a bug to fix.
+     */
     await page.screenshot({ path: `design/renders/p2-stage-${stage}.png` });
   }
   console.log(report.join("\n"));

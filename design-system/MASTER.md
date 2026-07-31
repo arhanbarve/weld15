@@ -73,7 +73,21 @@ Verified, not assumed. Body text means < 18px and not bold.
 | `--ink-scan` on `--void` | ~13:1 | body OK |
 | `--ink-day` on `--plaster` | ~15:1 | body OK |
 | `--mark` on `--void` | ~4.0:1 | **large text and graphics only — never body** |
-| `--line` on `--void` | ~6.5:1 | OK for hairlines and labels |
+| `--line` on `--void` | **8.82:1** (was stated ~6.5) | OK for hairlines and labels, and for body |
+
+The `--line` figure was `~6.5:1` and is measured at **8.82:1** — `#8FC4F2` on `#06203F` by the
+WCAG relative-luminance formula. The tilde was doing real work in this table: every other row is
+also approximate, and this one was pessimistic by enough to change what the pair is allowed to
+carry. Corrected rather than left, because a ledger that understates a ratio gets used to reject
+a legal combination. The full sweep is in `docs/CHECKLIST.md`: 119 text pairs measured against
+their real rendered grounds, one failure, since fixed.
+
+`--chip-day` is declared in `app/globals.css` and **painted on nothing** — measured across all
+six stages, zero elements compute its value. It is listed below as half of the chrome pair that
+"must read on both stages"; in practice both grounds use `--chip-scan` or an opaque `--void-deep`.
+It is kept as a declared token rather than struck, because the daylight stages have no chrome
+that needs a translucent chip *yet* and deleting it would lose the pairing the table describes —
+but it is documented here as unused so nobody reads its presence as evidence it was checked.
 
 ## Typography
 
