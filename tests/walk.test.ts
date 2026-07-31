@@ -47,6 +47,7 @@ import { floorLevel } from "@/geo/place";
 import {
   EYE,
   NO_INPUT,
+  PITCH_LIMIT,
   RADIUS,
   SPEED,
   SUBSTEP,
@@ -575,7 +576,12 @@ describe("walk the hall end to end", () => {
     let at = from;
     const bearing = Math.atan2(to.u - at.u, to.v - at.v);
     for (let i = 0; i < frames; i++) {
-      at = walk({ p: at, heading: bearing }, { forward: 1, strafe: 0, turn: 0 }, dt, ctx).p;
+      at = walk(
+        { p: at, heading: bearing, pitch: 0 },
+        { forward: 1, strafe: 0, turn: 0, pitch: 0 },
+        dt,
+        ctx,
+      ).p;
       path.push(at);
     }
     return path;
@@ -940,12 +946,17 @@ describe("walk: one frame of input", () => {
   it("faces +v at heading zero and +u at ninety degrees", () => {
     // frames.ts's azimuthToBuilding() convention, restated. A sign error here mirrors
     // the controls, which reads as a broken mouse rather than as a broken bearing.
-    const north = walk({ p: open, heading: 0 }, { forward: 1, strafe: 0, turn: 0 }, 0.5, ctx);
+    const north = walk(
+      { p: open, heading: 0, pitch: 0 },
+      { forward: 1, strafe: 0, turn: 0, pitch: 0 },
+      0.5,
+      ctx,
+    );
     expect(north.p.v - open.v).toBeCloseTo(SPEED * 0.5, 9);
     expect(north.p.u).toBeCloseTo(open.u, 9);
     const inward = walk(
-      { p: open, heading: Math.PI / 2 },
-      { forward: 1, strafe: 0, turn: 0 },
+      { p: open, heading: Math.PI / 2, pitch: 0 },
+      { forward: 1, strafe: 0, turn: 0, pitch: 0 },
       0.5,
       ctx,
     );
@@ -954,34 +965,64 @@ describe("walk: one frame of input", () => {
   });
 
   it("strafes ninety degrees off the heading", () => {
-    const right = walk({ p: open, heading: 0 }, { forward: 0, strafe: 1, turn: 0 }, 0.5, ctx);
+    const right = walk(
+      { p: open, heading: 0, pitch: 0 },
+      { forward: 0, strafe: 1, turn: 0, pitch: 0 },
+      0.5,
+      ctx,
+    );
     expect(right.p.u - open.u).toBeCloseTo(SPEED * 0.5, 9);
     expect(right.p.v).toBeCloseTo(open.v, 9);
   });
 
   it("normalises the diagonal, so 45 degrees is not the fast way across a room", () => {
     // Forward and strafe together would otherwise cover sqrt(2) * SPEED.
-    const diag = walk({ p: open, heading: 0 }, { forward: 1, strafe: 1, turn: 0 }, 0.4, ctx);
+    const diag = walk(
+      { p: open, heading: 0, pitch: 0 },
+      { forward: 1, strafe: 1, turn: 0, pitch: 0 },
+      0.4,
+      ctx,
+    );
     expect(dist(open, diag.p)).toBeCloseTo(SPEED * 0.4, 9);
-    const back = walk({ p: open, heading: 0 }, { forward: -1, strafe: -1, turn: 0 }, 0.4, ctx);
+    const back = walk(
+      { p: open, heading: 0, pitch: 0 },
+      { forward: -1, strafe: -1, turn: 0, pitch: 0 },
+      0.4,
+      ctx,
+    );
     expect(dist(open, back.p)).toBeCloseTo(SPEED * 0.4, 9);
     // and a half-pressed stick is still slower than a full one
-    const half = walk({ p: open, heading: 0 }, { forward: 0.5, strafe: 0, turn: 0 }, 0.4, ctx);
+    const half = walk(
+      { p: open, heading: 0, pitch: 0 },
+      { forward: 0.5, strafe: 0, turn: 0, pitch: 0 },
+      0.4,
+      ctx,
+    );
     expect(dist(open, half.p)).toBeCloseTo(SPEED * 0.4 * 0.5, 9);
   });
 
   it("turns at TURN_RATE and wraps the bearing to (-pi, pi]", () => {
-    const t = walk({ p: open, heading: 0 }, { forward: 0, strafe: 0, turn: 1 }, 0.5, ctx);
+    const t = walk(
+      { p: open, heading: 0, pitch: 0 },
+      { forward: 0, strafe: 0, turn: 1, pitch: 0 },
+      0.5,
+      ctx,
+    );
     expect(t.heading).toBeCloseTo(TURN_RATE * 0.5, 9);
     expect(t.p).toEqual(open);
     // 1.5 s at 120 deg/s is a 180 degree turn, which wraps to +pi and not to -pi
-    const about = walk({ p: open, heading: 0 }, { forward: 0, strafe: 0, turn: 1 }, 1.5, ctx);
+    const about = walk(
+      { p: open, heading: 0, pitch: 0 },
+      { forward: 0, strafe: 0, turn: 1, pitch: 0 },
+      1.5,
+      ctx,
+    );
     expect(about.heading).toBeCloseTo(Math.PI, 9);
     for (const dt of [0.5, 1, 2, 3, 7, 30]) {
       for (const sign of [1, -1]) {
         const h = walk(
-          { p: open, heading: 0 },
-          { forward: 0, strafe: 0, turn: sign },
+          { p: open, heading: 0, pitch: 0 },
+          { forward: 0, strafe: 0, turn: sign, pitch: 0 },
           dt,
           ctx,
         ).heading;
@@ -994,20 +1035,31 @@ describe("walk: one frame of input", () => {
     // The other order lags the turn by a frame, which at 20 Hz is a camera that slides
     // sideways out of the turn. Turning 90 degrees and walking must move in u, not v.
     const dt = Math.PI / 2 / TURN_RATE;
-    const got = walk({ p: open, heading: 0 }, { forward: 1, strafe: 0, turn: 1 }, dt, ctx);
+    const got = walk(
+      { p: open, heading: 0, pitch: 0 },
+      { forward: 1, strafe: 0, turn: 1, pitch: 0 },
+      dt,
+      ctx,
+    );
     expect(got.heading).toBeCloseTo(Math.PI / 2, 9);
     expect(got.p.u - open.u).toBeCloseTo(SPEED * dt, 9);
     expect(got.p.v).toBeCloseTo(open.v, 9);
   });
 
   it("does nothing on no input, and nothing on a zero dt", () => {
-    expect(walk({ p: open, heading: 1 }, NO_INPUT, 1 / 60, ctx)).toEqual({
+    expect(walk({ p: open, heading: 1, pitch: 0 }, NO_INPUT, 1 / 60, ctx)).toEqual({
       p: open,
       heading: 1,
+      pitch: 0,
     });
-    expect(walk({ p: open, heading: 1 }, { forward: 1, strafe: 0, turn: 0 }, 0, ctx).p).toEqual(
-      open,
-    );
+    expect(
+      walk(
+        { p: open, heading: 1, pitch: 0 },
+        { forward: 1, strafe: 0, turn: 0, pitch: 0 },
+        0,
+        ctx,
+      ).p,
+    ).toEqual(open);
   });
 
   it("survives a 30 second frame from a backgrounded tab", () => {
@@ -1020,8 +1072,8 @@ describe("walk: one frame of input", () => {
       if (!isClear(from, ctx)) continue;
       for (let i = 0; i < 24; i++) {
         const got = walk(
-          { p: from, heading: (i / 24) * 2 * Math.PI },
-          { forward: 1, strafe: 0, turn: 0 },
+          { p: from, heading: (i / 24) * 2 * Math.PI, pitch: 0 },
+          { forward: 1, strafe: 0, turn: 0, pitch: 0 },
           30,
           ctx,
         );
@@ -1036,6 +1088,88 @@ describe("walk: one frame of input", () => {
       }
     }
     expect(cases).toBe(7 * 24);
+  });
+});
+
+describe("pitch: looking up and down", () => {
+  const open = { u: 8, v: 39 }; // middle of bedroom B, same spot the frame tests use
+
+  it("clamps both ways and does not wrap", () => {
+    // 100 frames of dt 0.1 at input.pitch = -1 asks for 100 * TURN_RATE * 0.1 = about
+    // 20.9 rad of downward look, twelve times PITCH_LIMIT. The clamp inside walk() catches
+    // it every frame, so the walker is pinned at -PITCH_LIMIT long before frame 100 and
+    // sits there rather than rolling past it -- the thing wrap() would do and this must not.
+    let down = { p: open, heading: 0, pitch: 0 };
+    for (let i = 0; i < 100; i++) {
+      down = walk(down, { forward: 0, strafe: 0, turn: 0, pitch: -1 }, 0.1, ctx);
+    }
+    expect(down.pitch).toBe(-PITCH_LIMIT);
+    // one more frame at the limit changes nothing
+    expect(walk(down, { forward: 0, strafe: 0, turn: 0, pitch: -1 }, 0.1, ctx).pitch).toBe(
+      -PITCH_LIMIT,
+    );
+
+    let up = { p: open, heading: 0, pitch: 0 };
+    for (let i = 0; i < 100; i++) {
+      up = walk(up, { forward: 0, strafe: 0, turn: 0, pitch: 1 }, 0.1, ctx);
+    }
+    expect(up.pitch).toBe(PITCH_LIMIT);
+    expect(walk(up, { forward: 0, strafe: 0, turn: 0, pitch: 1 }, 0.1, ctx).pitch).toBe(
+      PITCH_LIMIT,
+    );
+  });
+
+  it("does not move the walker, whatever it is aimed at", () => {
+    // The same 40-frame walk -- forward, strafe and turn all live -- run three times,
+    // differing only in the pitch the walker starts and stays at. Bit-identical `p` is the
+    // property that says walking stays horizontal however far up or down you are looking.
+    const run = (pitch0: number): Vec2 => {
+      let state = { p: open, heading: 0.3, pitch: pitch0 };
+      for (let i = 0; i < 40; i++) {
+        state = walk(state, { forward: 0.7, strafe: -0.4, turn: 0.2, pitch: 0 }, 1 / 60, ctx);
+      }
+      return state.p;
+    };
+    const level = run(0);
+    expect(run(PITCH_LIMIT)).toEqual(level);
+    expect(run(-PITCH_LIMIT)).toEqual(level);
+  });
+
+  it("is not moved by the walker, even across a collision that needs more than one pass to settle", () => {
+    // The same inside corner as "settles flush in BOTH axes in an inside corner" above --
+    // bedroom B's south-west corner, where a single resolve() pass cannot settle both walls
+    // at once -- run through walk() instead of step() directly, so that whichever of
+    // resolve()'s extra passes or step()'s per-axis retry the collision needs happens under
+    // a nonzero pitch. input.pitch is 0 throughout, so pitch must come out exactly as it
+    // went in regardless of what the position maths had to do to resolve the corner.
+    const from = { u: 2, v: 36 };
+    const to = { u: -4, v: 30 };
+    const heading = Math.atan2(to.u - from.u, to.v - from.v);
+    const dt = dist(from, to) / SPEED;
+    const got = walk(
+      { p: from, heading, pitch: 0.37 },
+      { forward: 1, strafe: 0, turn: 0, pitch: 0 },
+      dt,
+      ctx,
+    );
+    expect(got.pitch).toBe(0.37);
+    // and it really did resolve the corner, so this is the collision case and not a no-op
+    expect(got.p).toEqual({ u: RADIUS, v: 34 + RADIUS });
+  });
+
+  it("the early return carries pitch, so looking around while standing still works", () => {
+    // walk()'s zero-magnitude early return is the common case for a pure look: no forward,
+    // no strafe, no turn. It must still apply the pitch clamp line, or holding the look-down
+    // key while standing still would silently do nothing.
+    const got = walk(
+      { p: open, heading: 0, pitch: 0 },
+      { forward: 0, strafe: 0, turn: 0, pitch: -1 },
+      1 / 60,
+      ctx,
+    );
+    expect(got.p).toEqual(open);
+    expect(got.pitch).toBeCloseTo(-TURN_RATE / 60, 12);
+    expect(got.pitch).not.toBe(0);
   });
 });
 

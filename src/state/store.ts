@@ -674,7 +674,7 @@ export const useStore = create<Store>((set, get) => ({
       if (!isClear(spot.p, ctx)) continue;
       const room = suite.rooms.find((r) => r.id === spot.id)!;
       set({
-        firstPerson: { p: spot.p, heading: arrivalHeading(room), room: spot.id },
+        firstPerson: { p: spot.p, heading: arrivalHeading(room), pitch: 0, room: spot.id },
         selected: null,
         // Walking and flying both own the camera. FirstPerson.tsx writes the walker and
         // CameraRig copies it, so a fly-down still advancing t underneath would be invisible
@@ -723,7 +723,7 @@ export const useStore = create<Store>((set, get) => ({
       return;
     }
     set({
-      firstPerson: { p, heading: arrivalHeading(room), room: roomId },
+      firstPerson: { p, heading: arrivalHeading(room), pitch: 0, room: roomId },
       selected: null,
       notice: `Standing in ${room.label}.`,
     });

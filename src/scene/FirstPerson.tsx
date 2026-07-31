@@ -390,6 +390,7 @@ export function FirstPerson() {
             forward: Math.max(-1, Math.min(1, forward)),
             turn: Math.max(-1, Math.min(1, turn)) * turnSign,
             strafe: Math.max(-1, Math.min(1, strafe)) * turnSign,
+            pitch: 0,
           };
 
     // The pointer's contribution is a displacement rather than a rate, so it is applied to
@@ -401,7 +402,7 @@ export function FirstPerson() {
     const looked = walker.heading + dx * perPx * turnSign;
 
     const dt = Math.min(MAX_DT, Math.max(0, delta));
-    const next = walk({ p: walker.p, heading: looked }, input, dt, ctxNow);
+    const next = walk({ p: walker.p, heading: looked, pitch: walker.pitch }, input, dt, ctxNow);
     frames.current++;
 
     // Written only when something actually changed, so an idle viewer costs no store
@@ -409,7 +410,7 @@ export function FirstPerson() {
     const moved =
       next.p.u !== walker.p.u || next.p.v !== walker.p.v || next.heading !== walker.heading;
     const room = moved ? roomAt(next.p, ctxNow) : walker.room;
-    if (moved) setWalk({ p: next.p, heading: next.heading, room });
+    if (moved) setWalk({ p: next.p, heading: next.heading, pitch: next.pitch, room });
 
     (window as unknown as { __walk?: WalkProbe }).__walk = {
       active: true,
