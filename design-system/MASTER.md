@@ -13,6 +13,7 @@ with the locked visual direction. Precedence: user's locked direction > this fil
 | CTA `#22C55E` (run-green) | `#A41034` Harvard crimson / `#E4526F` lifted | Subject is a Harvard building. Green has no meaning here. |
 | Type: Fira Code + Fira Sans | IBM Plex Mono + Libre Baskerville | Mono+sans is a weak contrast axis. Mono+transitional-serif suits an 1872 building and a technical drawing at once. |
 | Pattern: Immersive/Interactive | **Kept** | Its requirements adopted verbatim: skip control, mobile fallback, CTA after interaction. |
+| "The two palettes must not be blended" | **Amended in P9** | A third input — aerial photography — resolves *into* the scan palette by an altitude ramp. See "Two stages, two palettes". |
 
 ## Register
 
@@ -23,6 +24,32 @@ subject; chrome stays quiet and gets out of the way of the 3D viewport.
 
 The app crosses from a scan of the campus into a finished room. Each stage commits to its own
 palette; the crossing between them is the payoff, so they must not be blended.
+
+> **Amended in P9.** The scan and daylight palettes still must not blend *with each other*. A third
+> input arrives at stages 0–3 — georeferenced aerial photography — and it is neither palette. It is
+> resolved **into** the scan palette by an altitude ramp rather than sitting beside it: full colour
+> at orbit, and by the time the camera reaches Weld it has been desaturated to 25% and pushed 82% of
+> the way to `--void`. The rule the original line protects is that the *crossing* is the payoff, and
+> that rule is kept — the crossing is now photograph → scan → daylight, three states and two
+> crossings, each committed to.
+>
+> The ramp stops short of 100% deliberately. A fully tinted photograph is a flat blue rectangle with
+> every bit of tonal information gone, and what stage 3 wants is a photograph that has become *the
+> ground the drawing sits on*. The 18% that survives is what keeps the paths across the Yard
+> readable under the cyanotype, which is what makes the massing look like it is standing on
+> something. `src/scene/Ground.tsx` holds both numbers and the reasoning.
+
+### Token: the photographic layer
+
+| token | value | meaning |
+|---|---|---|
+| tint target | `--void` `#06203F` | what the photograph resolves toward as altitude falls |
+| tint ceiling | 0.82 | how far it goes at stage 3. Not 1.0; see above |
+| saturation floor | 0.25 | saturation left at full tint, so the tint does not read as a colour cast |
+| ramp bounds | 40,000 ft → 400 ft | the altitude band over which it happens (`src/scene/altitude.ts`) |
+
+These are design-system values rather than magic numbers in a shader, so the look can be tuned
+without touching GLSL.
 
 ### Stage: SCAN (globe, Cambridge, Yard, Weld exterior)
 

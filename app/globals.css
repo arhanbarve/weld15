@@ -243,6 +243,28 @@ button,
   min-height: 44px;
 }
 
+/* ---------- imagery credit ---------- */
+
+/* BOTTOM RIGHT, which is the last free corner: top-left is A11yAlt, top-centre the fly-down,
+   top-right the dimension panel, bottom-left Sources, bottom-centre the HUD. Small, dim, and
+   aria-hidden -- it is a credit, not a control, and Sources.tsx carries the reachable version. */
+.imagery-chip {
+  position: fixed;
+  right: var(--s2);
+  bottom: var(--s2);
+  z-index: var(--z-hud);
+  padding: 0.35rem 0.6rem;
+  background: var(--chip-scan);
+  border: 1px solid var(--rule-soft);
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+  pointer-events: none;
+}
+
 /* ---------- the fly-down ---------- */
 
 /* VISIBLE, unlike .skip, and that is the whole difference between them. .skip is an escape

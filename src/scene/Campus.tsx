@@ -104,7 +104,13 @@ export function Campus({ visible, highlightWeld }: { visible: boolean; highlight
         </Html>
       ) : null}
 
-      <gridHelper args={[3000, 60, SCAN.grid, SCAN.grid]} position={[0, -0.5, 0]} />
+      {/* THE gridHelper IS RETIRED IN P9. It read
+              <gridHelper args={[3000, 60, SCAN.grid, SCAN.grid]} position={[0, -0.5, 0]} />
+          and its whole job was to say "there is a ground here" under buildings that would
+          otherwise float in a void. There is now a ground -- Ground.tsx, four georeferenced
+          photographic quads -- so the stand-in has nothing left to stand in for, and a 60-division
+          grid over an aerial photograph reads as a bug rather than as a drawing. Removed rather
+          than commented out in place; this note is the record. */}
     </group>
   );
 }

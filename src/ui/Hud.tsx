@@ -11,6 +11,7 @@ import { places } from "@/scene/route";
 import type { NudgeDir } from "@/geo/drag";
 import { UrlSync } from "./UrlSync";
 import { Sources } from "./Sources";
+import { ImageryChip } from "./ImageryChip";
 import { A11yAlt } from "./A11yAlt";
 
 /**
@@ -484,6 +485,7 @@ export function Hud() {
   return (
     <>
       <UrlSync />
+      <ImageryChip />
       <button className="skip" onClick={skip} data-testid="skip">
         Skip to the room
       </button>

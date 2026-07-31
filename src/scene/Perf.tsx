@@ -69,6 +69,19 @@ export function Perf() {
       triangles: gl.info.render.triangles,
       lines: gl.info.render.lines,
       geometries: gl.info.memory.geometries,
+      /**
+       * Live texture count, added in P9b on the same argument this file already makes for
+       * `casters`: a budget that cannot be asserted is a budget that will be exceeded quietly.
+       *
+       * P9 ships five plates (2.20 MB of AVIF) and decodes them into GPU memory, where they are
+       * far larger than on disk -- L4 alone is 3072 x 3072 RGBA plus mipmaps, about 50 MB
+       * resident. The failure mode is not a crash but a slow leak: a component that reloads a
+       * level on every params change and never disposes climbs until the driver starts evicting,
+       * and the symptom is a frame-time cliff a long way from the cause. imagery.ts's loader
+       * returns a disposer for exactly that reason, and this is how a gate can tell whether it is
+       * being called.
+       */
+      textures: gl.info.memory.textures,
       shadows: gl.shadowMap.enabled,
       casters,
       frames: f.length,
