@@ -17,6 +17,12 @@ import {
 import { buildWalls } from "@/geo/walls";
 import { MAX_SECTION_LENGTH } from "@/geo/place";
 import { CUTAWAY_MODES, type CutawayMode } from "@/scene/cutaway";
+// Value imports of two more scene modules, on the same footing as cutaway.ts above:
+// walk.ts and route.ts are deliberately three-free and say so in their headers, so this
+// does not drag the renderer into the state layer -- tests/place.test.ts walks the real
+// import graph and would fail if it did.
+import { insideSuite, isClear, walkContext, RADIUS, type WalkState } from "@/scene/walk";
+import { places, standIn } from "@/scene/route";
 import type { Orbit } from "@/scene/orbit";
 import type { NudgeDir } from "@/geo/drag";
 // A value import of url.ts, and it does NOT close a cycle: url.ts imports this module
@@ -40,6 +46,18 @@ export const STAGES = [
 export type StageId = 0 | 1 | 2 | 3 | 4 | 5;
 
 export const LAST_STAGE: StageId = 5;
+
+/**
+ * Where the viewer is standing, in the suite's own frame, while first person is on.
+ *
+ * walk.ts's WalkState -- a position and a bearing -- plus the room the position falls in.
+ * The room is carried rather than recomputed by every reader because roomAt() needs a
+ * WalkCtx and building one walks a grid: FirstPerson.tsx holds the only context in the
+ * app and writes the answer here, so the HUD and its live region get "which room am I
+ * in" for a field read. Null in a doorway, which is roomAt()'s own answer there and not
+ * a missing value.
+ */
+export type FirstPerson = WalkState & { room: string | null };
 
 /**
  * The sun's default instant: 15 September 2026, 9 a.m. Cambridge time.
@@ -142,6 +160,23 @@ type Store = {
    */
   occupancy: number;
 
+  /**
+   * The viewer's own position and bearing while first person is on, or null when it is
+   * off. Null is the whole switch: there is no separate boolean to disagree with it.
+   *
+   * WRITTEN PER FRAME, by FirstPerson.tsx, and only while a key is actually down -- see
+   * setWalk(). The alternative was a ref shared between FirstPerson and CameraRig, and it
+   * was refused for the reason `pieces` is state rather than a function of the params: a
+   * position nothing can observe is a position no gate can assert on and no live region
+   * can announce. The publish cost is UrlSync's, measured there at under 2 ns, and
+   * `firstPerson` is deliberately absent from url.ts's key() so no walk rewrites the
+   * address bar sixty times a second.
+   *
+   * NOT CARRIED BY A LINK, for the reason `selected` is not: it is where the recipient is
+   * standing, not what the model is.
+   */
+  firstPerson: FirstPerson | null;
+
   /** The piece the panel and the keyboard act on, or null. */
   selected: string | null;
 
@@ -170,6 +205,15 @@ type Store = {
   setOccupancy: (n: number) => void;
   select: (id: string | null) => void;
   setNotice: (m: string | null) => void;
+
+  /** Stand up in the suite: seed the walker at the hall, or say why nobody can. */
+  enterFirstPerson: () => void;
+  /** Put the camera back on the stage's own keyframe. Escape's handler, and a button's. */
+  leaveFirstPerson: () => void;
+  /** One frame of walking, from FirstPerson.tsx. */
+  setWalk: (s: FirstPerson) => void;
+  /** Jump-cut to a named room. The reduced-motion form of walking there. */
+  goToPlace: (roomId: string) => void;
 
   /**
    * Commit a move the pointer path has already had accepted by drag.ts.
@@ -343,6 +387,43 @@ function survivors(params: SuiteParams, pieces: Piece[]): { kept: Piece[]; lost:
   return { kept, lost };
 }
 
+/**
+ * Which way to face on arriving in a room, as a suite-frame bearing.
+ *
+ * ONE RULE RATHER THAN A TABLE: along the room's longer axis, toward its low end. A
+ * rectangle's long axis is the direction that has something to show, and the low end is
+ * where the rest of the suite is -- u = 0 is the window wall and v = 0 is the stair-hall
+ * end. Measured against the seven rooms as shipped, that lands: bedroom A, bedroom B and
+ * the common room facing their own facade windows; the hall facing south down its 28.5 ft
+ * toward the suite entry, which is the same direction stages.ts aims the stage-5 shot; K
+ * and the bathroom, neither of which has a window, facing their own long walls.
+ *
+ * A table of seven headings would read better in two of those cases and would be seven
+ * more numbers to keep in step with the sliders, since a slider can turn a room's long
+ * axis through 90 degrees -- bedDepth 8 makes bedroom A wider along the hall than deep.
+ *
+ * heading 0 faces +v and positive turns toward +u (walk.ts), so -pi/2 faces -u and pi
+ * faces -v.
+ */
+function arrivalHeading(room: { du: number; dv: number }): number {
+  return room.du >= room.dv ? -Math.PI / 2 : Math.PI;
+}
+
+/**
+ * A refusal in words for a suite nobody can stand up in.
+ *
+ * A slider can shrink a room below the walker's own diameter, and walk.ts is explicit
+ * about what happens then: step() returns the same position forever rather than escaping,
+ * because there is no clear position to escape to. That has to be SAID rather than
+ * presented as a camera that will not move -- which is indistinguishable from a bug.
+ */
+function noRoomToStand(what: string): string {
+  return (
+    `${what} is narrower than the ${(2 * RADIUS).toFixed(1)} ft a standing viewer takes up, ` +
+    `so there is nowhere in it to stand. Widen a dimension and try again.`
+  );
+}
+
 export const useStore = create<Store>((set, get) => ({
   stage: 0,
   t: 0,
@@ -354,14 +435,21 @@ export const useStore = create<Store>((set, get) => ({
   cutaway: "none",
   pieces: DEFAULT_SNAPSHOT.pieces,
   occupancy: DEFAULT_OCCUPANCY,
+  firstPerson: null,
   selected: null,
   notice: null,
 
-  setStage: (stage) => set({ stage, t: 0 }),
+  // Every stage change drops the walker, and that is not tidiness. First person replaces
+  // the stage's camera, so a walker surviving a jump to stage 2 would be a viewer standing
+  // in a bedroom while the HUD said "Harvard Yard" -- and the control that leaves it is
+  // only mounted at the last stage, so it would be unreachable as well as wrong.
+  setStage: (stage) => set({ stage, t: 0, firstPerson: null }),
   setT: (t) => set({ t: Math.min(1, Math.max(0, t)) }),
-  next: () => set((s) => ({ stage: Math.min(LAST_STAGE, s.stage + 1) as StageId, t: 0 })),
-  prev: () => set((s) => ({ stage: Math.max(0, s.stage - 1) as StageId, t: 0 })),
-  skipToSuite: () => set({ stage: LAST_STAGE, t: 1 }),
+  next: () =>
+    set((s) => ({ stage: Math.min(LAST_STAGE, s.stage + 1) as StageId, t: 0, firstPerson: null })),
+  prev: () =>
+    set((s) => ({ stage: Math.max(0, s.stage - 1) as StageId, t: 0, firstPerson: null })),
+  skipToSuite: () => set({ stage: LAST_STAGE, t: 1, firstPerson: null }),
   setReducedMotion: (reducedMotion) => set({ reducedMotion }),
   /**
    * Move a dimension, and answer for the furniture standing on it.
@@ -387,15 +475,40 @@ export const useStore = create<Store>((set, get) => ({
     }
     const { kept, lost } = survivors(params, s.pieces);
     const suite = buildSuite(params);
+    /**
+     * The VIEWER is furniture too, for this one purpose.
+     *
+     * A dimension slider can close a wall onto the position somebody is standing at, and
+     * walk.ts is explicit about the consequence: from a position that is not clear, step()
+     * returns where it started, every frame, forever. So the walker is checked against the
+     * new suite exactly as the pieces are, and dropped with a sentence rather than left
+     * wedged -- the same choice, and for the same reason, as the pieces above: refusing
+     * the slider would mean a dimension the audit tags INFERRED could not be corrected
+     * while somebody happened to be standing in the way.
+     *
+     * The context is built only when there is a walker to check, because this runs on
+     * every pointer move of every one of the fifteen sliders.
+     */
+    const wedged =
+      s.firstPerson !== null &&
+      !(() => {
+        const ctx = walkContext(suite);
+        return insideSuite(s.firstPerson!.p, ctx) && isClear(s.firstPerson!.p, ctx);
+      })();
+    const dropped =
+      lost.length === 0
+        ? null
+        : `${lost.map((q) => pieceLabel(suite, q.id)).join(", ")} no longer ` +
+          `${lost.length === 1 ? "fits" : "fit"} and ${lost.length === 1 ? "was" : "were"} removed.`;
+    const stood = wedged
+      ? "A wall closed onto where you were standing, so first person is off."
+      : null;
     set({
       params,
       pieces: kept,
+      firstPerson: wedged ? null : s.firstPerson,
       selected: s.selected && kept.some((q) => q.id === s.selected) ? s.selected : null,
-      notice:
-        lost.length === 0
-          ? null
-          : `${lost.map((q) => pieceLabel(suite, q.id)).join(", ")} no longer ` +
-            `${lost.length === 1 ? "fits" : "fit"} and ${lost.length === 1 ? "was" : "were"} removed.`,
+      notice: [dropped, stood].filter((x) => x !== null).join(" ") || null,
     });
   },
   setDate: (date) => set({ date }),
@@ -422,6 +535,83 @@ export const useStore = create<Store>((set, get) => ({
     }),
   select: (selected) => set({ selected }),
   setNotice: (notice) => set({ notice }),
+
+  /**
+   * Stand up in the suite.
+   *
+   * SEEDED FROM places(), HUB FIRST, AND CHECKED BEFORE THE FIRST FRAME. There is no
+   * spawn() in walk.ts and step()'s guarantee is conditional on starting from a clear
+   * position, so a seed has to be verified rather than assumed -- and a dimension slider
+   * can leave the hall narrower than the walker is wide. places() already returns the
+   * reachable rooms with the hall first, which is exactly the order to try: the hall is
+   * what every room here is entered from, and any other reachable room is a worse but
+   * usable place to begin.
+   *
+   * If none of them has room, this REFUSES and says so, rather than seeding somewhere
+   * wedged and leaving the viewer with a camera that will not move.
+   *
+   * The selection is dropped because the arrow keys change hands: Hud.tsx gives them to
+   * the walker while first person is on, so a piece left selected would be a piece whose
+   * keyboard controls have silently stopped working.
+   */
+  enterFirstPerson: () => {
+    const s = get();
+    const suite = buildSuite(s.params);
+    const ctx = walkContext(suite);
+    for (const spot of places(suite)) {
+      if (!isClear(spot.p, ctx)) continue;
+      const room = suite.rooms.find((r) => r.id === spot.id)!;
+      set({
+        firstPerson: { p: spot.p, heading: arrivalHeading(room), room: spot.id },
+        selected: null,
+        notice: `Standing in ${room.label}. W, A, S and D to walk; Escape to stop.`,
+      });
+      return;
+    }
+    set({ notice: `Refused: ${noRoomToStand("Every room in this suite")}` });
+  },
+
+  leaveFirstPerson: () => set({ firstPerson: null, notice: null }),
+
+  // No clamping, no validation, and no recomputation of the room: this is the frame path,
+  // and FirstPerson.tsx has the WalkCtx that walk() and roomAt() were both answered
+  // against. A second opinion here would be a second WalkCtx per frame, which walk.ts's
+  // header exists to forbid.
+  setWalk: (firstPerson) => set({ firstPerson }),
+
+  /**
+   * Jump-cut to a named room.
+   *
+   * THIS IS THE REDUCED-MOTION ALTERNATIVE, and route.ts says so: places() returns named
+   * destinations, hall first, for exactly this. MASTER.md asks for a real alternative
+   * rather than nothing wherever an animation is switched off, and the alternative to
+   * walking somewhere is arriving there -- one instantaneous change of position, which is
+   * the same shape CameraRig's reduced branch and stages.ts's REDUCED_CUT already take.
+   *
+   * It is not gated on the media query. A jump to a named room is faster and more precise
+   * than walking for everybody, it is the only way to cross the suite without a pointer,
+   * and a control that appears only for readers who set a preference is a control nobody
+   * tests. What reduced motion changes is which of the two the HUD offers first.
+   */
+  goToPlace: (roomId) => {
+    const s = get();
+    const suite = buildSuite(s.params);
+    const room = suite.rooms.find((r) => r.id === roomId);
+    if (!room) {
+      set({ notice: `Refused: this suite has no room called ${roomId}.` });
+      return;
+    }
+    const p = standIn(room);
+    if (!isClear(p, walkContext(suite))) {
+      set({ notice: `Refused: ${noRoomToStand(room.label)}` });
+      return;
+    }
+    set({
+      firstPerson: { p, heading: arrivalHeading(room), room: roomId },
+      selected: null,
+      notice: `Standing in ${room.label}.`,
+    });
+  },
 
   commit: (id, r) => {
     const s = get();
@@ -479,6 +669,7 @@ export const useStore = create<Store>((set, get) => ({
       date: DEFAULT_DATE,
       hour: DEFAULT_HOUR,
       orbit: null,
+      firstPerson: null,
       selected: null,
       notice: "Back to the sourced dimensions and the shipped fit-out.",
     }),
@@ -502,6 +693,9 @@ export const useStore = create<Store>((set, get) => ({
       hour: s.hour,
       date: s.date,
       orbit: s.orbit,
+      // Cleared for the reason `selected` is: a link carries the model, not where the
+      // recipient is standing in it. url.ts does not encode either field.
+      firstPerson: null,
       selected: null,
       notice: null,
     }),

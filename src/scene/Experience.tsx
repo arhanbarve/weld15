@@ -6,6 +6,7 @@ import { useEffect } from "react";
 import { LAST_STAGE, useStore } from "@/state/store";
 import { visibility, thresholdOpacity } from "./stages";
 import { CameraRig } from "./CameraRig";
+import { FirstPerson } from "./FirstPerson";
 import { Lighting } from "./Lighting";
 import { Globe } from "./Globe";
 import { Campus } from "./Campus";
@@ -68,6 +69,9 @@ export default function Experience() {
   const cutaway = useStore((s) => s.cutaway);
   const pieces = useStore((s) => s.pieces);
   const selected = useStore((s) => s.selected);
+  // A boolean selector, not the walker: FirstPerson writes the walker sixty times a second
+  // while a key is down and this component mounts the whole scene.
+  const walking = useStore((s) => s.firstPerson !== null);
   const select = useStore((s) => s.select);
   const commit = useStore((s) => s.commit);
 
@@ -103,6 +107,13 @@ export default function Experience() {
               ramp that drives the dissolve. */}
           <Lighting />
 
+          {/* BEFORE CameraRig, and the order is load-bearing rather than tidy. Both run
+              their useFrame at the default priority, so R3F calls them in mount order:
+              FirstPerson advances the walker and writes it to the store, then CameraRig
+              reads it back and places the camera in the same frame. Mounted the other way
+              round the camera would show the previous frame's position, which at 4 ft/s is
+              a permanent 0.07 ft of lag and, on a slow frame, a visible one. */}
+          <FirstPerson />
           <CameraRig />
           <Perf />
 
@@ -123,12 +134,25 @@ export default function Experience() {
             // meaningful from anywhere, and it is only the pointer pick that needs the
             // camera to be in the room.
             //
-            // WHAT THIS COSTS, MEASURED RATHER THAN GUESSED. Stage 5 stands inside
-            // bedroom B, so the pointer can only reach bedroom B's furniture: projecting
-            // bedA-bed-0's corner puts it at (1574, -57) on a 1280 x 720 viewport, which
-            // is off the top-right of the screen and behind a wall besides. The keyboard
-            // and the panel's nudge buttons reach whatever is selected, but nothing
-            // selects a piece in another room.
+            // WHAT THIS COSTS, MEASURED RATHER THAN GUESSED, AND P7 CHANGED THE NUMBER.
+            // It used to read: stage 5 stands inside bedroom B, so the pointer can only
+            // reach bedroom B's furniture -- projecting bedA-bed-0's corner puts it at
+            // (1574, -57) on a 1280 x 720 viewport, off the top-right of the screen and
+            // behind a wall besides -- and 4 of 29 pieces were in frame at all.
+            //
+            // Stage 5 now stands in the hall (stages.ts records why), and re-measured the
+            // same way -- projecting each piece's anchor through DragLayer's own
+            // screenOf() and asking document.elementFromPoint what is on top -- 17 of the
+            // 29 are in frame and unobstructed: bedroom A's desk, two chairs and a
+            // dresser, all six pieces in the common room, and all seven in K, most of
+            // them seen through the doorways down the length of the hall. The 12 that are
+            // not are bedroom A's two beds and its other desk and dresser, which project
+            // off the left edge, and the whole of bedroom B, which is behind the camera.
+            //
+            // That test is a projection and not a depth test, which is worth saying: a
+            // piece can be "unobstructed" by that criterion and still be behind a wall.
+            // What it bounds is which pieces the pointer can be aimed at, which is the
+            // question this gate is about.
             //
             // The fix is the dollhouse view -- edit from stage 3 with a cutaway on --
             // and it is no longer blocked: WeldExterior reads `cutaway` and cuts the
@@ -144,7 +168,14 @@ export default function Experience() {
             // comment exists to record. `stage >= 3 && cutaway === "section"` is the
             // honest condition, and turning it on wants a look at what the pointer
             // actually hits from an orbiting camera rather than a one-line change here.
-            edit={stage === LAST_STAGE}
+            // AND NOT WHILE SOMEBODY IS WALKING. Editing and walking both want the
+            // pointer and the arrow keys, and in first person the pointer is the look
+            // control -- the click that requests pointer lock would otherwise also land
+            // on DragLayer and pick or deselect a piece, and the arrow keys would nudge a
+            // bed and turn the viewer on the same press. Hud.tsx hands the arrows over
+            // for the same reason, and enterFirstPerson() drops the selection so that no
+            // panel offers to move a piece whose keys have changed owner.
+            edit={stage === LAST_STAGE && !walking}
             selected={selected}
             onSelect={select}
             onResult={commit}

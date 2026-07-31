@@ -3,8 +3,9 @@
 import { useEffect, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
-import { useStore, type StageId } from "@/state/store";
+import { LAST_STAGE, useStore, type StageId } from "@/state/store";
 import { keyframes, cameraKeyframe } from "./stages";
+import { firstPersonPose } from "./FirstPerson";
 import { clampOrbit, orbitKeyframe, orbitOf, STAGE3_CLAMP } from "./orbit";
 
 /**
@@ -16,6 +17,13 @@ import { clampOrbit, orbitKeyframe, orbitOf, STAGE3_CLAMP } from "./orbit";
  * on top of that, and it lives in stages.ts cameraKeyframe, because snapping alone
  * would still take the camera through every interpolated position -- one per slider
  * event -- and an interpolated position arrived at instantly is still one.
+ *
+ * THERE IS ONE MORE SOURCE OF A CAMERA POSE SINCE P7, and this file is still the only
+ * WRITER of one. When the store holds a walker, the pose comes from FirstPerson.tsx's
+ * firstPersonPose() instead of from a keyframe, and it is copied rather than eased --
+ * see the branch in the frame loop. Two components writing camera.position is the bug
+ * that ends in a camera oscillating between two answers on alternate frames, so
+ * FirstPerson advances the walker and puts it in the store and this reads it back.
  */
 
 /**
@@ -86,6 +94,13 @@ type CamProbe = {
   target: [number, number, number];
   fov: number;
   /**
+   * Whether the pose came from the walker rather than from a keyframe.
+   *
+   * On the same probe as the position it explains, because a gate reading a camera inside
+   * the suite cannot otherwise tell "the stage-5 shot" from "somebody standing there".
+   */
+  firstPerson: boolean;
+  /**
    * Distinct camera positions since the last stage change, oldest first.
    *
    * This is the whole reduced-motion hook, and it exists because the gate in
@@ -121,10 +136,30 @@ export function CameraRig() {
     return () => mq.removeEventListener("change", onChange);
   }, [setReduced]);
 
+  /**
+   * A subscription to WHETHER somebody is walking, not to where they are.
+   *
+   * The selector returns a boolean, so this re-renders on the two transitions rather than
+   * on the sixty writes a second FirstPerson makes while a key is down.
+   */
+  const walking = useStore((s) => s.firstPerson !== null);
+
+  /**
+   * Un-settle on a stage change AND on entering or leaving first person, so the next frame
+   * places the camera rather than easing toward it.
+   *
+   * The first-person half is the interesting one, and it is not bookkeeping. An eased
+   * return from wherever the viewer walked to the stage-5 keyframe would be a straight
+   * line through whatever stands in between -- which is precisely the defect P7 paid back:
+   * stages.ts recorded a straight camera path from bedroom B to the hall passing through
+   * the partition and standing half a foot off it, at the near plane, with the frame going
+   * empty. A viewer who walks into bedroom A and presses Escape would fly the same line.
+   * So leaving is a cut, on purpose.
+   */
   useEffect(() => {
     settled.current = false;
     path.current = [];
-  }, [stage]);
+  }, [stage, walking]);
 
   /**
    * Pointer drag and wheel, at stage 3 only.
@@ -223,15 +258,31 @@ export function CameraRig() {
 
   useFrame((_, delta) => {
     const kf = keyframes(params);
+    /**
+     * The walker, read at frame time rather than subscribed to.
+     *
+     * getState() and not a useStore selector, because FirstPerson writes this sixty times
+     * a second while a key is down and a subscription would re-render this component on
+     * every one of them. FirstPerson's own useFrame runs first -- it is mounted first in
+     * Experience.tsx -- so what is read here was written this frame, not last.
+     */
+    const walker = stage === LAST_STAGE ? useStore.getState().firstPerson : null;
     const want =
-      stage === 3
-        ? orbitKeyframe(kf[3], orbit ?? orbitOf(kf[3]))
-        : cameraKeyframe(kf, stage, t, reduced);
+      walker !== null
+        ? { ...firstPersonPose(walker, params), fov: kf[LAST_STAGE].fov }
+        : stage === 3
+          ? orbitKeyframe(kf[3], orbit ?? orbitOf(kf[3]))
+          : cameraKeyframe(kf, stage, t, reduced);
 
     const wantPos = new THREE.Vector3(...want.position);
     const wantTarget = new THREE.Vector3(...want.target);
 
-    if (reduced || !settled.current) {
+    // COPIED, NEVER EASED, while somebody is walking. The walker IS the camera: an
+    // exponential approach to it would lag every step and every turn by a few frames,
+    // which reads as walking on ice rather than as a smooth camera. It is also what makes
+    // goToPlace() a jump cut -- the reduced-motion alternative to walking is one change of
+    // position, and an ease would put a fly back in between.
+    if (walker !== null || reduced || !settled.current) {
       camera.position.copy(wantPos);
       target.current.copy(wantTarget);
       camera.fov = want.fov;
@@ -269,6 +320,7 @@ export function CameraRig() {
       position: [camera.position.x, camera.position.y, camera.position.z],
       target: [target.current.x, target.current.y, target.current.z],
       fov: camera.fov,
+      firstPerson: walker !== null,
       path: p,
     };
     (window as unknown as { __cam?: CamProbe }).__cam = probe;

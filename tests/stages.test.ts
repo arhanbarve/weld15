@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { DEFAULT_PARAMS } from "@/geo/rooms";
+import { buildSuite, DEFAULT_PARAMS } from "@/geo/rooms";
 import {
   keyframes,
   blend,
@@ -7,9 +7,14 @@ import {
   visibility,
   cameraKeyframe,
   REDUCED_CUT,
+  SHELL_GONE,
 } from "@/scene/stages";
 import { pointInPolygon } from "@/geo/collide";
 import { fromThree } from "@/geo/frames";
+import { cameraInSuite } from "@/scene/cutaway";
+import { clearance, insideSuite, walkContext, type Vec2 } from "@/scene/walk";
+import { HUB } from "@/scene/route";
+import { floorLevel } from "@/geo/place";
 import weld from "@/data/weld.json";
 import type { StageId } from "@/state/store";
 
@@ -176,13 +181,35 @@ describe("reduced motion", () => {
     expect(thresholdOpacity(4, after, true)).toEqual({ shell: 0, interior: 1 });
   });
 
-  it("still interpolates when motion is allowed", () => {
+  it("still moves through the crossing when motion is allowed", () => {
     // The guard against fixing the reduced path by breaking the normal one.
+    //
+    // WHAT THIS USED TO ASSERT, AND WHY IT NO LONGER CAN. It pinned the full-motion pose
+    // at t = 0.5 to the component-wise MIDPOINT of kf[4] and kf[5], which was a
+    // restatement of the implementation -- blend() -- rather than a property of the
+    // crossing. Stage 4 is now a polyline through bedroom B's doorway (see the
+    // "threshold path" block below), so the halfway pose is not the halfway point and
+    // asserting that it is would be asserting the defect back into place. What is
+    // actually required of the full-motion path is that it MOVES, continuously, and
+    // through poses that are not keyframes -- and that it is clear of the walls, which
+    // is the assertion the midpoint check was standing in front of.
     const mid = cameraKeyframe(kf, 4, 0.5, false);
     expect(isAKeyframe(mid.position)).toBe(false);
-    for (let i = 0; i < 3; i++) {
-      expect(mid.position[i]).toBeCloseTo((kf[4].position[i]! + kf[5].position[i]!) / 2, 6);
+    // Strictly between the two ends in the direction of travel, and distinct from every
+    // neighbouring sample: a function returning one fixed interior pose would satisfy
+    // "not a keyframe" on its own.
+    const seen = new Set<string>();
+    let prev = kf[4].position;
+    for (let t = 0; t <= 1.0001; t += 0.02) {
+      const got = cameraKeyframe(kf, 4, t, false).position;
+      seen.add(got.join(","));
+      // 10 ft, against a measured largest step of 3.68 ft per 0.02 of t -- which is on
+      // the approach, where 0.7 of t covers 129 ft. What this catches is a cut: a branch
+      // that snapped to one end or the other would step 129 ft in one sample.
+      expect(dist(got, prev), `t=${t.toFixed(2)} did not advance`).toBeLessThan(10);
+      prev = got;
     }
+    expect(seen.size, "the full-motion path is a sequence, not two poses").toBeGreaterThan(40);
   });
 
   it("leaves every other stage exactly where it was", () => {
@@ -204,6 +231,170 @@ describe("reduced motion", () => {
       const { shell, interior } = thresholdOpacity(4, t, true);
       expect(shell + interior, `at t=${t.toFixed(2)}`).toBe(1);
     }
+  });
+});
+
+/**
+ * P7's debt: the crossing lands in the hall, and the path to it is clear of the walls.
+ *
+ * stages.ts carried a comment saying the hall was the better shot and could not be had,
+ * because a straight camera path from bedroom B to the hall passes through the partition
+ * between them and stood the camera half a foot from it -- at Experience.tsx's near plane
+ * of 0.5, so every face clipped and the frame went empty. These are the assertions that
+ * make the routed path a guarantee rather than a hope, and the last one is what stops
+ * them passing for the wrong reason: it shows the straight line this replaced still
+ * fails, at a value the panel's own slider offers.
+ */
+describe("the threshold path", () => {
+  const params = DEFAULT_PARAMS;
+  const suite = buildSuite(params);
+  const ctx = walkContext(suite);
+  /** A world position back in the suite's own frame. cutaway.ts's inverse, not a second one. */
+  const inSuite = (p: readonly number[]): Vec2 =>
+    cameraInSuite([p[0]!, p[1]!, p[2]!], params);
+  const roomAt = (p: Vec2) =>
+    suite.rooms.find(
+      (r) => p.u >= r.u && p.u <= r.u + r.du && p.v >= r.v && p.v <= r.v + r.dv,
+    )?.id ?? null;
+
+  it("ends the descent standing in the hall", () => {
+    // The shot the comment always wanted. Named through the same inverse A11yAlt uses to
+    // say which room the camera is in, so the description and the geometry cannot
+    // disagree about it.
+    expect(roomAt(inSuite(kf[5].position))).toBe(HUB);
+    // At eye height on the first floor, still: this moved the camera across the suite,
+    // not up or down.
+    expect(kf[5].position[1] - floorLevel(1)).toBeCloseTo(5 + 10 / 12, 9);
+  });
+
+  it("hangs a path off stage 4 and nowhere else", () => {
+    expect(kf[4].path, "stage 4 has a path").toBeDefined();
+    for (const s of [0, 1, 2, 3, 5] as StageId[]) {
+      expect(kf[s].path, `stage ${s} must be a place, not a path`).toBeUndefined();
+    }
+    const stops = kf[4].path!;
+    // Outside the gable, the crossing, and route()'s four interior waypoints.
+    expect(stops.length).toBe(6);
+    expect(stops[0]!.at).toBe(0);
+    expect(stops[stops.length - 1]!.at).toBe(1);
+    for (let i = 1; i < stops.length; i++) {
+      expect(stops[i]!.at, `stop ${i} is not after stop ${i - 1}`).toBeGreaterThan(
+        stops[i - 1]!.at,
+      );
+    }
+    // The ends are the two keyframes themselves, exactly, so the stage boundary cannot
+    // show a jump.
+    expect(cameraKeyframe(kf, 4, 0).position).toEqual(kf[4].position);
+    expect(cameraKeyframe(kf, 4, 1).position).toEqual(kf[5].position);
+  });
+
+  it("crosses the plane of the gable exactly when the brick has gone", () => {
+    // One number, two things: thresholdOpacity's shell ramp reaches zero at SHELL_GONE
+    // and the path's second waypoint sits on the gable's interior face. A camera on the
+    // far side of masonry that is still being drawn reads as a glitch.
+    expect(thresholdOpacity(4, SHELL_GONE).shell).toBeCloseTo(0, 9);
+    const here = inSuite(cameraKeyframe(kf, 4, SHELL_GONE).position);
+    expect(here.v).toBeCloseTo(params.sectionLength, 6);
+    // Before it, outside the suite; after it, inside.
+    expect(insideSuite(inSuite(cameraKeyframe(kf, 4, SHELL_GONE - 0.01).position), ctx)).toBe(
+      false,
+    );
+    expect(insideSuite(inSuite(cameraKeyframe(kf, 4, SHELL_GONE + 0.01).position), ctx)).toBe(
+      true,
+    );
+  });
+
+  it("never passes within the near plane of a wall once it is inside", () => {
+    /*
+     * The gate the whole phase is for, and the sampling is deliberate on both ends.
+     *
+     * FROM the third stop, which is route()'s first waypoint -- the centre of bedroom B.
+     * Everything before it is the crossing itself: the camera is coming through the
+     * gable masonry on purpose, and inside a 1.5 ft band a clearance is negative by
+     * definition. So what is asserted is the part of the path that is a WALK.
+     *
+     * Every 0.0002 of t, which is 1,190 samples over that stretch, because the failure
+     * being guarded against is a couple of frames wide -- the recorded one was at a
+     * single value of the slider.
+     */
+    const stops = kf[4].path!;
+    const from = stops[2]!.at;
+    let worst = Infinity;
+    let worstAt = { t: 0, p: { u: 0, v: 0 } as Vec2 };
+    for (let t = from; t <= 1.0001; t += 0.0002) {
+      const p = inSuite(cameraKeyframe(kf, 4, Math.min(1, t)).position);
+      expect(insideSuite(p, ctx), `t=${t.toFixed(4)} left the suite footprint`).toBe(true);
+      const c = clearance(p, ctx);
+      if (c < worst) {
+        worst = c;
+        worstAt = { t, p };
+      }
+    }
+    // MEASURED: +0.442 ft at (17.68, 37.66), which is the doorway crossing -- the camera
+    // centre passes 1.19 ft from the nearer jamb of a 3 ft door. The bound is 0 rather
+    // than the measured figure so that a slider that narrows the door does not fail this
+    // for being a different suite, and the number is in the message when it does.
+    expect(
+      worst,
+      `worst clearance ${worst.toFixed(3)} ft at t=${worstAt.t.toFixed(4)}, ` +
+        `(${worstAt.p.u.toFixed(2)}, ${worstAt.p.v.toFixed(2)})`,
+    ).toBeGreaterThan(0);
+    // And nowhere near the near plane: clearance is measured from a 0.75 ft disc's edge,
+    // so a clearance of c puts the camera centre c + 0.75 from the wall.
+    expect(worst + 0.75, "the camera centre reaches the near plane").toBeGreaterThan(0.5);
+  });
+
+  it("is not passing because a straight line would have done", () => {
+    /*
+     * The non-vacuity check, and it is the reason the route is not decoration.
+     *
+     * At the shipped params the straight blend from kf[4] to kf[5] happens to clear the
+     * bedroom B / hall partition by 0.264 ft, because the gable stand-off is 123.6 ft out
+     * and the line is therefore almost parallel to the section. At hallWidth = 3 -- the
+     * LOW END OF THE PANEL'S OWN SLIDER, Panel.tsx's `min` -- it does not: the camera
+     * centre passes 0.396 ft from that band, inside the 0.5 near plane, which is the
+     * defect stages.ts recorded, reproduced from a shipped control.
+     *
+     * Measured over the part of the line more than a foot south of the gable's interior
+     * face, so that what is being measured is a partition and not the wall the camera is
+     * deliberately coming through.
+     */
+    const narrow = { ...DEFAULT_PARAMS, hallWidth: 3 };
+    const nkf = keyframes(narrow);
+    const nctx = walkContext(buildSuite(narrow));
+    const straightWorst = (p: typeof narrow, k: ReturnType<typeof keyframes>, c: typeof nctx) => {
+      let worst = Infinity;
+      for (let t = 0; t <= 1.0001; t += 0.0002) {
+        const at = blend(k[4], k[5], t).position;
+        const q = cameraInSuite([at[0]!, at[1]!, at[2]!], p);
+        if (!insideSuite(q, c) || q.v > p.sectionLength - 1) continue;
+        worst = Math.min(worst, clearance(q, c));
+      }
+      return worst;
+    };
+    expect(straightWorst(narrow, nkf, nctx), "the straight line still fails").toBeLessThan(0);
+    // The routed path at the same params does not, so what changed is the path and not
+    // the suite.
+    const stops = nkf[4].path!;
+    let routed = Infinity;
+    for (let t = stops[2]!.at; t <= 1.0001; t += 0.0002) {
+      const at = cameraKeyframe(nkf, 4, Math.min(1, t)).position;
+      routed = Math.min(routed, clearance(cameraInSuite([at[0]!, at[1]!, at[2]!], narrow), nctx));
+    }
+    expect(routed, `routed worst ${routed.toFixed(3)} ft at hallWidth 3`).toBeGreaterThan(0);
+  });
+
+  it("memoises on the params object rather than rebuilding per frame", () => {
+    // CameraRig calls keyframes() from inside useFrame and the body now calls route(),
+    // which builds a WalkCtx -- walk.ts's header says to memoise one per params and never
+    // per frame. Identity, not value, for the reason the cache's docblock gives.
+    const p = { ...DEFAULT_PARAMS };
+    expect(keyframes(p)).toBe(keyframes(p));
+    expect(keyframes({ ...DEFAULT_PARAMS })).not.toBe(keyframes({ ...DEFAULT_PARAMS }));
+    // And a changed params object is a changed answer, which is what a cache keyed on the
+    // wrong thing would break.
+    const deeper = keyframes({ ...DEFAULT_PARAMS, sectionLength: 48 });
+    expect(dist(deeper[5].position, keyframes(DEFAULT_PARAMS)[5].position)).toBeGreaterThan(1);
   });
 });
 

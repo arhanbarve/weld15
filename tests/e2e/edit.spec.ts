@@ -551,19 +551,25 @@ test.describe("P6 -- the suite is changeable", () => {
     const midDrag = await calls();
     await page.mouse.up();
 
-    // Measured on this build: 35 idle at stage 5, and three more while a gesture is live.
+    // Measured on this build: 38 idle at stage 5, and three more while a gesture is live.
     // Three rather than the two the layer's own header predicts (a ghost and an outline),
     // and the difference is that the outline appears on SELECTION and the ghost on DRAG,
     // so a live gesture carries both plus the frame's own bookkeeping -- the perf probe
     // reads the previous frame's accumulated totals, so a rebuild frame can land in the
     // sample. Bounded rather than pinned for that reason.
     //
-    // The 35 is 27 plus the furniture's shadow pass, one call per instanced batch;
-    // Lighting.tsx carries the full measurement and why furniture-only was the
-    // compromise. So the ceiling here is 40 rather than campus.spec.ts's 30, which covers
-    // stages 1 to 3 where nothing casts.
+    // Idle was 35 -- 27 plus the furniture's shadow pass, one call per instanced batch;
+    // Lighting.tsx carries the full measurement and why furniture-only was the compromise.
+    // It is now 38, and NOTHING WAS ADDED TO THE SCENE: P7 moved the stage-5 shot from a
+    // corner of bedroom B into the hall, so the frustum admits three more batches.
+    // Measured either side of that change, geometries 11 and casters 9 both ways, and 38
+    // while walking too -- so first person itself costs nothing. 38 + 3 is 41, which is
+    // why the ceiling moves to 45 rather than staying at 40: the old bound was 40 against
+    // an idle 35, i.e. two calls of headroom over the gesture, and this keeps roughly that.
+    // Still well clear of campus.spec.ts's 30, which covers stages 1 to 3 where nothing
+    // casts.
     expect(midDrag - idle, `idle ${idle}, mid-drag ${midDrag}`).toBeLessThanOrEqual(3);
-    expect(midDrag, `idle ${idle}, mid-drag ${midDrag}`).toBeLessThanOrEqual(40);
+    expect(midDrag, `idle ${idle}, mid-drag ${midDrag}`).toBeLessThanOrEqual(45);
   });
 
   test("the room is lit with real shadows, and they are paid for once", async ({ page }) => {

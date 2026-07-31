@@ -221,10 +221,17 @@ test.describe("P8 -- the model has a text alternative", () => {
     const described = said.map((s) => s.replace(/^Stage \d of 5, [^.]+\. /, ""));
     expect(new Set(described).size, described.join("\n")).toBe(6);
     // Stage 5 stands in a room, and naming the room is the whole point of the exercise --
-    // stages.ts positions that shot relative to bedroom B, and cameraInSuite() is what
-    // turns the world position back into a room. A sentence that named the wrong room
-    // would be worse than none.
-    expect(said[5]).toContain("Bedroom B");
+    // stages.ts positions that shot, and cameraInSuite() is what turns the world position
+    // back into a room. A sentence that named the wrong room would be worse than none.
+    //
+    // THE ROOM MOVED, AND THE MACHINERY DID NOT. This asserted "Bedroom B" until P7 routed
+    // the stage 4 -> 5 path through the doorway and stood the final shot in the hall, which
+    // is what stages.ts always wanted and could not have: a straight blend from bedroom B
+    // to the hall passes through the partition between them, and it clears at the shipped
+    // params only by luck -- measured worst clearance +0.264 ft, and -0.354 ft at
+    // hallWidth = 3, which is the panel's own slider minimum. So this is a stale
+    // expectation rather than a regression, and the fact that it failed is the gate working.
+    expect(said[5]).toContain("Hall");
     console.log(said.map((s, i) => `stage ${i}: ${s}`).join("\n"));
   });
 
