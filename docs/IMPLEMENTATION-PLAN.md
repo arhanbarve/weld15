@@ -407,15 +407,43 @@ suite without pasting the run.
 
 ## 9. Performance budget
 
-| Stage | Draw calls | Triangles | Target |
-|---|---|---|---|
-| Globe | ≤ 4 | ≤ 20k | 60 fps |
-| Campus | ≤ 10 | ≤ 120k | 60 fps desktop / 30 mobile |
-| Weld exterior | ≤ 8 | ≤ 40k | 60 fps |
-| Suite | ≤ 25 | ≤ 80k | 60 fps desktop / 30 mobile |
+**These are SCENE draw calls, excluding the bloom composer's 17 fullscreen passes.** Stated
+because the omission caused the same misreading three times: `WeldExterior.tsx`'s header and
+`docs/phases/P4-P5.md`'s verification table both recorded a mesh count as a call count, and both
+were corrected from measurement. The composer's share is exactly **17 calls and 17 triangles** at
+1280 × 720 — one fullscreen triangle per pass — measured at ten points by comparing full motion
+against `prefers-reduced-motion: reduce`, where it is not mounted. So a frame reading 38 calls at
+stage 5 is 21 of scene against the 25 below.
+
+| Stage | Draw calls | Triangles | Target | Measured | Verdict |
+|---|---|---|---|---|---|
+| Globe | ≤ 4 | ≤ 20k | 60 fps | **3** / 3,328 | pass |
+| Campus | ≤ 10 | ≤ 120k | 60 fps desktop / 30 mobile | **9** / 16,882 | pass, the tightest row |
+| Weld exterior | ≤ 8 | ≤ 40k | 60 fps | **4** / 416 | pass |
+| Suite | ≤ 25 | ≤ 80k | 60 fps desktop / 30 mobile | **21** / 1,452 | pass |
 
 Merged geometry for campus masses and edges. Instanced furniture. DPR capped at 2. Canvas mounted
-`ssr: false`. Globe code-split so it is not in the critical path once you are past it.
+`ssr: false`.
+
+**The globe is deliberately NOT code-split, against this plan's own instruction**, and the
+measurement is in `docs/phases/P7-P8.md`'s Performance section: the whole globe is 716 B of a
+1,252,534 B scene chunk, because it is three spheres and every three class it touches stays
+behind. A lazy boundary moves 432 B and ships 1,173 B *more*, by forcing `geo/frames` into its
+own chunk the main bundle fetches immediately anyway. It also breaks the descent — with the
+chunk delayed 2,500 ms, stage 0 reads 0.0% coverage and one distinct colour for two seconds,
+failing `journey.spec.ts`'s own gate on every frame in that window. Stage 0 *is* first paint, so
+"not in the critical path once you are past it" is a contradiction for this one component.
+
+**Frame time is recorded and never gated**, and as of P8 there is finally a real number: Apple
+M5 Pro, macOS 26.5.2, headed Chrome 150 against a production build, ANGLE Metal renderer — 2.5
+to 2.8 ms median across all six stages at DPR 2, p95 never above 4.0. Headless Chromium runs
+SwiftShader at 62–79 ms, about 25× the hardware cost, which is why every gate in the suite is on
+draw calls and triangles instead.
+
+The 60 fps targets above are therefore met with room to spare on this machine. Lighthouse
+performance is a separate question and is **81 against a target of 90** — the cost of shipping a
+WebGL engine, with 420 ms of total blocking time of which 322 ms is evaluating the scene chunk.
+`docs/phases/P7-P8.md` carries the breakdown.
 
 ---
 

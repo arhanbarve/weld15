@@ -55,11 +55,33 @@ test("merging holds: many triangles in few draw calls", async ({ page }) => {
     //
     // Gated on draw calls, NOT frame time: headless Chromium runs SwiftShader in
     // software, where bloom costs ~70ms against roughly 1-3ms on a real GPU. Frame
-    // time here is recorded for run-to-run comparison only, and P8 measures it on
-    // real hardware.
+    // time here is recorded for run-to-run comparison only, and P8 measured it on real
+    // hardware -- Apple M5 Pro, headed Chrome, ANGLE Metal: 2.5 to 2.8 ms median across
+    // every stage at DPR 2, against 62-79 ms here. Software costs about 25x.
+    //
+    // The 30 covers scene calls PLUS the bloom composer's 17 fullscreen passes, which is
+    // why it is not IMPLEMENTATION-PLAN section 9's 10 for the campus row. Section 9
+    // counts scene submissions; measured, the composer is exactly 17 calls, so stage 2's
+    // 26 here is 9 of scene. Three separate records in this project stated a scene budget
+    // as a frame budget before that was pinned down.
     expect(p.calls, `stage ${stage} draw calls: ${report.join(" | ")}`).toBeLessThanOrEqual(30);
     expect(p.triangles, `stage ${stage} lost its geometry`).toBeGreaterThan(10_000);
-    // 36 unmerged buildings would show up here as far more geometries.
+    /*
+     * 36 unmerged buildings would show up here as far more geometries.
+     *
+     * MIND WHAT THIS COUNTER IS. renderer.info.memory.geometries is CUMULATIVE OVER THE
+     * SESSION, not a property of the stage: measured, it reads 11 arriving at stage 5 on a
+     * fresh page and 20 arriving there through the full descent, and 13 to 18 while
+     * cycling the four cutaway modes -- all with calls, triangles and casters identical.
+     * So the bound below is only meaningful on the path THIS test walks, which is a fresh
+     * load and stages 1 to 3 with no cutaway cycling, where it measures 13.
+     *
+     * Kept rather than raised or dropped, because on that path it still catches the thing
+     * it was written for. But it is not the assertion that carries the merge claim -- the
+     * draw-call bound above is, and it is not path-dependent. A future test that reaches
+     * this line after more of the app has been exercised should expect a larger number and
+     * should not read a rise as a regression.
+     */
     expect(p.geometries, `stage ${stage} geometry count suggests the merge broke`).toBeLessThan(20);
   }
   console.log(report.join("\n"));
