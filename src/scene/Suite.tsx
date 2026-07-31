@@ -53,16 +53,12 @@ import { Furniture } from "./Furniture";
  * depth occludes whatever is drawn after it, so the suite sorted wrong against the
  * dissolving shell during the threshold.
  *
- * WHAT THE OPENING LIST GETS WRONG, AND WHY IT IS RENDERED ANYWAY
- * buildOpenings() centres each face window on its WALL BAND rather than on the
- * room it lights. The facade band is one 44 ft band shared by four rooms, so at the
- * defaults all four facade windows come back at offset 18 with width 8 -- the same
- * span, four times over. Rendering them literally means four coincident panes of a
- * transmissive material fighting for the same depth, so overlapping cuts of the same
- * kind are merged before anything is emitted. What is NOT done is moving them: the
- * exterior's window bays come from the same list, and an interior that quietly
- * disagrees with the facade is worse than an interior that is wrong in the same way.
- * The fix belongs in buildOpenings(); see the report.
+ * WHY OVERLAPPING CUTS ARE STILL MERGED, EVEN THOUGH THEY NO LONGER OVERLAP AT THE DEFAULTS
+ * buildOpenings() (walls.ts) centres each window on the ROOM it lights, not on the
+ * band it sits in -- a bug where all four facade windows landed at the same offset
+ * was fixed there. What remains here is the merge of overlapping cuts of the same
+ * kind before anything is emitted, kept because a slider can still bring two rooms'
+ * windows into contact on a shared band; at the defaults it has nothing to do.
  */
 
 /** Floor slab thickness, ft. Reads as a floor in the cutaway rather than as paper. */
