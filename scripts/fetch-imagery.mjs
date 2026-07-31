@@ -466,8 +466,19 @@ async function main() {
     frame: "site feet, x east, y north, origin at Weld Hall's centroid (src/geo/frames.ts)",
     levels,
   };
-  writeFileSync(join(OUT, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-  console.log(`\nwrote ${OUT}/manifest.json`);
+  // WRITTEN INTO src/data AND NOT INTO public, so it is IMPORTED rather than fetched.
+  //
+  // Two reasons, and the first is a claim this project already makes: MASTER.md:80 says the app
+  // works offline, and a manifest fetched at boot is a network request on the critical path that
+  // would have to succeed before any ground could be drawn. Bundled, it cannot fail. The second
+  // is that a bundled JSON import is type-checked at the point of use, so a level renamed here
+  // is a tsc error in imagery.ts rather than a runtime undefined.
+  //
+  // Only ONE copy exists. public/imagery holds the plates; src/data holds the description of
+  // them.
+  const dest = "src/data/imagery-manifest.json";
+  writeFileSync(dest, `${JSON.stringify(manifest, null, 2)}\n`);
+  console.log(`\nwrote ${dest}`);
 }
 
 await main();

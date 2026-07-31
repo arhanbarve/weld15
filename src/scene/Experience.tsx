@@ -10,6 +10,7 @@ import { FirstPerson } from "./FirstPerson";
 import { FlyDown } from "./FlyDown";
 import { Lighting } from "./Lighting";
 import { Globe } from "./Globe";
+import { Ground } from "./Ground";
 import { Campus } from "./Campus";
 import { WeldExterior } from "./WeldExterior";
 import { Suite } from "./Suite";
@@ -128,6 +129,11 @@ export default function Experience() {
           <Perf />
 
           <Globe visible={vis.globe} />
+          {/* AFTER the globe and BEFORE the campus, which is the order they occlude in: the
+              globe is a depth-less backdrop behind everything, the ground is a real depth-tested
+              surface, and the massing stands on the ground. Mounted on the same stages as the
+              campus, because the ground and the buildings on it arrive together. */}
+          <Ground visible={vis.campus} />
           <Campus visible={vis.campus} highlightWeld={stage >= 2} />
           <WeldExterior visible={vis.weld} opacity={shell} />
           <Suite

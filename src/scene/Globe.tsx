@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { WELD_ORIGIN } from "@/geo/frames";
@@ -8,6 +8,7 @@ import { subsolarPoint } from "@/geo/solar";
 import { useStore } from "@/state/store";
 import { cambridgeInstant } from "./Lighting";
 import { layerOpacity } from "./altitude";
+import { levelUrl, loadTexture } from "./imagery";
 import { assertRigVisible, geoToSite, globeRig, weldBasis, type Vec3 } from "./globeRig";
 
 /**
@@ -84,7 +85,12 @@ const NIGHT = "#061426";
  */
 const SURFACE_VERT = /* glsl */ `
   varying vec3 vNormalSite;
+  varying vec2 vUv;
   void main() {
+    // SphereGeometry's own UVs, unmodified: u runs from the prime meridian and v from the south
+    // pole, which is exactly the layout of an equirectangular plate. That is why L0 is written
+    // 4096 x 2048 and not cropped -- see scripts/fetch-imagery.mjs.
+    vUv = uv;
     vNormalSite = normalize(mat3(modelMatrix) * normal);
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
@@ -95,11 +101,23 @@ const SURFACE_FRAG = /* glsl */ `
   uniform vec3 uDay;
   uniform vec3 uNight;
   uniform float uOpacity;
+  uniform sampler2D uMap;
+  uniform float uHasMap;
   varying vec3 vNormalSite;
+  varying vec2 vUv;
   void main() {
+    // uHasMap rather than a #define, so the Blue Marble arriving does not recompile the program
+    // mid-descent. The flat colour is what stage 0 shows on the very first frame, before any
+    // texture has loaded, and CanvasHost.tsx's header is the reason it must be something rather
+    // than nothing.
+    vec3 day = mix(uDay, texture2D(uMap, vUv).rgb, uHasMap);
+    // The night side is the same photograph crushed toward the void colour rather than a flat
+    // black, so coastlines stay faintly readable across the terminator the way they do from
+    // orbit at dusk.
+    vec3 night = mix(uNight, mix(uNight, day, 0.18), uHasMap);
     float l = dot(normalize(vNormalSite), normalize(uSun));
     float lit = smoothstep(-0.12, 0.25, l);
-    gl_FragColor = vec4(mix(uNight, uDay, lit), uOpacity);
+    gl_FragColor = vec4(mix(night, day, lit), uOpacity);
   }
 `;
 
@@ -237,6 +255,21 @@ export function Globe({ visible }: { visible: boolean }) {
   const marker = useMemo(markerDirection, []);
 
   /**
+   * The Blue Marble, loaded imperatively.
+   *
+   * NOT useTexture / useLoader, for the reason imagery.ts's header sets out at length: a
+   * suspending child of <Canvas> suspends the whole page back to "LOADING WELD 15", and stage 0
+   * IS first paint, so this is the single worst place in the app to suspend. Until it arrives the
+   * sphere is drawn in the flat DAY colour, which is what the grey-box shipped with.
+   */
+  const [day, setDay] = useState<THREE.Texture | null>(null);
+  useEffect(() => {
+    const url = levelUrl("L0");
+    if (!url) return;
+    return loadTexture(url, setDay);
+  }, []);
+
+  /**
    * The uniforms, built once each.
    *
    * Once, and held across renders, because a fresh uniforms object makes three recompile the
@@ -253,6 +286,8 @@ export function Globe({ visible }: { visible: boolean }) {
       uDay: { value: new THREE.Color(DAY) },
       uNight: { value: new THREE.Color(NIGHT) },
       uOpacity: { value: 1 },
+      uMap: { value: null as THREE.Texture | null },
+      uHasMap: { value: 0 },
     }),
     [],
   );
@@ -294,8 +329,16 @@ export function Globe({ visible }: { visible: boolean }) {
     g.scale.setScalar(rig.radius);
 
     if (surface.current) {
-      surface.current.uniforms.uOpacity!.value = o.globe;
-      (surface.current.uniforms.uSun!.value as THREE.Vector3).copy(sunSite);
+      const u = surface.current.uniforms;
+      u.uOpacity!.value = o.globe;
+      (u.uSun!.value as THREE.Vector3).copy(sunSite);
+      // THROUGH THE MATERIAL'S OWN UNIFORMS, for the reason Ground.tsx records in full: mutating
+      // the memoised object handed to <shaderMaterial uniforms={...}> writes to a copy, the
+      // sampler stays unbound, and nothing is drawn without an error being raised.
+      if (day && u.uMap!.value !== day) {
+        u.uMap!.value = day;
+        u.uHasMap!.value = 1;
+      }
     }
     if (rim.current) rim.current.uniforms.uOpacity!.value = 0.55 * o.globe;
 
