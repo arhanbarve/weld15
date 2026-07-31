@@ -66,6 +66,50 @@ type Perf = {
 const perf = (page: Page): Promise<Perf> =>
   page.evaluate(() => (window as unknown as { __perf: Perf }).__perf);
 
+/**
+ * `__perf`, once it has stopped changing. Every COUNTING assertion reads this, not `perf`.
+ *
+ * WHAT THIS FIXES, MEASURED. The counting tests took one sample after a fixed 2400 ms
+ * settle, and under full-suite load that sample could land on a frame that had not
+ * rendered: `triangles: 1`, or stage 5 reading 1 draw call where it draws 38. The composer
+ * gate failed that way in a full run while passing in isolation with an exact 17-call
+ * delta at both stages. Median frame time went from 62-79 ms to 205-300 ms under the same
+ * load, so 2400 ms stopped being enough frames to settle in -- the wait was denominated in
+ * milliseconds and what it needed was FRAMES.
+ *
+ * So this waits for the thing the assertion depends on instead of for the clock: two
+ * consecutive reads agreeing on both counts, with a floor that rejects the unrendered
+ * frame outright. It is the same move as waiting on `window.__weld` rather than sleeping,
+ * which is how every other spec in this suite avoids exactly this class of flake.
+ *
+ * NOT a retry of the assertion. The bounds are untouched and a genuinely over-budget frame
+ * still fails: this only refuses to answer with a frame that was never drawn. A draw-call
+ * budget that tolerates a frame reading 1 triangle is not a budget, and loosening one was
+ * the alternative to this.
+ */
+async function settled(page: Page, what: string): Promise<Perf> {
+  let prev: Perf | null = null;
+  for (let i = 0; i < 60; i++) {
+    const p = await perf(page);
+    if (
+      p &&
+      p.triangles > 100 &&
+      p.calls > 0 &&
+      prev &&
+      prev.calls === p.calls &&
+      prev.triangles === p.triangles
+    ) {
+      return p;
+    }
+    prev = p ?? null;
+    await page.waitForTimeout(150);
+  }
+  throw new Error(
+    `${what}: __perf never settled over 9 s. Last read: ${JSON.stringify(prev)}. ` +
+      `A read of 1 triangle or 1 call means the frame had not rendered.`,
+  );
+}
+
 async function openAt(page: Page, stage: number) {
   await page.goto("/");
   await expect(page.locator("canvas")).toBeVisible({ timeout: 30_000 });
@@ -123,7 +167,7 @@ test("§9's budget holds, on the quantity §9 is counting", async ({ browser }) 
   try {
     for (const b of BUDGET) {
       await openAt(page, b.stage);
-      const p = await perf(page);
+      const p = await settled(page, `${b.row} (stage ${b.stage})`);
       report.push(`${b.row} (stage ${b.stage}): ${p.calls} calls / ${p.triangles} tris`);
       expect(
         p.calls,
@@ -168,8 +212,8 @@ test("the composer is the whole difference between the frame and the budget", as
     for (const stage of [2, 5]) {
       await openAt(fullPage, stage);
       await openAt(cutPage, stage);
-      const a = await perf(fullPage);
-      const b = await perf(cutPage);
+      const a = await settled(fullPage, `stage ${stage} full motion`);
+      const b = await settled(cutPage, `stage ${stage} reduced motion`);
       report.push(`stage ${stage}: ${a.calls} -> ${b.calls} calls, ${a.triangles} -> ${b.triangles} tris`);
       expect(
         a.calls - b.calls,
