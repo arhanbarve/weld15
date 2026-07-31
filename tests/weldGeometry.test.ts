@@ -1286,4 +1286,72 @@ describe("the cutaway opens the shell", () => {
       expect(sameParts(new Set([1, 2]), new Set([3, 4]))).toBe(false);
     });
   });
+  /*
+   * WHICH PARTS OF THE SHELL THE PARAMS ACTUALLY REACH, measured rather than assumed.
+   *
+   * Threshold.tsx builds its sweep surface from buildWeldCut() and rides only `walls` and
+   * `roof`, and both its header and WeldExterior's assert in prose that those two "take no
+   * params at all". That claim is load-bearing: it is the reason Threshold can leave
+   * `params` out of the memo that builds the surface, and so the reason a dimension slider
+   * does not rebuild and re-merge the shell mid-crossing for an identical result.
+   *
+   * A comment is not evidence, so this asserts it on the geometry: two params sets that
+   * differ in nine dimensions, and walls and roof come out byte-identical in every
+   * attribute and in the index, while `bays` -- which is derived from the openings, which
+   * are derived from the rooms -- does not. If someone later makes the shell depend on a
+   * dimension, this fails and points at the memo that would then be wrong.
+   */
+  describe("the params reach the bays and nothing else", () => {
+    const OTHER: SuiteParams = {
+      ...DEFAULT_PARAMS,
+      sectionLength: DEFAULT_PARAMS.sectionLength - 3,
+      commonDeep: DEFAULT_PARAMS.commonDeep + 1.5,
+      commonAlong: DEFAULT_PARAMS.commonAlong + 1,
+      bedDepth: DEFAULT_PARAMS.bedDepth - 1,
+      bedAAlong: DEFAULT_PARAMS.bedAAlong + 0.5,
+      bedBAlong: DEFAULT_PARAMS.bedBAlong + 0.5,
+      hallWidth: DEFAULT_PARAMS.hallWidth + 1,
+      bathDeep: DEFAULT_PARAMS.bathDeep + 0.5,
+      legDepth: DEFAULT_PARAMS.legDepth + 1,
+      ceiling: DEFAULT_PARAMS.ceiling + 0.5,
+    };
+
+    /** Every attribute and the index, as plain arrays, so two builds can be compared. */
+    const bytesOf = (g: THREE.BufferGeometry | null) => {
+      if (!g) return null;
+      const out: Record<string, number[]> = {};
+      for (const [name, attr] of Object.entries(g.attributes)) {
+        out[name] = Array.from((attr as THREE.BufferAttribute).array as ArrayLike<number>);
+      }
+      out.index = g.index ? Array.from(g.index.array as ArrayLike<number>) : [];
+      return out;
+    };
+
+    it("gives walls and roof that do not move when ten dimensions change", () => {
+      /*
+       * Non-vacuity first, and it earns its place: written with a `bedAlong` override --
+       * which is not a key, the suite has bedAAlong and bedBAlong -- this counted 7 where
+       * 9 was claimed and pointed straight at the typo. A comparison of two params sets
+       * proves nothing until the two sets are known to differ.
+       */
+      const differing = (Object.keys(DEFAULT_PARAMS) as (keyof SuiteParams)[]).filter(
+        (k) => DEFAULT_PARAMS[k] !== OTHER[k],
+      );
+      expect(differing.length, `differing: ${differing.join(", ")}`).toBe(10);
+
+      const a = buildWeldCut(DEFAULT_PARAMS, TOWER_DEFAULTS, NO_CUT);
+      const b = buildWeldCut(OTHER, TOWER_DEFAULTS, NO_CUT);
+      expect(bytesOf(a.walls)).toEqual(bytesOf(b.walls));
+      expect(bytesOf(a.roof)).toEqual(bytesOf(b.roof));
+      expect(bytesOf(a.towers)).toEqual(bytesOf(b.towers));
+      for (const g of [...Object.values(a), ...Object.values(b)]) g?.dispose();
+    });
+
+    it("gives bays that DO move, so the comparison above is not measuring nothing", () => {
+      const a = buildWeldCut(DEFAULT_PARAMS, TOWER_DEFAULTS, NO_CUT);
+      const b = buildWeldCut(OTHER, TOWER_DEFAULTS, NO_CUT);
+      expect(bytesOf(a.bays)).not.toEqual(bytesOf(b.bays));
+      for (const g of [...Object.values(a), ...Object.values(b)]) g?.dispose();
+    });
+  });
 });

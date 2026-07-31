@@ -75,9 +75,22 @@
  * is derived from are WeldExterior's, which are a defaulted prop there and the store field
  * here; they agree on the current call site and would not for a caller that passed its own.
  * The section plane is derived from them, so that was a latent defect and not a style
- * difference. What params still reaches from here goes to buildWeldCut() for the bays, which
- * are thrown away: shellGeometry() and gableRoof(), the two parts the sweep actually rides,
- * take no params at all, so the surface cannot disagree with the shell about anything.
+ * difference.
+ *
+ * AND THE PARAMS ARE GONE FROM HERE ENTIRELY, which was the last of it. They only ever
+ * reached buildWeldCut() to build the bays, and the bays are thrown away: the two parts the
+ * sweep actually rides are shellGeometry() and gableRoof(), and both are marched from
+ * weld.json's ring rather than from any dimension. That was asserted in prose here and in
+ * WeldExterior's header, which is not evidence, so it is now measured in
+ * tests/weldGeometry.test.ts -- "the params reach the bays and nothing else" builds the
+ * shell twice across ten differing dimensions and compares every attribute and the index:
+ * walls, roof and towers come out byte-identical, and bays do not, so the comparison is not
+ * measuring nothing. That test is what makes the store subscription safe to delete, and it
+ * is what will fail if someone later makes the shell depend on a dimension.
+ *
+ * The saving is a real one rather than a tidy-up: with params in the memo's dependencies,
+ * every drag of any of the fifteen dimension sliders rebuilt and re-merged the whole shell
+ * mid-crossing to produce the identical geometry.
  *
  * The merge is what keeps it to ONE draw call. walls and roof carry the same two
  * attributes (position and normal, both Float32, both indexed), which is what
@@ -122,7 +135,7 @@ import * as THREE from "three";
 import { mergeBufferGeometries } from "three-stdlib";
 import { useStore } from "@/state/store";
 import { WELD } from "@/geo/place";
-import { type SuiteParams } from "@/geo/rooms";
+import { DEFAULT_PARAMS } from "@/geo/rooms";
 import { SCAN } from "./materials";
 import {
   buildWeldCut,
@@ -316,8 +329,17 @@ function scanlineMaterial(u: LineUniforms): THREE.MeshBasicMaterial {
  * part of the sweep, so that part is built and thrown away with the bays. P6's slider can
  * move them without invalidating anything here.
  */
-function scanlineSurface(params: SuiteParams, cut: WeldCut): THREE.BufferGeometry | null {
-  const masses = buildWeldCut(params, TOWER_DEFAULTS, cut);
+/**
+ * The surface the line is drawn on: the shell's walls and roof, merged.
+ *
+ * NO PARAMS ARGUMENT, and DEFAULT_PARAMS is not a stand-in for the live ones -- it is the
+ * argument buildWeldCut() requires for a part this function discards. The header explains
+ * at length and tests/weldGeometry.test.ts proves it: walls, roof and towers are
+ * byte-identical across ten changed dimensions, and only the bays move. Passing the live
+ * params instead would be identical output at the cost of putting them in the caller's memo.
+ */
+function scanlineSurface(cut: WeldCut): THREE.BufferGeometry | null {
+  const masses = buildWeldCut(DEFAULT_PARAMS, TOWER_DEFAULTS, cut);
   const ride = [masses.walls, masses.roof].filter((g): g is THREE.BufferGeometry => g !== null);
   const merged = ride.length > 0 ? mergeBufferGeometries(ride, false) : null;
   if (ride.length > 0 && !merged) {
@@ -340,7 +362,6 @@ function scanlineSurface(params: SuiteParams, cut: WeldCut): THREE.BufferGeometr
  */
 export function Threshold({ progress, cut }: { progress: number; cut: WeldCut }) {
   const reduced = useStore((s) => s.reducedMotion);
-  const params = useStore((s) => s.params);
 
   /**
    * Whether the line is drawn at all, and therefore whether its surface is worth having.
@@ -369,8 +390,8 @@ export function Threshold({ progress, cut }: { progress: number; cut: WeldCut })
   // cache used to avoid -- see the header. WeldExterior's own parts are handled the same
   // way, and for the same reason: these are this component's buffers and nobody else's.
   const geometry = useMemo(
-    () => (drawn ? scanlineSurface(params, cut) : null),
-    [drawn, params, cut],
+    () => (drawn ? scanlineSurface(cut) : null),
+    [drawn, cut],
   );
 
   useEffect(() => {
