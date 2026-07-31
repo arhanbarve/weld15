@@ -9,6 +9,7 @@ import {
   REDUCED_CUT,
   SHELL_GONE,
 } from "@/scene/stages";
+import { orbitKeyframe, orbitOf, MASS_RADIUS, MASSING_CENTER, transitPose } from "@/scene/orbit";
 import { pointInPolygon } from "@/geo/collide";
 import { fromThree } from "@/geo/frames";
 import { cameraInSuite } from "@/scene/cutaway";
@@ -17,6 +18,7 @@ import { HUB } from "@/scene/route";
 import { floorLevel } from "@/geo/place";
 import weld from "@/data/weld.json";
 import type { StageId } from "@/state/store";
+import { paramsSweep } from "./journey.test";
 
 const kf = keyframes(DEFAULT_PARAMS);
 const ring = weld.rings[0] as number[][];
@@ -114,6 +116,94 @@ describe("blend", () => {
     const mid = blend(kf[3], kf[4], 0.5);
     for (let i = 0; i < 3; i++) {
       expect(mid.position[i]).toBeCloseTo((kf[3].position[i]! + kf[4].position[i]!) / 2, 6);
+    }
+  });
+});
+
+/**
+ * P10's one real geometric gap in the descent: stage 3's pose is `kf[3]` (or wherever the
+ * viewer orbited to) and stage 4's path starts at `kf[4]`, 124 ft outside the north gable.
+ * Nothing used to interpolate between them. CameraRig now reads
+ * `transitPose(orbitKeyframe(kf[3], orbit ?? orbitOf(kf[3])), kf[4], MASSING_CENTER, t)`
+ * for stage 3 above t = 0, so this is asserted against transitPose() itself, the same way
+ * the crossing above is asserted against blend().
+ *
+ * transitPose interpolates in SPHERICAL coordinates about MASSING_CENTER rather than in
+ * cartesian space -- a first attempt at this step used a raw blend() and it dipped to 108
+ * ft against MASS_RADIUS's 114.9, even though both ends sit at 195-251 ft from
+ * MASSING_CENTER, because a chord between two points outside a sphere is not guaranteed to
+ * stay outside it. Lerping the radius directly, about the sphere's own centre, does not
+ * have that failure mode: see orbit.ts's docblock on transitPose for why.
+ */
+describe("the stage 3 -> 4 transit", () => {
+  // Component-wise, not toEqual: floating-point round-trips through orbitOf/orbitKeyframe
+  // can differ from the input by a float ulp -- the same reason the "blend" describe above
+  // uses toBeCloseTo rather than toEqual.
+  const sameAs = (got: readonly number[], want: readonly number[]) => {
+    for (let i = 0; i < 3; i++) expect(got[i]).toBeCloseTo(want[i]!, 9);
+  };
+
+  // A straight line between two points outside a sphere is not guaranteed to stay outside
+  // it -- kf[3]'s orbit sits at radius ~251 ft from MASSING_CENTER against a minRadius of
+  // 114.9, and kf[4] sits at ~195 ft -- so this is a real geometric claim about this
+  // specific segment, not a tautology. keepOutsideMassing is the function that used to
+  // enforce clearance on every eased frame, and CameraRig.tsx now switches it off above
+  // t = 0 for exactly this transit, so this test is what stands in its place.
+  const clearsMassing = (base: ReturnType<typeof orbitKeyframe>, to: ReturnType<typeof orbitKeyframe>) => {
+    for (let t = 0; t <= 1.0001; t += 0.001) {
+      const p = transitPose(base, to, MASSING_CENTER, Math.min(1, t)).position;
+      const r = Math.hypot(
+        p[0]! - MASSING_CENTER[0],
+        p[1]! - MASSING_CENTER[1],
+        p[2]! - MASSING_CENTER[2],
+      );
+      expect(r, `t=${t.toFixed(3)}`).toBeGreaterThanOrEqual(MASS_RADIUS);
+    }
+  };
+
+  it("starts at kf[3]'s orbit pose exactly", () => {
+    const base = orbitKeyframe(kf[3], orbitOf(kf[3]));
+    const start = transitPose(base, kf[4], MASSING_CENTER, 0);
+    sameAs(start.position, base.position);
+    sameAs(start.target, base.target);
+    expect(start.fov).toBeCloseTo(base.fov, 9);
+  });
+
+  it("ends at kf[4], the first stop of stage 4's own path, to 1e-9", () => {
+    const base = orbitKeyframe(kf[3], orbitOf(kf[3]));
+    const end = transitPose(base, kf[4], MASSING_CENTER, 1);
+    sameAs(end.position, kf[4].position);
+    sameAs(end.target, kf[4].target);
+    expect(end.fov).toBeCloseTo(kf[4].fov, 9);
+  });
+
+  it("clears the massing for the whole segment", () => {
+    clearsMassing(orbitKeyframe(kf[3], orbitOf(kf[3])), kf[4]);
+  });
+
+  it("holds across a sweep of params sets", () => {
+    for (const [i, params] of paramsSweep().entries()) {
+      const k = keyframes(params);
+      const base = orbitKeyframe(k[3], orbitOf(k[3]));
+      const start = transitPose(base, k[4], MASSING_CENTER, 0);
+      sameAs(start.position, base.position);
+      sameAs(start.target, base.target);
+      expect(start.fov, `set ${i}`).toBeCloseTo(base.fov, 9);
+
+      const end = transitPose(base, k[4], MASSING_CENTER, 1);
+      sameAs(end.position, k[4].position);
+      sameAs(end.target, k[4].target);
+      expect(end.fov, `set ${i}`).toBeCloseTo(k[4].fov, 9);
+
+      for (let t = 0; t <= 1.0001; t += 0.001) {
+        const p = transitPose(base, k[4], MASSING_CENTER, Math.min(1, t)).position;
+        const r = Math.hypot(
+          p[0]! - MASSING_CENTER[0],
+          p[1]! - MASSING_CENTER[1],
+          p[2]! - MASSING_CENTER[2],
+        );
+        expect(r, `set ${i}, t=${t.toFixed(3)}`).toBeGreaterThanOrEqual(MASS_RADIUS);
+      }
     }
   });
 });

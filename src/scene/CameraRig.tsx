@@ -4,9 +4,9 @@ import { useEffect, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { LAST_STAGE, useStore, type StageId } from "@/state/store";
-import { keyframes, cameraKeyframe } from "./stages";
+import { keyframes, cameraKeyframe, REDUCED_CUT } from "./stages";
 import { firstPersonPose } from "./FirstPerson";
-import { clampOrbit, orbitKeyframe, orbitOf, STAGE3_CLAMP } from "./orbit";
+import { clampOrbit, orbitKeyframe, orbitOf, STAGE3_CLAMP, transitPose, MASSING_CENTER } from "./orbit";
 import { nearFar } from "./altitude";
 import { toJourney } from "./journey";
 
@@ -306,11 +306,25 @@ export function CameraRig() {
      * Experience.tsx -- so what is read here was written this frame, not last.
      */
     const walker = stage === LAST_STAGE ? useStore.getState().firstPerson : null;
+    // Reduced motion for the stage 3 -> 4 transit below: cameraKeyframe's own reduced
+    // branch does not fire for stage 3, since stage 3 has no path of its own to jump
+    // within. This gives the transit the same jump-at-midpoint shape stage 4's crossing
+    // already has, so under reduced motion stage 3 is either exactly the orbit or exactly
+    // kf[4] and nothing geometrically between.
+    const transit = reduced ? (t < REDUCED_CUT ? 0 : 1) : t;
     const want =
       walker !== null
         ? { ...firstPersonPose(walker, params), fov: kf[LAST_STAGE].fov }
         : stage === 3
-          ? orbitKeyframe(kf[3], orbit ?? orbitOf(kf[3]))
+          ? // Stage 3 is a PLACE at t = 0 and a TRANSIT above it. The transit starts from
+            // whatever the viewer orbited to rather than from a fixed pose, so scrubbing on
+            // from stage 3 leaves from where they were standing; at t = 1 it is kf[4]
+            // exactly, the first stop of stage 4's own path, so the next boundary is not a
+            // cut either. Interpolated in SPHERICAL coordinates about MASSING_CENTER
+            // (orbit.ts's transitPose), not cartesian: a straight position blend dipped
+            // inside MASS_RADIUS at t ~= 0.58 even though both ends clear it, since a chord
+            // between two points outside a sphere can still cut through the middle.
+            transitPose(orbitKeyframe(kf[3], orbit ?? orbitOf(kf[3])), kf[4], MASSING_CENTER, transit)
           : cameraKeyframe(kf, stage, t, reduced);
 
     const wantPos = new THREE.Vector3(...want.position);
@@ -340,7 +354,11 @@ export function CameraRig() {
         camera.fov += (want.fov - camera.fov) * k;
         camera.updateProjectionMatrix();
       }
-      if (stage === 3) keepOutsideMassing(camera.position, target.current);
+      // Only while stage 3 IS a place, i.e. t === 0. Above that the pose is the transit to
+      // kf[4], which deliberately leaves STAGE3_CLAMP's envelope on its way to a stand-off
+      // 124 ft out, and forcing the radius back inside it would pin the camera to the orbit
+      // sphere and stall the move.
+      if (stage === 3 && t === 0) keepOutsideMassing(camera.position, target.current);
     }
 
     camera.lookAt(target.current);

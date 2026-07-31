@@ -76,7 +76,7 @@ describe("monotone in altitude", () => {
  * committed params-sweep fixture to reuse, so this reuses that same generator at 18
  * samples rather than inventing an unrelated one.
  */
-function paramsSweep(): SuiteParams[] {
+export function paramsSweep(): SuiteParams[] {
   let seed = 20260731;
   const rnd = () => {
     seed = (seed * 1103515245 + 12345) & 0x7fffffff;
