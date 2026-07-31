@@ -1,0 +1,21 @@
+# What must not be uploaded to Vercel.
+#
+# `vercel deploy` uploads the WORKING DIRECTORY, not a git commit, and it does not skip a
+# path merely because git is not tracking it. So anything large or confusing that lives
+# untracked beside the app has to be named here.
+#
+# .claude/ holds agent worktrees. One of them measured 591 MB, with its own node_modules,
+# its own package.json and its own next.config.ts -- a second, nested Next project inside
+# the upload. Two separate problems: the upload size, and a nested config that a build's
+# file scanning has no reason to handle gracefully. Neither is worth finding out about
+# during a production deploy.
+#
+# Kept in .vercelignore rather than .gitignore on purpose. This is a statement about what
+# gets deployed, and .gitignore is shared with other branches whose owners may have their
+# own intentions for these paths. Ignoring a worktree in git as well is defensible and is
+# not this file's decision to make.
+.claude/
+
+# Local scratch and test output. None of it is served: the app is a fully static export.
+test-results/
+playwright-report/
