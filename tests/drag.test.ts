@@ -394,12 +394,19 @@ describe("blocks-door", () => {
     if (!back.ok) return;
     expect([back.piece.u, back.snapped]).toEqual([11.5, "grid"]);
 
-    // WHAT THIS IS NOT: a claim about every suite the sliders can build. Measured over
-    // the 30-suite sweep at the bottom of this file, 82 of those 870 designed pieces
-    // cannot be re-dropped, every one of them a chair -- 66 snapping into the desk they
-    // are centred on and 16 into a landing. Both are the 0.5 ft grid meeting walls a
-    // slider has taken off it, not the door rule, and the arrangement anybody has
-    // actually looked at is this one.
+    // THIS USED TO BE A CLAIM ABOUT THIS SUITE ALONE, and it is now a claim about every
+    // suite the sliders can build -- see "puts every designed piece back where it
+    // stands" in the sweep at the bottom of this file, which is where the rule is
+    // asserted and this is just its default case.
+    //
+    // What it recorded before, kept because it is what the sweep now forbids: 82 of the
+    // 870 designed pieces over that sweep could not be re-dropped, every one of them a
+    // chair -- 66 snapping into the desk they are centred on and 16 into a landing --
+    // and 658 of 6960 over tests/furniture.test.ts's 240-set sweep, chairs and dressers.
+    // Both are the 0.5 ft grid meeting walls a slider has taken off it rather than the
+    // door rule, and filing that as "the arrangement anybody has actually looked at is
+    // this one" was the mistake: a slider is the feature, so every arrangement it
+    // reaches is one somebody will look at.
   });
 
   it("lets a piece standing in a landing move clear of it", () => {
@@ -1100,6 +1107,111 @@ describe("property sweep over randomised suites and targets", () => {
     for (const k of ["grid", "wall", "none"] as const) {
       expect(tally[k], `nothing snapped to ${k}`).toBeGreaterThan(5);
     }
+  });
+
+  /**
+   * THE ROUND TRIP: pick a piece up, put it down without moving the pointer, and the
+   * answer must be yes. For every piece of every arrangement layout() emits, not just
+   * the default one.
+   *
+   * WHY IT IS A PROPERTY OVER RANDOMISED PARAMETERS AND NOT A SUITE OF CASES
+   *   The whole point of a parametric fit-out is that the sliders move the walls, and
+   *   the failure is a quarter-foot one: drag.ts judges the position it is HANDED, and a
+   *   re-drop hands it the piece's own anchor SNAPPED onto the 0.5 ft grid, so a piece
+   *   with under GRID / 2 of margin on an off-grid anchor is legal where it stands and
+   *   refused where it stands. Every room corner in the DEFAULT suite is on the grid --
+   *   tests/collide.test.ts asserts that -- so at the defaults snapToGrid() is very
+   *   nearly the identity and the defect barely shows: it cost exactly one piece, the
+   *   sofa, and the test above pins it. Move a wall a third of a foot and it shows
+   *   everywhere. A default-only assertion is therefore the one that CANNOT catch this,
+   *   which is why the numbers below were measured over sweeps and not over the suite
+   *   anybody looked at.
+   *
+   * BOTH GENERATORS, DELIBERATELY
+   *   The first 60 sets keep the section closed, so the arrangement is the designed one
+   *   and what is under test is furniture.ts's recipes -- gridUp() and gridDown() there.
+   *   The last 120 jitter the section length on its own, which is what a slider actually
+   *   does, so bedroom B is sometimes far too small and pieces are rescued onto the grid
+   *   all over the suite. That half is the harder one and it is the half no recipe can
+   *   answer for: a rescued piece stands where no recipe chose it, so only
+   *   furniture.ts's redroppable() gate covers it. Measured, dropping the gate and
+   *   keeping the recipes leaves 52 dressers failing over tests/furniture.test.ts's
+   *   240-set sweep and 71 pieces over its 160-set off-closure one.
+   *
+   * WHAT IS ASSERTED IS ACCEPTANCE, NOT STILLNESS
+   *   A re-drop is allowed to move a piece; it is not allowed to refuse one. Ten of the
+   *   29 default anchors are off the grid for reasons no fix should touch -- a chair
+   *   centred on its 4 ft desk stands at u 11.25 -- and shift a quarter foot when put
+   *   back. That is the UI's own snapping. The count below is the non-vacuity that
+   *   matters most here: if every anchor were on the grid this property would be a
+   *   statement about snapToGrid() being the identity and would hold however broken the
+   *   recipes were.
+   */
+  it("puts every designed piece back where it stands, over 180 randomised suites", () => {
+    const rnd = makeRnd(20260731);
+    const stuck: string[] = [];
+    let pieces = 0;
+    let offGrid = 0;
+    let shifted = 0;
+    let degraded = 0;
+    const facades = new Set<string>();
+
+    for (let i = 0; i < 180; i++) {
+      const p = plausible(rnd);
+      if (i >= 60) {
+        // Off closure, so bedroom B gets whatever the section has left. Floored the
+        // same way tests/furniture.test.ts floors it, because a negative-width rect is
+        // a buildSuite() input error rather than something layout() survives.
+        const upToBedB = p.commonAlong + p.bedAAlong + p.bathAlong + 3 * p.partition;
+        p.sectionLength = Math.max(upToBedB + 2, 44 + (rnd() * 2 - 1) * 6);
+      }
+      const s = buildSuite(p);
+      // If this trips, the generator is wrong, not the drag maths.
+      expect(findOverlaps(s.rooms), `suite ${i} setup`).toEqual([]);
+      const built = buildWalls(s);
+      const ps = layout(s);
+      const c: DragCtx = { suite: s, pieces: ps, openings: built.openings };
+      facades.add(s.params.facade);
+      if (ps.length < 29) degraded++;
+
+      for (const q of ps) {
+        pieces++;
+        if (!onGrid(q.u) || !onGrid(q.v)) offGrid++;
+        const r = tryMove(q, { u: q.u, v: q.v }, c);
+        if (!r.ok) {
+          // The id, the verdict and what it hit, so a failure names the piece and the
+          // neighbour rather than reporting a count. This is the assertion.
+          stuck.push(`suite ${i} ${q.id} ${r.reason} against ${r.against.join(" ")}`);
+          continue;
+        }
+        if (r.snapped !== "none") shifted++;
+      }
+    }
+
+    expect(stuck).toEqual([]);
+    // Non-vacuity, in the order it matters. Measured at this seed: 5146 pieces over the
+    // 180 suites, 4903 of them on an anchor off the grid, 5116 moved by the re-drop, and
+    // 21 of the 120 off-closure arrangements degraded.
+    //
+    // The middle two are close and not equal, and the 213 between them is the sweep
+    // earning its keep: those are pieces whose anchor IS on the grid and which the
+    // re-drop moved anyway, because snapToWalls() runs second and pulled them flush
+    // against a wall a slider had taken off the grid. So the property is not just about
+    // snapToGrid() -- it covers the composition drag.ts's place() actually applies, which
+    // is the whole reason furniture.ts's redroppable() applies the same two calls in the
+    // same order rather than rounding to the grid and calling it done.
+    expect(pieces).toBeGreaterThan(5000);
+    expect(offGrid, "every anchor on the grid: the property is vacuous").toBeGreaterThan(4000);
+    expect(shifted, "no re-drop moved anything: the snapping is untested here").toBeGreaterThan(
+      4000,
+    );
+    expect(shifted - offGrid, "no on-grid anchor was moved: wall snap is untested").toBeGreaterThan(
+      50,
+    );
+    // Or the second half of the sweep is testing the recipes over again rather than the
+    // rescue scan, which is the half the gate exists for.
+    expect(degraded, "nothing degraded: the rescue scan is untested").toBeGreaterThan(10);
+    expect(facades).toEqual(new Set(["east", "west"]));
   });
 });
 

@@ -13,6 +13,8 @@ import {
   footprintOf,
   overlaps,
   placeIsLegal,
+  snapToGrid,
+  snapToWalls,
   type Box,
 } from "@/geo/collide";
 import { buildWalls, type Opening, type Wall } from "@/geo/walls";
@@ -318,6 +320,15 @@ describe("layout at the defaults", () => {
     // stands exactly ON d3's boundary and is safe only by its grid alignment, and the
     // four bedroom chairs are off the grid and safe only by their 1.25 ft of clearance.
     // The sofa used to satisfy neither, which is the defect commonSlots() closed.
+    //
+    // WHAT IT IS NOT SUFFICIENT FOR, and this is worth knowing here rather than only
+    // where it is fixed: the disjunction is about LANDINGS, and a snap can carry a
+    // piece into the FURNITURE beside it just as easily. It did -- the bedroom chair
+    // is flush against its own desk, so it has no margin at all on that axis, and
+    // once a slider takes a bedroom corner off the grid the snap puts it inside the
+    // desk. This test cannot see that and passed throughout. "keeps every piece
+    // re-droppable under collide.ts's snapping" at the bottom of this file is the
+    // assertion that can, over randomised parameters rather than at the defaults.
     const zones = doorwaysOf(suite).map((d) => d.zone);
     /**
      * How far a landing is from this piece, as the gap a snap would have to close on
@@ -1067,4 +1078,170 @@ describe("property sweep over randomised suites", () => {
     expect(minBedB).toBeLessThan(6);
   });
 
+  /**
+   * Every piece survives collide.ts's own snapping being applied to it where it
+   * already stands: the arrangement this module ships is one the drag handler will
+   * accept back.
+   *
+   * WHAT THIS ADDS TO "leaves no piece both off the grid and inside GRID / 2 of a
+   * landing" ABOVE, WHICH IS THE DEFAULT-SUITE VERSION OF THE SAME IDEA
+   *   Two things, and the first is why that test could pass while the fit-out was
+   *   broken. Its disjunction is about LANDINGS only -- a piece is safe if it is on
+   *   the grid or GRID / 2 clear of every doorway -- and a snap can just as easily
+   *   carry a piece into the FURNITURE beside it. That is what it did: the bedroom
+   *   chair is designed flush against the front edge of its own desk, so it has no
+   *   margin at all on the axis the desk fills, and once a slider takes the bedroom's
+   *   corner off the grid the snap puts the chair inside the desk. Measured before
+   *   furniture.ts landed that coordinate on the grid, 658 of the 6960 pieces over
+   *   the first sweep in this describe could not be put back where they stood -- 606
+   *   chairs and 52 dressers -- against exactly one at the defaults.
+   *
+   *   Second, it composes the snap the drag handler actually applies rather than only
+   *   the grid half of it: snapToGrid() then snapToWalls(), which is what collide.ts's
+   *   header says the drop path is and what furniture.ts's redroppable() copies. Wall
+   *   snap can move a piece whose anchor is already ON the grid, so grid alignment
+   *   alone is not the whole of the property either.
+   *
+   * WHY IT IS HERE AND ALSO IN tests/drag.test.ts, WHICH IS NOT DUPLICATION
+   *   This file never imports drag.ts, on purpose: the landings it measures against
+   *   are worked out at the top from buildWalls() with a literal 2 ft, so a wrong
+   *   landing cannot agree with itself. What is asserted here is that furniture.ts's
+   *   output survives collide.ts's snapping -- the two modules this one is allowed to
+   *   know about. tests/drag.test.ts asserts the thing a user meets, tryMove()
+   *   returning ok, over its own randomised sweep. If those two ever disagree, the
+   *   disagreement is the finding.
+   */
+  it("keeps every piece re-droppable under collide.ts's snapping, over 180 sets", () => {
+    const rnd = makeRnd(19640214);
+    /** Where a re-drop at the piece's own anchor would put it. drag.ts's place(). */
+    const snappedBack = (p: Piece, r: Rect): Piece => {
+      const s = snapToWalls(snapToGrid({ u: p.u, v: p.v, du: p.du, dv: p.dv, rot: p.yaw }), r);
+      return { ...p, u: s.u, v: s.v };
+    };
+    const bad: string[] = [];
+    let moved = 0;
+    let pieces = 0;
+    let gridChairs = 0;
+    let kCentred = 0;
+    let kAligned = 0;
+    let degraded = 0;
+
+    for (let i = 0; i < 180; i++) {
+      const p = plausible(rnd);
+      if (i >= 60) {
+        // The off-closure half, so the rescue scan runs and the pieces under test are
+        // ones no recipe chose. Same floor as the sweep above, for the same reason.
+        const upToBedB = p.commonAlong + p.bedAAlong + p.bathAlong + 3 * p.partition;
+        p.sectionLength = Math.max(upToBedB + 2, 44 + (rnd() * 2 - 1) * 6);
+      }
+      const s = buildSuite(p);
+      expect(findOverlaps(s.rooms), `iteration ${i} setup`).toEqual([]);
+      const ps = layout(s);
+      const zones = doorwaysOf(s).map((d) => d.zone);
+      if (ps.length < 29) degraded++;
+
+      for (const q of ps) {
+        pieces++;
+        const room = roomOf(s, q.room);
+        const back = snappedBack(q, room);
+        if (Math.abs(back.u - q.u) > EPS || Math.abs(back.v - q.v) > EPS) moved++;
+        // Against every other piece in the SUITE and not just in the room, which is
+        // the list drag.ts's place() uses. A superset of what placeIsLegal() needs,
+        // and the one that survives a piece whose room field is wrong.
+        const others = ps.filter((o) => o.id !== q.id).map(pieceBox);
+        const v = placeIsLegal(pieceBox(back), room, others);
+        if (!v.ok) bad.push(`iteration ${i} ${q.id}: ${v.reason}`);
+        for (const z of zones) {
+          if (overlaps(pieceBox(back), z)) bad.push(`iteration ${i} ${q.id}: into a landing`);
+        }
+      }
+
+      // THE RECIPE HALF OF THE FIX, pinned on the coordinate it was made for, and
+      // asserted separately from the property above because the gate would otherwise
+      // hide it: strip the grid step out of bedroomSlots() or clearOfBWalls() and the
+      // rescue scan finds those chairs a legal home, so "every piece is re-droppable"
+      // still passes and the designed arrangement is silently gone. This is the
+      // assertion that says the recipe aimed rather than that the gate caught.
+      //
+      // WHICH AXIS, WITHOUT RE-DERIVING frameOf(): the recipes call it b, and b is by
+      // definition the one across the room's longer side -- so it is the shorter side,
+      // whichever of u and v that turns out to be. Measured at these parameters that
+      // is v for a bedroom, which is deeper than it is long, and u for K, which is the
+      // other way round; writing it as the shorter side rather than as a literal is
+      // what keeps this true if a slider crosses over.
+      //
+      // WHY THE DISJUNCTION: a chair the scan rescued stands where no recipe chose it,
+      // and stops() only offers the grid and flush-against-a-wall. So both halves of
+      // the sweep can be covered without weakening the claim -- with the grid step
+      // gone, the designed chair is neither.
+      for (const q of ps.filter((x) => x.kind === "chair" && x.room.startsWith("bed"))) {
+        const room = roomOf(s, q.room);
+        const across = room.du >= room.dv ? "v" : "u";
+        const f = pieceBox(q);
+        const lo = across === "v" ? f.v : f.u;
+        const size = across === "v" ? f.dv : f.du;
+        const roomLo = across === "v" ? room.v : room.u;
+        const roomSize = across === "v" ? room.dv : room.du;
+        const onGrid = Math.abs(lo / GRID - Math.round(lo / GRID)) < EPS;
+        const flush =
+          Math.abs(lo - roomLo) < EPS || Math.abs(lo + size - (roomLo + roomSize)) < EPS;
+        if (onGrid) gridChairs++;
+        expect(onGrid || flush, `iteration ${i} ${q.id}: ${across} ${lo} neither`).toBe(true);
+      }
+
+      // K's seated group, which clearOfBWalls() places and which has TWO legal states
+      // rather than one -- so both are pinned, or a change that collapses them into
+      // whichever the seed happens to reach would pass. With a door in one of K's b
+      // walls the group is landed on the suite grid, because a snap could otherwise
+      // round it into that landing; with none, it is left centred across b, because
+      // there is then no boundary for a snap to strand it across and the symmetry is
+      // worth more than the alignment. Asserted on the group and not the chair: it is
+      // the group's near edge clearOfBWalls() returns, and the four chairs and the
+      // table all sit a whole number of grid steps off it.
+      const kChairs = ps.filter((x) => x.room === "k" && x.kind === "chair");
+      if (kChairs.length === 4) {
+        const room = roomOf(s, "k");
+        const across = room.du >= room.dv ? "v" : "u";
+        const roomLo = across === "v" ? room.v : room.u;
+        const roomHi = roomLo + (across === "v" ? room.dv : room.du);
+        const boxes = kChairs.map(pieceBox);
+        const lo = Math.min(...boxes.map((b) => (across === "v" ? b.v : b.u)));
+        const hi = Math.max(...boxes.map((b) => (across === "v" ? b.v + b.dv : b.u + b.du)));
+        const centred = Math.abs(lo - roomLo - (roomHi - hi)) < EPS;
+        const aligned = Math.abs(lo / GRID - Math.round(lo / GRID)) < EPS;
+        // Counted exclusively, or neither count is evidence. Measured at this seed the
+        // two never in fact coincide -- 15 centred and 165 aligned out of 180, none
+        // both -- but a group that was centred AND on the grid by luck would be
+        // counted by an inclusive tally under either branch, so the bounds below would
+        // then be satisfied by whichever one the seed happened to reach. Each of these
+        // says the OTHER branch would not have covered this suite.
+        if (centred && !aligned) kCentred++;
+        if (aligned && !centred) kAligned++;
+        expect(
+          centred || aligned,
+          `iteration ${i} k group: ${across} ${lo} neither centred nor on the grid`,
+        ).toBe(true);
+      }
+    }
+
+    expect(bad).toEqual([]);
+    // Non-vacuity. Measured at this seed: 5127 pieces over the 180 suites, 4103 of them
+    // moved by the snap, 687 of the 720 bedroom chairs on the grid across their desk --
+    // the other 33 flush against a wall, rescued rather than designed -- K's group on
+    // the grid and not centred in 165 of the suites and centred and not on the grid in
+    // the other 15, and 31 of the 120 off-closure arrangements degraded.
+    //
+    // The moved count is the one that matters most: if the snap were the identity
+    // everywhere -- which is what it very nearly is at the defaults, where every room
+    // corner is on the grid -- this whole property would hold however broken the recipes
+    // were, and that is exactly how the defect survived to be measured at 658 pieces.
+    expect(pieces).toBeGreaterThan(5000);
+    expect(moved, "the snap moved nothing: the property is vacuous").toBeGreaterThan(3500);
+    expect(gridChairs, "no bedroom chair landed on the grid").toBeGreaterThan(600);
+    // Both of clearOfBWalls's branches, or the assertion above is about one of them and
+    // silent about the other.
+    expect(kAligned, "K's group never landed on the grid alone").toBeGreaterThan(100);
+    expect(kCentred, "K's group was never left centred alone").toBeGreaterThan(0);
+    expect(degraded, "nothing degraded: the rescue scan is untested").toBeGreaterThan(10);
+  });
 });

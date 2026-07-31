@@ -39,7 +39,7 @@
  *   is refused, and `against` names the door and the two rooms it joins, so the UI
  *   can say what was hit rather than snapping the piece back in silence.
  *
- * THE DEFAULT FIT-OUT SATISFIES THIS RULE, AND DID NOT ALWAYS
+ * EVERY FIT-OUT SATISFIES THIS RULE, AND DID NOT ALWAYS
  *   Measured at the defaults, layout() stands no piece in any of the suite's five
  *   doorway landings. That is not luck and it is not this module's doing:
  *   furniture.ts was made door-aware for exactly this reason, and
@@ -56,6 +56,19 @@
  *   and K's own chair is why that is the general rule rather than a patch -- it stands
  *   exactly ON the same boundary with no margin at all and re-drops for that reason
  *   alone. tests/drag.test.ts asserts the whole fit-out, not just the two.
+ *
+ *   AND IT IS NOT ONLY THE DEFAULT FIT-OUT, which is where this section stopped for a
+ *   while and should not have. The sliders are the feature, so every arrangement they
+ *   reach is one somebody will meet, and off the defaults the same quarter foot cost
+ *   far more than the sofa: measured, 82 of the 870 pieces over the 30-suite sweep at
+ *   the bottom of tests/drag.test.ts could not be put back where they stood, and 658
+ *   of 6960 over the 240-set sweep in tests/furniture.test.ts. Every one a chair or a
+ *   dresser, none of them anything a person had looked at, and all of it invisible at
+ *   the defaults because every room corner there is already on the grid. furniture.ts
+ *   closed it in the two places its header names -- the recipes land the coordinates
+ *   that need it on the grid, redroppable() refuses in the gate whatever they cannot
+ *   reach -- and tests/drag.test.ts now asserts the round trip over 180 randomised
+ *   parameter sets rather than over the one suite anybody inspected.
  *
  *   IT DID NOT ALWAYS, and that is why the rule is enforced on the position a piece
  *   is HANDED and not only on the ones a designer chose. layout() used to be blind to

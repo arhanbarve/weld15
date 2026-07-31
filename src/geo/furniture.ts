@@ -72,9 +72,37 @@
  *   and accept() refuses them in both its passes, so nothing the rescue scan finds
  *   can stand in a doorway either. Same split as placeIsLegal(): the recipe aims,
  *   the gate guarantees.
+ *
+ * AND THE ARRANGEMENT HAS TO BE ONE drag.ts WILL ACCEPT
+ *   Every piece this module emits can be picked up and put back down where it
+ *   stands. That is not implied by being legal, and it was not true: drag.ts judges
+ *   the position it is HANDED, and a re-drop hands it the piece's own anchor SNAPPED
+ *   onto collide.ts's grid, so a piece with less than GRID / 2 = 0.25 ft of margin on
+ *   an off-grid anchor is legal where it stands and refused where it stands. At the
+ *   defaults that cost one piece, the sofa, and commonSlots() records it. Off the
+ *   defaults it cost 82 of 870 over the 30-suite sweep in tests/drag.test.ts and 658
+ *   of 6960 over the 240-set sweep here -- every one of them a chair or a dresser,
+ *   none of them anything a person had looked at.
+ *
+ *   Closed the same way as the doors, and in the same two places. The recipes land
+ *   the coordinates that need it on the grid, one way only and away from whatever
+ *   boundary the piece is flush against -- gridUp() and gridDown() are that step, and
+ *   bedroomSlots(), commonSlots() and clearOfBWalls() each say what theirs is against.
+ *   And redroppable() refuses in the gate whatever the recipes could not reach, which
+ *   is what covers the rescue scan's own output and the one piece no one-way step can
+ *   help: the dresser, wedged off-grid between the bed behind it and the desk in
+ *   front. The recipe aims, the gate guarantees, again.
  */
 
-import { GRID, footprintOf, overlaps, placeIsLegal, type Box } from "./collide";
+import {
+  GRID,
+  footprintOf,
+  overlaps,
+  placeIsLegal,
+  snapToGrid,
+  snapToWalls,
+  type Box,
+} from "./collide";
 import type { Rect, Suite } from "./rooms";
 import { buildWalls, type Opening, type Wall } from "./walls";
 
@@ -217,6 +245,34 @@ const GAP = 3 * GRID;
 
 /** Float slack. Same rationale as collide.ts's EPSILON, which is not exported. */
 const EPS = 1e-9;
+
+/**
+ * A slot coordinate landed on collide.ts's grid, stepping one way only.
+ *
+ * `origin` is the suite-frame coordinate of the room axis the slot is measured
+ * along, because the grid snapToGrid() rounds to is the SUITE's and not the room's
+ * -- a room whose corner a slider has taken off the grid has an a, b frame that
+ * disagrees with it, and the frame that decides whether a re-drop moves a piece is
+ * the drag handler's. commonSlots() worked this out for the sofa; these two
+ * functions are that arithmetic named, so the next recipe needing it does not have
+ * to derive it again.
+ *
+ * ONE WAY ONLY, AND THE CALLER PICKS WHICH
+ *   A piece needs this exactly when it stands flush against a boundary it must not
+ *   cross -- a desk's front edge, a doorway landing -- and rounding to the NEAREST
+ *   grid line would carry it across that boundary half the time, which is the
+ *   defect rather than the fix. So the caller says which direction is away from the
+ *   boundary and the step is taken that way, spending under a grid step of the
+ *   floor on the far side to buy a re-drop that cannot move the piece at all.
+ *
+ * The EPS is what makes both of them the identity on a coordinate already on the
+ * grid, so a suite whose corners are on it -- the default one, every room -- is
+ * untouched by either call.
+ */
+const gridUp = (origin: number, x: number) =>
+  Math.ceil((origin + x) / GRID - EPS) * GRID - origin;
+const gridDown = (origin: number, x: number) =>
+  Math.floor((origin + x) / GRID + EPS) * GRID - origin;
 
 /**
  * Clear floor a doorway needs on each side, ft. ASSUMED.
@@ -517,13 +573,44 @@ function farLimit(f: Frame, keep: Keep[]): number {
  * suite has two, and inventing a rule for a case the geometry does not produce is
  * how a recipe grows branches no test reaches.
  */
-function clearOfBWalls(f: Frame, keep: Keep[], depth: number): number {
+function clearOfBWalls(f: Frame, keep: Keep[], depth: number, origin: number): number {
   let b0 = (f.B - depth) / 2;
+  // Which way is away from the door, or 0 for a room with no door in either b wall.
+  // It decides the grid step below, and the step is what makes the group
+  // re-droppable: a group standing a quarter foot clear of a landing edge on an
+  // off-grid anchor is one snapToGrid() rounds INTO the landing, so tryMove()
+  // answers blocks-door to a person setting a chair down where they just picked it
+  // up. That was 16 of the 82 unre-droppable pieces measured over the randomised
+  // sweep, all of them K's chairs.
+  //
+  // A PROPERTY OF WHICH WALL THE DOOR IS IN, NOT OF WHETHER THE LANDING BOUND IT
+  //   Written first as "the direction the landing pushed the group", which reads
+  //   better and is wrong: where the centring alone already clears the landing, it
+  //   can clear it by less than half a grid step, and that is exactly as
+  //   unre-droppable as standing flush against it. Measured, that reading leaves one
+  //   piece failing out of the 30-suite sweep and 13 out of the 240-set one, and the
+  //   30-suite case is k-chair-1 in suite 2: centred at u 24.195, 0.081 ft clear of
+  //   d3's landing, snapped back to u 24 and so 0.114 ft inside it. Its own pair at
+  //   the same anchor clears by 0.266 ft and survives, which is the whole margin the
+  //   two readings differ over. So the door's wall picks the direction whether or not
+  //   its landing is what set b0.
+  let away = 0;
   for (const k of keep) {
-    if (k.b0 <= EPS) b0 = Math.max(b0, k.b1);
-    if (k.b1 > f.B - EPS) b0 = Math.min(b0, k.b0 - depth);
+    if (k.b0 <= EPS) {
+      b0 = Math.max(b0, k.b1);
+      away = 1;
+    }
+    if (k.b1 > f.B - EPS) {
+      b0 = Math.min(b0, k.b0 - depth);
+      away = -1;
+    }
   }
-  return b0;
+  // No door in either b wall, so there is no boundary here a snap could strand the
+  // group across: the room's own walls are not one -- snapToWalls() pulls anything
+  // inside its catchment back flush -- and the gaps to the table are a whole grid
+  // step. The symmetry is worth more than the alignment in that case.
+  if (away === 0) return b0;
+  return away > 0 ? gridUp(origin, b0) : gridDown(origin, b0);
 }
 
 // --- the recipes ----------------------------------------------------------
@@ -599,6 +686,11 @@ function bedroomSlots(f: Frame, keep: Keep[], students: number): Slot[] {
   /** b of a piece standing `depth` ft off station i's own wall. */
   const off = (i: number, depth: number, eb: number) =>
     i === 0 ? depth : f.B - depth - eb;
+  // The suite-frame origin of the b axis. Only the chair's b needs it; see there.
+  const originB = f.long === "u" ? f.room.v : f.room.u;
+  /** Same, landed on the grid a step AWAY from station i's own wall. */
+  const gridOff = (i: number, depth: number, eb: number) =>
+    i === 0 ? gridUp(originB, off(i, depth, eb)) : gridDown(originB, off(i, depth, eb));
 
   // As deep as the door lets it go. With no door in that wall this is flush
   // against it, which is where the desk stood before any of this.
@@ -616,8 +708,24 @@ function bedroomSlots(f: Frame, keep: Keep[], students: number): Slot[] {
   for (let i = 0; i < n; i++) {
     out.push({
       kind: "chair",
+      // Centred on the desk's frontage along a, exactly, and NOT landed on the grid
+      // there: a is the axis the centring is visible on, the chair has 1.25 ft of
+      // the desk either side of it, and no boundary along a is within a grid step
+      // -- the desk stands against the landing, so the chair behind it is 1.25 ft
+      // clear of that too. A re-drop shifts a by up to a quarter foot and nothing
+      // closes, which is the same quarter foot the default fit-out already spends.
       a: deskA + (desk.ea - chair.ea) / 2,
-      b: off(i, desk.eb, chair.eb),
+      // b IS landed on the grid, stepped out into the room. The chair is designed
+      // flush against the front edge of its own desk, so its clearance along b is
+      // exactly nothing -- and b is the axis the desk fills, so a re-drop that
+      // rounds b back toward the wall by a quarter foot puts the chair INSIDE the
+      // desk and tryMove() answers `collision` to a person setting a chair down
+      // where they just picked it up. That was 66 of the 82 unre-droppable pieces
+      // over the randomised sweep, and every one of them was this. Stepping out
+      // instead costs under a grid step of the aisle and buys a re-drop that cannot
+      // move b at all. At the defaults, where the bedroom corners are on the grid,
+      // this is the identity and the chair still stands against its desk.
+      b: gridOff(i, desk.eb, chair.eb),
       faces: toward(i),
     });
   }
@@ -678,8 +786,10 @@ function commonSlots(f: Frame, keep: Keep[]): Slot[] {
   const shelf = localExtent(f, "shelf", "+b");
 
   const origin = f.long === "u" ? f.room.u : f.room.v;
-  const deepest = origin + farLimit(f, keep) - sofa.ea;
-  const sofaA = Math.floor(deepest / GRID + EPS) * GRID - origin;
+  // Back off the deepest legal anchor onto the grid, which is gridDown() by another
+  // name -- the step is away from the landing the sofa's back is against, so the
+  // direction is the shallow one.
+  const sofaA = gridDown(origin, farLimit(f, keep) - sofa.ea);
   const tableA = sofaA - GAP - table.ea;
   const tableB = (f.B - table.eb) / 2;
   return [
@@ -716,7 +826,14 @@ function studySlots(f: Frame, keep: Keep[]): Slot[] {
   // The seated group, not the table: a chair pushed into a doorway blocks it just
   // as well as a table would, and it is the chairs that reach nearest the walls.
   const group = table.eb + 2 * (GRID + chair.eb);
-  const near = clearOfBWalls(f, keep, group);
+  // Landed on the suite grid by clearOfBWalls() when a landing is what set it, and
+  // the whole group inherits that: every other b below is `near` plus a whole number
+  // of grid steps -- a chair's 1.5 ft is three, the table's 2.5 is five, the gap is
+  // one -- so one aligned coordinate aligns the four chairs and the table with it.
+  // Which is the point: K's chairs stand flush against the edge of the landing the
+  // common room's door needs, so on an off-grid anchor a re-drop rounds them a
+  // quarter foot INTO it and answers blocks-door. That was the other 16 of the 82.
+  const near = clearOfBWalls(f, keep, group, f.long === "u" ? f.room.v : f.room.u);
   const tableB = near + GRID + chair.eb;
   const far = tableB + table.eb + GRID;
   const ends = [tableA, tableA + table.ea - chair.ea];
@@ -789,6 +906,8 @@ function accept(
   // and drag.ts refuses it outright for the same reason. So a piece with nowhere
   // legal to stand clear of a door is dropped, not stood in the door.
   if (blocksADoor(cand, landings)) return false;
+  // Both passes too, and for the same reason. See redroppable() for what it costs.
+  if (!redroppable(cand, room, boxes, landings)) return false;
   if (!strict) return true;
   // Only the beds already down are checked, and the candidate is not checked
   // against itself. There is no need: a bed's own clearance is greatest with its
@@ -805,6 +924,71 @@ function accept(
     if (bedClearance(bed, room, [...placed, cand]) < BED_CLEARANCE - EPS) return false;
   }
   return true;
+}
+
+/**
+ * Can this piece be put back down where it is about to stand?
+ *
+ * The arrangement the app ships with has to be an arrangement the app will
+ * accept. drag.ts judges the position it is HANDED and the position a re-drop hands
+ * it is the piece's own anchor SNAPPED, so a piece on an off-grid anchor with less
+ * than GRID / 2 of margin is legal where it stands and refused when dropped there:
+ * pick it up, put it down without moving the pointer, and the UI says no. That is a
+ * defect in this module and not in that one -- the gate there is the rule, and the
+ * arrangement here is what has to satisfy it.
+ *
+ * The check is drag.ts's place() with the door test, minus the parts that cannot
+ * differ: snapToGrid() then snapToWalls(), in that order and with the same
+ * defaults, then placeIsLegal() and blocksADoor(). Duplicated rather than imported
+ * because drag.ts imports THIS file for pieceBox and the other direction is a
+ * cycle, which is the same reason DOOR_CLEARANCE is copied; and asserted against
+ * tryMove() itself over randomised suites in tests/drag.test.ts rather than trusted.
+ *
+ * WHY IT IS IN THE GATE AND NOT ONLY IN THE RECIPES
+ *   The recipes above land the coordinates that need it on the grid, and that is
+ *   the better fix where it reaches: a designed slot the gate refuses is a slot the
+ *   rescue scan replaces with a nearby one, so the arrangement somebody looked at is
+ *   traded for a legal one. But the recipes cannot reach all of it, and the dresser
+ *   is why. It stands at a = bed.ea, which is 82 in = 6.833 ft and off the grid by
+ *   construction, wedged between the bed behind it and the desk in front. Stepping
+ *   it down lands it in the bed; stepping it up lands it in the desk whenever the
+ *   depth binds and the band closes exactly. There is no one-way step that is
+ *   unconditionally safe, so the decision has to be made against the actual
+ *   neighbours -- which is what this does. Measured over the 240-set sweep, that is
+ *   52 dressers the recipes leave and the gate catches, each rescued to the grid a
+ *   quarter-turned, which is the same trade drag.ts's DOOR_CLEARANCE note records
+ *   for a 3 ft landing.
+ *
+ *   Checked in BOTH passes, like blocksADoor() and unlike the bed clearance: a piece
+ *   nobody can put back is not a comfort this module trades away when a room gets
+ *   tight.
+ *
+ * WHAT IT COSTS, MEASURED
+ *   Nothing in pieces. Over the 240-set sweep, the 30-set sweep in
+ *   tests/drag.test.ts and the 160-set off-closure sweep, the placed counts are
+ *   6960, 870 and 4541 with this gate and 6960, 870 and 4541 without it -- every
+ *   refusal finds a rescue and none becomes a drop. What it costs is position, and
+ *   the recipes above are what keep that bill small: with them, 137 of the 11,530
+ *   pieces across those sweeps stand somewhere other than their designed slot; with
+ *   this gate alone and the recipes blind, 1,120 do.
+ *
+ * THE ONE GAP, AND WHY THE PROPERTY TEST IS SEPARATE FROM THIS
+ *   `boxes` is what is placed SO FAR, because that is all fitOut() has when it asks.
+ *   tryMove() sees the whole finished suite, so a piece accepted here could in
+ *   principle have its snapped-back position taken by a piece placed after it.
+ *   Measured over all 430 suites of those three sweeps, that never happens -- but
+ *   "never happens at these parameters" is not "cannot", so what tests/drag.test.ts
+ *   asserts is the finished layout against tryMove(), not this function.
+ */
+function redroppable(cand: Piece, room: Rect, boxes: Box[], landings: Box[]): boolean {
+  const raw: Box = { u: cand.u, v: cand.v, du: cand.du, dv: cand.dv, rot: cand.yaw };
+  const back = snapToWalls(snapToGrid(raw), room);
+  // Already where a re-drop would put it, so the re-drop is a no-op and the
+  // placeIsLegal() call above accept()'s own has already answered this. The recipes
+  // aim for exactly this case; it is the common one.
+  if (Math.abs(back.u - cand.u) < EPS && Math.abs(back.v - cand.v) < EPS) return true;
+  const moved: Piece = { ...cand, u: back.u, v: back.v };
+  return placeIsLegal(pieceBox(moved), room, boxes).ok && !blocksADoor(moved, landings);
 }
 
 /**
