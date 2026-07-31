@@ -209,8 +209,13 @@ untracked and `git checkout` on them is a silent no-op.
   for longer than a 30 s test would wait. Now recomputed only when the camera has moved a quarter foot,
   which is half the drag grid.
 - **The pointer can only reach the room the camera stands in.** Bedroom A's furniture projects off
-  screen, so editing at stage 5 covers bedroom B. The dollhouse fix is blocked on `WeldExterior` not
-  reading `cutaway`; see `Experience.tsx`.
+  screen, so editing at stage 5 covers bedroom B. Recorded here as blocked on `WeldExterior` not
+  reading `cutaway`. **It no longer is** — the shell cuts as of `c2c2166`. What replaced the block is
+  a narrower fact, and it is measured: of the four modes only `section` opens the *suite*. From the
+  stage-3 keyframe `wallsDown` drops 9 of 56 ring edges, 97.9 ft of the 440.3 ft perimeter, all south
+  of v = 19.9, while the suite's windows are at v 33.7–70.9 — it opens the empty half of the building.
+  So the dollhouse edit condition is `stage >= 3 && cutaway === "section"`, not "any cutaway", and
+  turning it on wants a look at what the pointer hits from an orbiting camera. See `Experience.tsx`.
 - **Gate 4 moved rather than being dropped.** Reaching a doorway landing through the UI is up to 120
   nudge presses at a 62 ms frame, because landings sit at the room edges the camera does not show. The
   door rule stays pinned in `tests/drag.test.ts` and its wording in `tests/store.test.ts`; the e2e

@@ -140,11 +140,19 @@ export default function Experience() {
             // selects a piece in another room.
             //
             // The fix is the dollhouse view -- edit from stage 3 with a cutaway on --
-            // and it is blocked on something real: hiddenWalls() takes down the
-            // interior's own walls, and WeldExterior does not read `cutaway` at all, so
-            // from outside you are looking at an opaque 1872 brick shell. Editing from
-            // there would be dragging pieces you cannot see. Recorded here and in
-            // docs/phases/P6.md rather than half-built.
+            // and it is no longer blocked: WeldExterior reads `cutaway` and cuts the
+            // shell, so the brick comes off the half you are looking into.
+            //
+            // IT IS STILL NOT `stage >= 3 && cutaway !== "none"`, AND THE REASON IS
+            // MEASURED. Only `section` opens the suite. From the stage-3 keyframe
+            // wallsDown drops 9 of 56 ring edges -- 97.9 ft of the 440.3 ft perimeter,
+            // all of it south of v = 19.9, while the suite's own windows are at
+            // v 33.7-70.9 -- so it opens the empty half of the building and leaves the
+            // suite behind brick. Gating edit on "any cutaway" would put the pointer
+            // back to picking pieces the viewer cannot see, which is the bug this
+            // comment exists to record. `stage >= 3 && cutaway === "section"` is the
+            // honest condition, and turning it on wants a look at what the pointer
+            // actually hits from an orbiting camera rather than a one-line change here.
             edit={stage === LAST_STAGE}
             selected={selected}
             onSelect={select}
