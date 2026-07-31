@@ -212,15 +212,38 @@ describe("reduced motion", () => {
     expect(seen.size, "the full-motion path is a sequence, not two poses").toBeGreaterThan(40);
   });
 
-  it("leaves every other stage exactly where it was", () => {
-    // Reduced motion is about the crossing. Stages 0-3 and 5 are single places, and
-    // the flag must not move any of them.
-    for (const s of [0, 1, 2, 3, 5] as StageId[]) {
+  it("leaves the stages that are places exactly where they were", () => {
+    // Stages 3 and 5 are single places, and the flag must not move either of them. This used
+    // to cover 0, 1 and 2 as well; since P9 those three are flights, and what reduced motion
+    // owes them is the assertion below rather than this one.
+    for (const s of [3, 5] as StageId[]) {
       for (const r of [false, true]) {
         for (const t of [0, 0.5, 1]) {
           expect(cameraKeyframe(kf, s, t, r), `stage ${s} reduced=${r} t=${t}`).toEqual(kf[s]);
         }
       }
+    }
+  });
+
+  it("jump-cuts each descent stage to its own two endpoints and nothing between", () => {
+    // The same guarantee the crossing has, extended to the flight. Under reduced motion the
+    // only poses stages 0, 1 and 2 can produce are the ends of their own paths -- so the
+    // camera visits four positions across the whole descent instead of sweeping three decades
+    // of altitude, and CameraRig's window.__cam.path is what proves it from outside.
+    for (const s of [0, 1, 2] as StageId[]) {
+      const stops = kf[s].path!;
+      const first = stops[0]!.frame;
+      const last = stops[stops.length - 1]!.frame;
+      const seen = new Set<string>();
+      for (let t = 0; t <= 1.0001; t += 0.01) {
+        const got = cameraKeyframe(kf, s, Math.min(1, t), true);
+        seen.add(got.position.join(","));
+        const want = t < REDUCED_CUT ? first : last;
+        expect(got.position, `stage ${s} at t=${t.toFixed(2)}`).toEqual(want.position);
+      }
+      expect(seen.size, `stage ${s} visits two poses, not a sweep`).toBe(2);
+      // And the far end is the next stage's pose exactly, so the cut lands on a keyframe.
+      expect(last.position).toEqual(kf[(s + 1) as StageId].position);
     }
   });
 
@@ -267,9 +290,15 @@ describe("the threshold path", () => {
     expect(kf[5].position[1] - floorLevel(1)).toBeCloseTo(5 + 10 / 12, 9);
   });
 
-  it("hangs a path off stage 4 and nowhere else", () => {
-    expect(kf[4].path, "stage 4 has a path").toBeDefined();
-    for (const s of [0, 1, 2, 3, 5] as StageId[]) {
+  it("hangs a path off the stages that travel and not off the stages that sit", () => {
+    // THIS USED TO READ "off stage 4 and nowhere else", and P9 is why it does not. The
+    // descent from orbit is a flight, so stages 0, 1 and 2 now carry paths too; stages 3 and
+    // 5 are still places. Stage 3 in particular MUST stay a place -- it is the free orbit,
+    // and CameraRig routes it through orbitKeyframe() rather than cameraKeyframe().
+    for (const s of [0, 1, 2, 4] as StageId[]) {
+      expect(kf[s].path, `stage ${s} travels and needs a path`).toBeDefined();
+    }
+    for (const s of [3, 5] as StageId[]) {
       expect(kf[s].path, `stage ${s} must be a place, not a path`).toBeUndefined();
     }
     const stops = kf[4].path!;
@@ -402,6 +431,17 @@ describe("visibility", () => {
   it("shows the globe only at stage 0", () => {
     expect(visibility(0).globe).toBe(true);
     for (const s of [1, 2, 3, 4, 5] as StageId[]) expect(visibility(s).globe).toBe(false);
+  });
+
+  it("mounts the campus at stage 0, because stage 0 is where the ground arrives", () => {
+    // P9 CHANGED THIS LINE and it is worth an assertion of its own. Stage 0's path runs from
+    // 31,353,347 ft down to stage 1's keyframe at 16,332 ft, so the massing's fade-in at
+    // 40,000 ft happens inside stage 0. Mounting the campus only from stage 1 would move the
+    // pop from the 0 -> 1 boundary to the moment of mounting rather than removing it.
+    expect(visibility(0).campus).toBe(true);
+    for (const s of [1, 2, 3] as StageId[]) expect(visibility(s).campus).toBe(true);
+    // And still off once the camera is inside, where it would be geometry behind a wall.
+    for (const s of [4, 5] as StageId[]) expect(visibility(s).campus).toBe(false);
   });
 
   it("mounts the interior a stage before the threshold needs it", () => {

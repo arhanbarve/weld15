@@ -17,6 +17,7 @@ import type { Vec3 } from "@/geo/frames";
 import type { StageId } from "@/state/store";
 import { HUB, route, standIn } from "./route";
 import { EYE } from "./walk";
+import { R_EARTH_FT } from "./altitude";
 
 /**
  * One camera pose, plus -- for the one stage that has a path rather than a place -- the
@@ -61,6 +62,215 @@ const GABLE_FRAMING = 1.35;
  * shows a rectangle of wall at the end of it and nothing of the corridor.
  */
 const ROOM_FOV = 62;
+
+const DEG = Math.PI / 180;
+
+/**
+ * Vertical field of view for the three descent stops, degrees.
+ *
+ * Named for the same reason GABLE_FOV is: the altitude of every stop below is DERIVED from
+ * it, and the comment on gableBack records what happens when a distance and the fov it was
+ * chosen for are allowed to drift -- a hard-coded 40 ft survived a change of fov and quietly
+ * stopped framing the building. Nothing below is a literal altitude.
+ */
+const DESCENT_FOV = 45;
+
+/**
+ * How far each stop looks down from straight down, degrees.
+ *
+ * Stage 0 is nearly overhead; 1 and 2 are obliques. THE TWO OBLIQUE VALUES ARE A FRAMING
+ * JUDGEMENT and P9.md section 8 flags them as such -- 40 and 45 are its proposal, taken as
+ * offered. What is not a judgement is that the horizon must be out of frame, and it is: the
+ * top edge of the frame sits at tilt + DESCENT_FOV/2 from nadir, which is 62.5 degrees at
+ * stage 1 and 67.5 at stage 2, so both frames are entirely ground with 27.5 and 22.5 degrees
+ * to spare. That matters because a flat ground quad has an edge (Ground.tsx fades it), and
+ * the cheapest way not to see the edge is not to point at it.
+ *
+ * STAGE 0's 2 DEGREES IS NOT FREE, and the budget is tight enough to record. The globe's
+ * disc is centred on the direction to Earth's CENTRE, but the camera aims at WELD, and those
+ * two directions differ. Tilting the camera by tau moves the disc off the frame's centre by
+ * tau - atan(alt*tan(tau)/(alt+R)), so a tilted camera pushes the disc up and opens a band
+ * of empty background along the bottom of the very first frame the viewer ever sees.
+ * Measured against the disc's own angular radius:
+ *
+ *   alt = 1.6 R   disc 22.6199 deg, overfills a 22.5 deg half-frame by 0.12
+ *                 tilt 0.3 -> offset 0.115, just holds.  tilt 1 -> 0.385, VOID BAND.
+ *   alt = 1.5 R   disc 23.5782 deg, overfills by 1.08
+ *                 tilt 2 -> offset 0.800, holds with 0.28 deg to spare. tilt 3 -> VOID.
+ *
+ * So the altitude came DOWN from the 1.6 Earth radii the old unit-scale kf0 used, to buy the
+ * tilt. 0.3 degrees of tilt would have kept 1.6 R, and it was rejected: at 0.3 degrees the
+ * cross product in three's lookAt is 0.005 long, which is close enough to the straight-down
+ * singularity to be relying on a library's degeneracy guard for the camera's roll -- and the
+ * roll is what puts north at the top of the screen.
+ */
+const STAGE0_TILT_DEG = 2;
+const STAGE1_TILT_DEG = 40;
+const STAGE2_TILT_DEG = 45;
+
+/**
+ * Camera altitude at stage 0, ft.
+ *
+ * 1.5 Earth radii above grade, for the reason the tilt comment above gives. The image is
+ * very close to the unit-scale shot this replaces -- that one sat 2.6 radii from the centre
+ * and subtended 22.62 degrees, this one sits 2.5 and subtends 23.58 -- but it is not
+ * identical, and it is not meant to be: the globe now fills the frame with a degree of margin
+ * instead of a tenth of one.
+ */
+const STAGE0_ALT = 1.5 * R_EARTH_FT;
+
+/**
+ * Which way round Weld each stop stands, degrees from due south toward the east.
+ *
+ * Read off the poses these replace so the shots stay recognisable: 30, 34.1 and (at stage 3,
+ * which does not move) 38.3. The gentle swing eastward as the camera descends is the existing
+ * character of the sequence and there was no reason to flatten it. Stage 0 shares stage 1's
+ * azimuth so that the top of the descent is a straight drop rather than a drop and a turn.
+ */
+const STAGE0_AZIMUTH_DEG = 30;
+const STAGE1_AZIMUTH_DEG = 30;
+const STAGE2_AZIMUTH_DEG = 34.1;
+
+/**
+ * What each stop has to frame, ft of ground measured UP THE SCREEN.
+ *
+ * Up the screen and not across it, because DESCENT_FOV is the vertical field of view; at 16:9
+ * the horizontal extent is wider, so framing the vertical is the conservative reading of "it
+ * fits".
+ *
+ * Cambridge is about 23,000 ft across. THE YARD FIGURE IS MEASURED RATHER THAN CHOSEN:
+ * campus.json's 36 buildings span 1,149 x 1,269 ft, and 1,300 is that long axis plus a
+ * little air. The stop it replaces framed 790 ft, i.e. 62% of the thing it was named after,
+ * which is half of the complaint P9 answers.
+ */
+const CAMBRIDGE_EXTENT = 23_000;
+const YARD_EXTENT = 1_300;
+
+/**
+ * The vertical drop from a target that frames `extent` feet of level ground at `tilt`.
+ *
+ * A ground line through the target, running up the screen, is foreshortened onto the image
+ * plane by cos(tilt) -- the view axis makes 90 - tilt with the ground -- and the extent the
+ * frame subtends at the target's slant range is 2 * slant * tan(fov/2). With
+ * slant = drop / cos(tilt) the two combine to
+ *
+ *   extent = 2 * drop * tan(fov/2) / cos^2(tilt)
+ *
+ * which is the formula below, solved for the drop. Note that the cos^2 makes an oblique
+ * camera see MORE ground than a nadir one at the same height, which is why P9.md section
+ * 5.1's figures (27,763 and 1,569 ft) are larger than these: that section applies the nadir
+ * formula and then asks for a 40 degree tilt, and the two do not compose. Framing Cambridge
+ * from 28,000 ft at 40 degrees would put 39,528 ft in the frame, not 23,000.
+ *
+ * First order about the target, and deliberately so: the near and far halves of an oblique
+ * frame are not the same size on the ground, so "the extent" is only well defined at the
+ * centre. What it guarantees is that the named thing fits, which is all the stop needs.
+ */
+function obliqueDrop(extent: number, tiltDeg: number, fovDeg: number): number {
+  const c = Math.cos(tiltDeg * DEG);
+  return (extent * c * c) / (2 * Math.tan((fovDeg / 2) * DEG));
+}
+
+/** A pose at `azimuth` round the target, looking down at `tilt`, framing what it must. */
+function descentStop(
+  drop: number,
+  tiltDeg: number,
+  azimuthDeg: number,
+  targetY: number,
+  fov = DESCENT_FOV,
+): Keyframe {
+  const horizontal = drop * Math.tan(tiltDeg * DEG);
+  return {
+    position: [
+      horizontal * Math.sin(azimuthDeg * DEG),
+      targetY + drop,
+      horizontal * Math.cos(azimuthDeg * DEG),
+    ],
+    target: [0, targetY, 0],
+    fov,
+  };
+}
+
+/** The tilt, azimuth, drop and aim height a descent keyframe was built from. */
+function stopGeometry(k: Keyframe): {
+  drop: number;
+  tiltDeg: number;
+  azimuthDeg: number;
+  targetY: number;
+  fov: number;
+} {
+  const [px, py, pz] = k.position;
+  const [tx, ty, tz] = k.target;
+  const drop = py - ty;
+  const horizontal = Math.hypot(px - tx, pz - tz);
+  return {
+    drop,
+    tiltDeg: Math.atan2(horizontal, drop) / DEG,
+    azimuthDeg: Math.atan2(px - tx, pz - tz) / DEG,
+    targetY: ty,
+    fov: k.fov,
+  };
+}
+
+/**
+ * The flight between two descent stops.
+ *
+ * LOGARITHMIC IN ALTITUDE, AND THAT IS THE WHOLE POINT OF THIS FUNCTION. Stage 0 falls from
+ * 31,353,347 ft to 16,332 ft, a ratio of 1,920. A straight line between those two positions
+ * -- which is what blend() alone would give -- is still at 15,684,839 ft at t = 0.5 and does
+ * not reach 47,700 ft until t = 0.999. Every band in altitude.ts's table, the globe's whole
+ * fade, and the arrival of the ground would all happen inside the last thousandth of the
+ * slider. Descending at a constant RELATIVE rate instead -- d(log alt)/dt constant, which is
+ * what uniformly spaced `at` over log-spaced altitudes gives -- is both the only usable
+ * mapping and what a Google Earth fly-to actually does.
+ *
+ * The tilt, the azimuth and the aim height interpolate linearly across the same t, so the
+ * camera swings from nearly overhead at orbit to the 40 degree oblique at Cambridge while it
+ * falls. That is decision 11's "the camera rotates so Weld comes to frame centre while still
+ * high, then descends", and it comes out of the interpolation rather than needing waypoints
+ * placed by hand.
+ *
+ * HOW MANY STOPS, and why it is not a round number. alongPath() blends LINEARLY between
+ * adjacent stops, so the polyline is a piecewise-linear approximation to an exponential and
+ * the error is set by the altitude RATIO across one segment, not by the number of segments as
+ * such. Eight stops per decade puts every segment at a ratio of 1.33, where the chord's
+ * maximum deviation from the true curve is under 1% of the drop -- invisible, and it means a
+ * stage that covers three decades gets three times the stops of one that covers a single
+ * decade rather than the same number stretched thinner.
+ *
+ * The last stop IS the `to` keyframe object, not a copy of its numbers, for the reason
+ * thresholdPath() gives: cameraKeyframe(kf, n, 1) and kf[n+1] then hold the same pose exactly
+ * and the stage boundary cannot show a jump of a thousandth of a foot.
+ */
+function descentPath(from: Keyframe, to: Keyframe): PathStop[] {
+  const a = stopGeometry(from);
+  const b = stopGeometry(to);
+  // Both drops are positive at every descent stop -- the camera is always above what it looks
+  // at -- but a params set that put them equal would make the log undefined, so refuse rather
+  // than emit NaN. keyframes() is called on the way to discovering an illegal suite.
+  if (!(a.drop > 0) || !(b.drop > 0) || a.drop <= b.drop) return [{ at: 0, frame: from }, { at: 1, frame: to }];
+
+  const decades = Math.log10(a.drop / b.drop);
+  const segments = Math.max(6, Math.ceil(decades * 8));
+
+  const stops: PathStop[] = [{ at: 0, frame: from }];
+  for (let i = 1; i < segments; i++) {
+    const u = i / segments;
+    const drop = Math.exp(Math.log(a.drop) + u * (Math.log(b.drop) - Math.log(a.drop)));
+    stops.push({
+      at: u,
+      frame: descentStop(
+        drop,
+        a.tiltDeg + u * (b.tiltDeg - a.tiltDeg),
+        a.azimuthDeg + u * (b.azimuthDeg - a.azimuthDeg),
+        a.targetY + u * (b.targetY - a.targetY),
+        a.fov + u * (b.fov - a.fov),
+      ),
+    });
+  }
+  stops.push({ at: 1, frame: to });
+  return stops;
+}
 
 /**
  * The t at which the brick has finished dissolving.
@@ -212,11 +422,46 @@ function buildKeyframes(params: SuiteParams): Record<StageId, Keyframe> {
   const five: Keyframe = { position: inHall, target: hallTarget, fov: ROOM_FOV };
   const path = thresholdPath(params, suite, bedB, four, five);
 
+  // STAGES 0, 1 AND 2 ARE NOW DERIVED, AND STAGE 0 CHANGES UNITS.
+  //
+  // kf[0] was `{ position: [0, 0, 2.6] }` -- 2.6 UNITS, in the globe's own scale, because the
+  // globe used to live in a scene of its own and stage 0 -> 1 was a hard cut. P9 removes the
+  // cut: there is one frame, in feet, and altitude is the parameter (altitude.ts). So kf[0] is
+  // a foot-scale pose 31,353,347 ft up. The picture is nearly the same; every number in it is
+  // different. tests/stages.test.ts and tests/altitude.test.ts both assert on it.
+  //
+  // Stages 1 and 2 keep their azimuths and their aim heights and get new altitudes, because
+  // both were mis-pitched against their own names: stage 1 framed 3,268 ft and is called
+  // Cambridge, stage 2 framed 790 ft of a 1,269 ft Yard.
+  //
+  //   stop   was                   now                      frames
+  //   0      2.6 units             alt 31,353,347 ft         the globe, filling the frame
+  //   1      alt 2,600 ft          alt 16,332 ft             23,000 ft -- Cambridge
+  //   2      alt   620 ft          alt    815 ft             1,300 ft -- the whole Yard
+  //
+  // Stage 3 does NOT move, and that is load-bearing rather than conservative: orbit.ts:71-93
+  // derives the whole of STAGE3_CLAMP from MASS_RADIUS and from this keyframe, so moving it
+  // invalidates a derivation and a brute-force verification in another file.
+  const zero = descentStop(STAGE0_ALT, STAGE0_TILT_DEG, STAGE0_AZIMUTH_DEG, 0);
+  const one = descentStop(
+    obliqueDrop(CAMBRIDGE_EXTENT, STAGE1_TILT_DEG, DESCENT_FOV),
+    STAGE1_TILT_DEG,
+    STAGE1_AZIMUTH_DEG,
+    40,
+  );
+  const two = descentStop(
+    obliqueDrop(YARD_EXTENT, STAGE2_TILT_DEG, DESCENT_FOV),
+    STAGE2_TILT_DEG,
+    STAGE2_AZIMUTH_DEG,
+    30,
+  );
+  const three: Keyframe = { position: [150, 110, 190], target: [0, 42, 0], fov: DESCENT_FOV };
+
   return {
-    0: { position: [0, 0, 2.6], target: [0, 0, 0], fov: 45 },
-    1: { position: [1500, 2600, 2600], target: [0, 40, 0], fov: 45 },
-    2: { position: [420, 620, 620], target: [0, 30, 0], fov: 45 },
-    3: { position: [150, 110, 190], target: [0, 42, 0], fov: 45 },
+    0: { ...zero, path: descentPath(zero, one) },
+    1: { ...one, path: descentPath(one, two) },
+    2: { ...two, path: descentPath(two, three) },
+    3: three,
     4: path ? { ...four, path } : four,
     5: five,
   };
@@ -406,12 +651,23 @@ export function thresholdOpacity(
 /**
  * The keyframe the camera should hold, for a stage and its progress.
  *
- * Stage 4 is the only stage with a path rather than a place -- it runs from outside the
- * gable, through it, and out of bedroom B's door into the hall -- so it is the only
- * stage this does anything to. The path is on kf[4].path, built by thresholdPath(), and
- * the fallback when there is none is the straight blend this replaced: a suite whose
- * bedroom B and hall are not joined by a door has no route to follow, and a camera that
- * refused to move at all would be a worse answer than a line.
+ * GENERIC OVER WHICH STAGES HAVE A PATH, since P9. It used to read `if (stage !== 4) return
+ * kf[stage]`, because stage 4 was the only stage that travelled rather than sat. P9a gives
+ * stages 0, 1 and 2 paths too -- the descent from orbit is a flight, and a flight is a path
+ * -- so the test became "does this stage have a path" rather than "is this stage 4". That is
+ * strictly more general and it preserves stage 4 exactly: stage 4 has a path, stages 3 and 5
+ * do not.
+ *
+ * THE STAGE-4 FALLBACK IS STILL SPECIAL AND MUST STAY. A suite whose bedroom B and hall are
+ * not joined by a door has no route, thresholdPath() returns null, and the straight blend to
+ * kf[5] is the answer -- a camera that refused to move at all would be worse than a line.
+ * Stages 0-2 have no such fallback because their paths are geometry rather than routing and
+ * cannot fail to exist. Collapsing the two cases into `if (!path) return kf[stage]` would
+ * silently freeze the camera outside the gable for the four params sets in eighteen that
+ * route() cannot solve, which tests/stages.test.ts exercises directly.
+ *
+ * The path is on kf[stage].path, built by thresholdPath() for stage 4 and by descentPath()
+ * for stages 0-2.
  *
  * REDUCED MOTION IS A JUMP CUT, and this is where that is true. The crossing is not
  * walked more quickly; it is not walked. The return value is kf[4] before the cut
@@ -429,13 +685,47 @@ export function cameraKeyframe(
   t: number,
   reduced = false,
 ): Keyframe {
-  if (stage !== 4) return kf[stage];
-  if (reduced) return t < REDUCED_CUT ? kf[4] : kf[5];
-  const path = kf[4].path;
-  return path ? alongPath(path, t) : blend(kf[4], kf[5], t);
+  const path = kf[stage].path;
+  if (!path) {
+    // Stage 4 without a route: the straight blend. See the header -- this is the one case
+    // where a missing path means "fall back" rather than "this stage is a place".
+    if (stage === 4) {
+      if (reduced) return t < REDUCED_CUT ? kf[4] : kf[5];
+      return blend(kf[4], kf[5], t);
+    }
+    return kf[stage];
+  }
+  // The ENDS OF THE PATH, not kf[stage] and kf[stage + 1]. For stage 4 the two are the same
+  // pose by construction -- thresholdPath() pins its last stop to the kf[5] object itself --
+  // and for a stage whose path ends where it began, a jump cut to its own endpoints is the
+  // right reading of "do not animate this".
+  if (reduced) return t < REDUCED_CUT ? path[0]!.frame : path[path.length - 1]!.frame;
+  return alongPath(path, t);
 }
 
-/** Which stages need the campus, Weld's shell, and the interior mounted. */
+/**
+ * Which stages need the campus, Weld's shell, and the interior mounted.
+ *
+ * MOUNTING, NOT OPACITY, and P9 makes the distinction matter. This is a function of the stage
+ * because it is read during React's render; the layers' opacities are functions of ALTITUDE
+ * and are applied per frame from inside useFrame, where the camera can be read. altitude.ts's
+ * layerOpacity() is the other half and the two must not be confused: this decides what exists,
+ * that decides what is seen.
+ *
+ * THE CAMPUS IS NOW MOUNTED AT STAGE 0, which is the visible consequence of removing the cut.
+ * Stage 0's path descends from 31,353,347 ft all the way to stage 1's keyframe at 16,332 ft,
+ * so the globe's fade-out, the ground's arrival and the massing's arrival ALL happen inside
+ * stage 0. A campus mounted only from stage 1 would pop into existence at the stage boundary,
+ * which is the cut this phase exists to delete -- moved rather than removed.
+ *
+ * WHAT THAT COSTS AT FIRST PAINT. Stage 0 is first paint (Globe.tsx records the measurement),
+ * so mounting 36 extruded buildings there is not free. It is bounded by their own opacity: the
+ * massing band is zero above 40,000 ft, and a group whose opacity is zero is set invisible
+ * rather than drawn transparent, so the draw calls are not issued while the camera is in
+ * orbit. The geometry is built, which is the cost that remains, and it is the cost that buys a
+ * warm campus by the time the camera is low enough to see it -- the same argument the interior
+ * line below has always made.
+ */
 export function visibility(stage: StageId): {
   globe: boolean;
   campus: boolean;
@@ -444,7 +734,7 @@ export function visibility(stage: StageId): {
 } {
   return {
     globe: stage === 0,
-    campus: stage >= 1 && stage <= 3,
+    campus: stage <= 3,
     weld: stage >= 2 && stage <= 4,
     // Mounted a stage early so its geometry is warm before the threshold needs it.
     interior: stage >= 3,
