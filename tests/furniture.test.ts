@@ -253,7 +253,7 @@ describe("layout at the defaults", () => {
 
   it("stands nothing in a doorway landing", () => {
     // The defect this whole arrangement was rebuilt for. Before layout() could see
-    // openings it put six pieces across three of the suite's five interior doors:
+    // openings it put six pieces across three of the five doors the suite had then:
     // both bedroom A desks and both bedroom B desks flush against the wall their
     // hall door is in, the common room sofa square across K's door, and one of K's
     // own chairs 0.25 ft into that same landing from the other side. Every one of
@@ -264,11 +264,19 @@ describe("layout at the defaults", () => {
 
     // Non-vacuity, in three parts, because "no piece is in a doorway" is also true
     // of a suite with no doorways and of a landing measured as an empty box.
+    //
+    // SIX DOORS NOW, and d5 -- the hall's door into the common room -- is the one this
+    // list has to keep naming, because it is the newest and the one a stale expectation
+    // would silently stop covering. Its landing is u 16.5 to 19.5, v 13 to 17.5, and the
+    // 2 ft of it that fall inside the common room, v 13 to 15, are floor commonSlots()
+    // now has to keep clear. The default arrangement already does: the sofa is the
+    // nearest piece and it stands at u 15 to 17.75, v 4.5 to 10.5.
     const doors = doorwaysOf(suite);
-    expect(doors.map((d) => d.id)).toEqual(["d0", "d1", "d2", "d3", "d4"]);
+    expect(doors.map((d) => d.id)).toEqual(["d0", "d1", "d2", "d3", "d4", "d5"]);
     for (const d of doors) {
       expect(d.zone.du * d.zone.dv, d.id).toBeGreaterThan(0);
     }
+    expect(doors.find((d) => d.id === "d5")!.zone).toEqual({ u: 16.5, v: 13, du: 3, dv: 4.5 });
     // And the six old positions really are inside the landings this file measures,
     // so the assertion above is testing the arrangement and not the measurement.
     const oldPositions: [string, Box][] = [

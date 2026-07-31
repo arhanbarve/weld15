@@ -198,11 +198,12 @@ describe("blocks-door", () => {
    * EVERY CASE IS NOW A PIECE DELIBERATELY MOVED INTO A LANDING, which it was not
    * always: d0 and d2 used to hand the loop a bedroom desk that already stood in the
    * doorway at the defaults and re-drop it where it was. furniture.ts is door-aware
-   * now and the fit-out clears all five doors, so a case built that way tests
-   * nothing -- it has to carry the piece in. The two rooms with no piece that can
-   * reach their door at all -- the bathroom and the hall, for the suite entry -- get
-   * a free-standing dresser stood in them, which is the phase spec's own example of
-   * the failure.
+   * now and the fit-out clears all six doors, so a case built that way tests
+   * nothing -- it has to carry the piece in. The three landings no piece can reach at
+   * all get a free-standing dresser stood in them, which is the phase spec's own
+   * example of the failure: the bathroom, which has no fit-out; and both of the hall's
+   * own doors, the suite entry and the door into the common room, because the hall has
+   * no fit-out either.
    *
    * PICKING A TARGET THAT `blocks-door` IS ACTUALLY THE RIGHT ANSWER FOR
    *   place() settles containment before it asks about doors, so a target that
@@ -267,7 +268,32 @@ describe("blocks-door", () => {
       to: { u: 18.5, v: 17 },
       // wall p12 is u 21 to 21.5, the suite entry runs v 16.5 to 19.7
       zone: "u 19 to 23.5, v 16.5 to 19.7",
-      against: ["d4", "hall", "outside"],
+      // TWO DOORS, MEASURED, and the probe is left exactly where it was rather than moved
+      // to isolate one. The hall's south-west corner is where the entry's landing and the
+      // common room door's landing overlap: this dresser's box is u 18.5 to 21, v 17 to
+      // 18.5, and d5's landing runs u 16.5 to 19.5, v 13 to 17.5, so half a foot of the
+      // dresser stands in each. That overlap is a fact about a 3.2 ft entry and a 3 ft
+      // door 4.5 ft apart in a 4.5 ft hall, and hiding it by shifting the probe north
+      // would make this case tidier and the record less true. d5's own case below is the
+      // one that isolates d5.
+      against: ["d4", "hall", "outside", "d5", "common1"],
+    },
+    {
+      door: "d5",
+      // The hall's south-west corner, flush in both axes: box u 16.5 to 19, v 15.5 to 17.
+      // Far enough west that it clears the entry's landing at u 19 -- touching, so not
+      // blocking, for the same reason touching is not colliding -- and clear of d0's at
+      // v 19. So this one names d5 alone.
+      //
+      // A free-standing dresser because the hall has no fit-out piece to carry in, which
+      // is the same reason d1's case has one, and because nothing in the common room can
+      // reach this landing either: it bites u 16.5 to 19.5, v 13 to 15 of the common room,
+      // and the nearest designed piece is the sofa at u 15 to 17.75, v 4.5 to 10.5.
+      piece: dresserIn("probe", "hall", 16.5, 15.5),
+      to: { u: 16.5, v: 15.5 },
+      // wall w0 is v 15 to 15.5 and runs in u; the door runs u 16.5 to 19.5
+      zone: "u 16.5 to 19.5, v 13 to 17.5",
+      against: ["d5", "hall", "common1"],
     },
   ];
 
@@ -311,7 +337,10 @@ describe("blocks-door", () => {
     if (r.ok) return;
     expect(r.reason).toBe("blocks-door");
     // d0 at v 19-22, d1 at v 28.25-31.25, d2 at v 37.5-40.5 -- the dresser runs
-    // v 17 to 39 and u 19 to 23, so it stands in all three plus the entry.
+    // v 17 to 39 and u 19 to 23, so it stands in all three, plus the entry, plus the
+    // door into the common room: d5's landing reaches u 16.5 to 19.5, v 13 to 17.5, and
+    // the dresser's south-west corner is inside it. Five doors and six rooms, in the
+    // openings' own emission order, with the hall named once for all four of its doors.
     expect(r.against).toEqual([
       "d0",
       "hall",
@@ -322,8 +351,14 @@ describe("blocks-door", () => {
       "bedB",
       "d4",
       "outside",
+      "d5",
+      "common1",
     ]);
     expect(new Set(r.against).size).toBe(r.against.length);
+    // The de-duplication is what this test is for, so count what it suppressed: four of
+    // the five doors name the hall and it appears once.
+    expect(r.against.filter((x) => x === "hall").length).toBe(1);
+    expect(r.against.filter((x) => x.startsWith("d")).length).toBe(5);
   });
 
   it("finds the default fit-out standing in no doorway landing at all", () => {
@@ -1072,24 +1107,38 @@ describe("property sweep over randomised suites and targets", () => {
       }
     }
 
-    // Non-vacuity. Every branch has to have been reached, or the property above is
-    // a statement about an empty set. Re-measured at this seed against the fit-out
-    // as it stands, over 360 drags, 90 nudges and 90 rotations: 164 accepted, 262
-    // outside-room, 104 collision, 10 blocks-door, and of the accepted, 72 snapped
-    // to the grid, 83 to a wall and 9 needed neither.
-    //
-    // Those were 162 / 262 / 105 / 11 and 70 / 83 / 9 before the sofa's designed anchor
-    // moved a quarter foot inboard onto the grid, and the two cases that changed are
-    // both the sofa's: one of a pair of consecutive nudges into d3's landing now lands
-    // clear of it, and one drag that used to come down on the sofa now misses it. A
-    // quarter foot moving 2 of 540 outcomes is the size of change to expect from it.
-    //
-    // What the retry in nudge() did to that, measured both ways with the same seed:
-    // it moved exactly one of the 540 outcomes, a nudge that used to be absorbed by
-    // a wall and now lands on the grid a step further out. The four verdict counts
-    // are identical. That is the number to expect from a change that alters how far
-    // a keypress asks to go and nothing about what the answer may be -- 90 of the
-    // 540 cases are nudges at all, and most of those are nowhere near a wall.
+    /*
+     * Non-vacuity. Every branch has to have been reached, or the property above is
+     * a statement about an empty set. Re-measured at this seed against the fit-out
+     * as it stands, over 360 drags, 90 nudges and 90 rotations: 179 accepted, 261
+     * outside-room, 92 collision, 8 blocks-door, and of the accepted, 86 snapped
+     * to the grid, 84 to a wall and 9 needed neither.
+     *
+     * THOSE WERE 164 / 262 / 104 / 10 AND 72 / 83 / 9 BEFORE THE HALL-TO-COMMON-ROOM
+     * DOOR, and 15 of the 540 outcomes moving is more than a new door's own landing can
+     * account for. It is not: the door MOVED THE FIT-OUT. furniture.ts's commonSlots()
+     * runs farLimit() against every door landing, so d5's landing on the common room's
+     * inner face pulls the sofa, the table and its two chairs inboard wherever it
+     * reaches them. Measured over this generator's own first 30 suites, by dumping
+     * layout() with the door and without it: 5 of the 30 arrangements move, always the
+     * same four pieces, always 0.5 to 1.0 ft in u, and never a piece dropped -- 870
+     * pieces both ways. So fewer random targets come down on the common room's group
+     * and more land on open floor, which is the collision-to-accepted shift above.
+     *
+     * blocks-door falling from 10 to 8 has the same cause and is the one to watch: the
+     * new door adds a landing and the count still went DOWN, because the group it moved
+     * was standing in reach of d3's landing and is now further from it. Eight is still
+     * eight cases and the bound below is five, but a bound this near its measurement is
+     * measuring the seed, which is why the specific-case tests above pin one per door
+     * with literals instead.
+     *
+     * What the retry in nudge() did to that, measured both ways with the same seed:
+     * it moved exactly one of the 540 outcomes, a nudge that used to be absorbed by
+     * a wall and now lands on the grid a step further out. The four verdict counts
+     * were identical. That is the number to expect from a change that alters how far
+     * a keypress asks to go and nothing about what the answer may be -- 90 of the
+     * 540 cases are nudges at all, and most of those are nowhere near a wall.
+     */
     expect(tally.ok + tally.collision + tally["outside-room"] + tally["blocks-door"]).toBe(540);
     expect(tally.nudges).toBe(90);
     expect(tally.rotates).toBe(90);
@@ -1100,9 +1149,10 @@ describe("property sweep over randomised suites and targets", () => {
     // blocks-door carries its own floor, because it is intrinsically the rarest of the
     // four -- layout() keeps the whole fit-out clear of the landings, so a random
     // target has to find one -- and because it sat one case above the shared 10 until
-    // the sofa moved. A bound that a quarter-foot design change crosses is measuring
-    // the seed rather than the branch; ten is still ten cases, at four of the five
-    // doors, and the specific-case tests above pin one per door with literals.
+    // the sofa moved, and two below it once the hall-to-common-room door moved the
+    // common room's group again. A bound that a quarter-foot design change crosses is
+    // measuring the seed rather than the branch; eight is still eight cases, and the
+    // specific-case tests above pin one per door with literals.
     expect(tally["blocks-door"], "nothing exercised blocks-door").toBeGreaterThan(5);
     for (const k of ["grid", "wall", "none"] as const) {
       expect(tally[k], `nothing snapped to ${k}`).toBeGreaterThan(5);
@@ -1189,6 +1239,13 @@ describe("property sweep over randomised suites and targets", () => {
     }
 
     expect(stuck).toEqual([]);
+    // RE-MEASURED WITH THE HALL-TO-COMMON-ROOM DOOR IN PLACE, and all five numbers below
+    // are unchanged: 0 stuck, 5146 / 4903 / 5116 / 21 / 213. The door does move the
+    // fit-out -- it pulls the common room's sofa, table and two chairs inboard where its
+    // landing reaches them, measured in 5 of the 30 suites of the sweep above -- so this
+    // holding still is the statement, not the absence of one: every piece the app ships
+    // is still a piece the app will accept, with one more door to clear.
+    //
     // Non-vacuity, in the order it matters. Measured at this seed: 5146 pieces over the
     // 180 suites, 4903 of them on an anchor off the grid, 5116 moved by the re-drop, and
     // 21 of the 120 off-closure arrangements degraded.

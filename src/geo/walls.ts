@@ -371,16 +371,69 @@ function buildOpenings(suite: Suite, walls: Wall[]): Opening[] {
   const byId = new Map(suite.rooms.map((r) => [r.id, r]));
   let n = 0;
 
+  /**
+   * A door in the band that divides two rooms: centred on the band, then slid into the
+   * stretch of it where the two rooms actually FACE each other.
+   *
+   * The slide is not a refinement. It is what makes the hall-to-common-room door a door
+   * rather than a hole in front of bedroom A. Bands merge, and w0 is the worst case in
+   * the suite: one 21 ft band at v 15 to 15.5 running the whole leg depth, separating
+   * the common room from bedroom A over u 0 to 16 and from the hall over u 16.5 to 20.
+   * A 3 ft door centred on that BAND lands at u 9 to 12 -- inside bedroom A's stretch,
+   * so `connects` would say hall and common room while the hole opened out of the
+   * bedroom, walk.ts would cut the void there, and route.ts's thresholdOf() would stand
+   * the hall-side waypoint at u 10.5, v 16.5, which is in bedroom A.
+   *
+   * Third instance of one error, so it is a rule now rather than a fix: the suite entry
+   * below was offset from its band's end instead of the hall's, and every facade window
+   * was centred on the 44 ft band instead of on the room it lights. Both are recorded
+   * where they were fixed. An offset is measured along the band and a door belongs to
+   * two rooms, and those are not the same interval.
+   *
+   * CLAMPED RATHER THAN RE-CENTRED, and that costs one line to say why. Centring on the
+   * shared face instead would move K's door: w7 runs the common room's full 15 ft while
+   * K is 12 along, so the band centre is v 6 to 9 and the shared-face centre would be
+   * v 4.5 to 7.5. v 6 to 9 is already wholly inside K and already right, and three other
+   * modules have measured it there by its coordinates -- furniture.ts's commonSlots() and
+   * clearOfBWalls(), drag.ts's DOOR_CLEARANCE note. So the band centre is KEPT wherever
+   * it already lies within the shared face, which measured is all four doors that existed
+   * before this one, and slid to the nearer end of that face when it does not.
+   *
+   * The width is clipped to the shared face as well. A slider can leave the common room
+   * barely reaching the hall -- commonDeep only just past bedDepth + partition -- and the
+   * honest answer there is a narrow door that walk.ts's canPass() refuses the walker,
+   * rather than a 3 ft door hanging off the end of a 0.5 ft shared face.
+   */
   const door = (a: string, b: string, width: number, note?: string) => {
     const w = wallBetween(walls, a, b);
     if (!w) return;
-    const along = w.du > w.dv ? w.du : w.dv;
+    const ra = byId.get(a);
+    const rb = byId.get(b);
+    // Both rooms exist by construction: `separates` is measured by probing suite.rooms,
+    // so a band that separates a from b was found by finding them. Narrowed rather than
+    // asserted because a missing room is not a case this can invent an answer for.
+    if (!ra || !rb) return;
+
+    const alongV = !(w.du > w.dv);
+    const along = alongV ? w.dv : w.du;
+    const lo = alongV ? w.v : w.u;
+    const runLo = (r: Rect) => (alongV ? r.v : r.u);
+    const runHi = (r: Rect) => (alongV ? r.v + r.dv : r.u + r.du);
+    const faceLo = Math.max(lo, runLo(ra), runLo(rb));
+    const faceHi = Math.min(lo + along, runHi(ra), runHi(rb));
+    // Positive whenever wallBetween() found this band at all, since `separates` records
+    // a pair only where both rooms answer the probe at the SAME point along the band.
+    // Guarded anyway: walls and rooms can arrive from two different builds.
+    if (faceHi - faceLo <= EPS) return;
+
+    const clear = Math.min(width, faceHi - faceLo);
+    const centred = (along - clear) / 2;
     out.push({
       id: `d${n++}`,
       wallId: w.id,
       kind: "door",
-      offset: Math.max(0, (along - width) / 2),
-      width: Math.min(width, along),
+      offset: Math.min(Math.max(centred, faceLo - lo), faceHi - lo - clear),
+      width: clear,
       connects: [a, b],
       note,
     });
@@ -428,6 +481,41 @@ function buildOpenings(suite: Suite, walls: Wall[]): Opening[] {
       });
     }
   }
+
+  /**
+   * The hall's south end opens into the common room, and this is the door that was
+   * missing.
+   *
+   * WHAT WAS WRONG WITHOUT IT. The five openings above are four interior doors and the
+   * entry, and they do not connect the suite: unreachableRooms() in rooms.ts flood-fills
+   * over shared WALL SEGMENTS and answered [], while route.ts's reachable() fills over
+   * DOORWAYS and answered ["hall", "bedA", "bath", "bedB"]. Both were right about their
+   * own question, and the gap between them was this door. The suite's doorway graph was
+   * two components -- the hall plus the three rooms off it, and the common room plus K
+   * reachable only through it -- so route("hall", "common1") was null and no viewer could
+   * be walked to the room the suite is named for. Measured, before and after, in
+   * tests/route.test.ts and tests/walk.test.ts.
+   *
+   * MEASURED, at the defaults: it lands in w0, the 21 ft band at v 15 to 15.5, at offset
+   * 16.5 and width 3, i.e. u 16.5 to 19.5. The band's own centre is u 9 to 12 and the
+   * hall runs u 16.5 to 21 against the common room's u 0 to 20, so the shared face is
+   * u 16.5 to 20 and the 3 ft door is slid to its low end -- see door() above. Its low
+   * jamb is therefore flush with the line where bedroom A's partition meets the hall,
+   * which is a door in the corner of the hall and is the whole 3.5 ft the two rooms give
+   * it. route.ts stands the waypoints at u 18, v 14 in the common room and v 16.5 in the
+   * hall, and both answer roomAt() correctly.
+   *
+   * WHY IT IS EMITTED LAST, WHICH IS NOT WHERE IT BELONGS IN THE STORY. Opening ids are
+   * emission order, and three other modules have measured these ones by name: drag.ts
+   * reports `["d3", "common1", "k"]` to the UI, furniture.ts's commonSlots() cites d3's
+   * landing boundary at u 18, and walk.ts's solidsOf() names d4 as the entry it leaves
+   * whole. Emitting this door in narrative order -- with the other interior doors, before
+   * the entry -- renumbers d4 and would make every one of those records say something
+   * false about a different door. So it goes on the end and says so here, which is the
+   * same trade rooms.ts's measuredFacadeStep makes: the awkward arrangement is the one
+   * that keeps the other modules' measurements true.
+   */
+  door("hall", "common1", 3);
 
   // A window is centred on the ROOM it lights, not on the band it sits in.
   //

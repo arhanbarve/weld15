@@ -16,9 +16,11 @@
  * WHAT CANNOT BE TESTED FROM HERE, stated rather than quietly skipped. route() prefers
  * the shorter walk when two doorways join the same pair of rooms, and routeRooms() runs
  * Dijkstra weighted by distance rather than by hop count. Neither branch can be reached:
- * buildOpenings() hard-codes the suite's four interior doors, no two of them join the same
+ * buildOpenings() hard-codes the suite's five interior doors, no two of them join the same
  * pair, and the resulting graph is a tree, so every chain is unique and the two orderings
- * cannot disagree. Reaching those branches needs a second door in walls.ts.
+ * cannot disagree. Reaching those branches needs a SECOND door between one pair of rooms,
+ * which the hall-to-common-room door is not -- it added an edge to the tree and the tree
+ * grew deeper rather than acquiring a cycle.
  */
 
 import { describe, it, expect } from "vitest";
@@ -185,11 +187,17 @@ describe("standIn and the constants", () => {
 describe("thresholds: the doorways a walker can get through", () => {
   const ts = thresholds(suite);
 
-  it("finds the four interior doors and nothing else", () => {
+  it("finds the five interior doors and nothing else", () => {
     // Windows are excluded by canPass; the suite entry is excluded because "outside" is
     // not a room this model has, which is the same reason walk.ts leaves that band whole.
-    expect(ts.map((t) => t.id)).toEqual(["d0", "d1", "d2", "d3"]);
-    expect(buildWalls(suite).openings.length).toBe(10);
+    //
+    // d5 and not d4 is the hall-to-common-room door, and the gap in the sequence is not a
+    // mistake. Opening ids are emission order and walls.ts emits that door LAST, after the
+    // entry, because drag.ts, furniture.ts and walk.ts have each recorded d3 or d4 by name
+    // -- see the docblock on it. So the interior doors are d0..d3 and d5, and d4 is the
+    // entry sitting between them.
+    expect(ts.map((t) => t.id)).toEqual(["d0", "d1", "d2", "d3", "d5"]);
+    expect(buildWalls(suite).openings.length).toBe(11);
   });
 
   it("names the wall each door is actually hung in", () => {
@@ -237,20 +245,39 @@ describe("thresholds: the doorways a walker can get through", () => {
   });
 
   it("leaves room for the walker at every standing position", () => {
-    // Measured on the default suite: 1.0528 ft at all eight, and the arithmetic is worth
-    // writing out because the standoff alone does not produce it. The nearest solid to a
-    // waypoint is the END of a jamb, not its face: 1.0 ft away across the wall and 1.5 ft
-    // along it, so hypot(1, 1.5) - 0.75 = 1.0528.
+    /*
+     * Measured on the default suite: 1.0528 ft at nine of the ten, and the arithmetic is
+     * worth writing out because the standoff alone does not produce it. The nearest solid
+     * to a waypoint is the END of a jamb, not its face: 1.0 ft away across the wall and
+     * 1.5 ft along it, so hypot(1, 1.5) - 0.75 = 1.0528.
+     *
+     * THE TENTH IS 0.75, and it is d5's hall side. That door is clamped to the low end of
+     * the stretch the hall and the common room share, so its low jamb is flush with the
+     * line of bedroom A's partition -- w4, at u 16 to 16.5 -- and from the door's
+     * centreline at u 18 that partition is 1.5 ft away SIDEWAYS rather than diagonally.
+     * 1.5 - 0.75 = 0.75. A door in the corner of the hall has a corner's clearance, which
+     * is the geometry the clamp reports rather than a defect in it: canPass() admits a
+     * door wider than 2 * RADIUS and this one is 3 ft, so half of it always exceeds the
+     * radius. The sweep at the bottom of this file is where that bound is measured tight.
+     */
     for (const t of ts) {
       expect([t.id, clearance(t.at[0], ctx) > 0]).toEqual([t.id, true]);
       expect([t.id, clearance(t.at[1], ctx) > 0]).toEqual([t.id, true]);
+    }
+    const byId = new Map(ts.map((t) => [t.id, t]));
+    const d5 = byId.get("d5")!;
+    expect(clearance(d5.at[0], ctx)).toBeCloseTo(0.75, 12);
+    expect(clearance(d5.at[1], ctx)).toBeCloseTo(1.0527756377319948, 12);
+    for (const t of ts) {
+      if (t.id === "d5") continue;
+      for (const p of t.at) expect([t.id, clearance(p, ctx)]).toEqual([t.id, clearance(ts[0]!.at[0], ctx)]);
     }
   });
 
   it("closes every doorway for a walker too wide for a 3 ft door", () => {
     // The radius is a parameter of the walker, and thresholds() filters on canPass.
     expect(thresholds(suite, 1.6)).toEqual([]);
-    expect(thresholds(suite, 1.49).length).toBe(4);
+    expect(thresholds(suite, 1.49).length).toBe(5);
   });
 
   it("refuses to skip an opening that names a wall the suite has no wall for", () => {
@@ -262,19 +289,34 @@ describe("thresholds: the doorways a walker can get through", () => {
 });
 
 describe("reachable: what a walk can get to, against what a door could", () => {
-  it("reaches the hall and the three rooms off it, and not the other three", () => {
+  it("reaches every room but the unknown strip, which is the whole suite less the seal", () => {
     /*
-     * MEASURED, and the mismatch with unreachableRooms() is not one room but three. Two of
-     * them are a gap in walls.ts, not a choice here: buildOpenings() hangs no door between
-     * the hall and the common room, so the doorway graph is two components. See route.ts's
-     * header for the whole accounting.
+     * MEASURED, and this is the assertion the previous reading said to change when the
+     * hall-to-common-room door landed. It has landed. reachable() returns all seven ids
+     * except "unknown", in the suite's own room order, and the component test in
+     * tests/walk.test.ts has collapsed from three groups to two. Nothing in route.ts
+     * changed with it: the door was the whole of the gap.
      *
-     * WHEN THAT DOOR LANDS, this is the assertion to change: reachable() should then
-     * return all seven ids except "unknown", and the component test below should collapse
-     * to two groups. Nothing in route.ts needs to change with it.
+     * WHAT IT SAID BEFORE, kept because it is what the door fixed rather than history for
+     * its own sake: ["hall", "bedA", "bath", "bedB"], against unreachableRooms()'s [].
+     * Both were right about their own question -- shared wall segments against actual
+     * doorways -- and the three rooms between them were the common room, K reached through
+     * it, and the strip. Only the strip is left, and only the strip is deliberate.
+     *
+     * The one mismatch that REMAINS is the strip, and rooms.ts exempts it from its own
+     * gate for the same reason it has no door: naming whose door it would be asserts a use
+     * no source supports. So the two functions still disagree by one room, permanently,
+     * and that is the disagreement this module exists to make legible.
      */
-    expect(reachable(suite)).toEqual(["hall", "bedA", "bath", "bedB"]);
+    expect(reachable(suite)).toEqual(["common1", "k", "hall", "bedA", "bath", "bedB"]);
+    expect(reachable(suite)).not.toContain("unknown");
     expect(unreachableRooms(suite)).toEqual([]);
+    // The hall is no longer FIRST in that list, and it never was by rank: reachable()
+    // returns the suite's own room order and buildSuite() emits common1 and k ahead of the
+    // hall. It used to look sorted only because those two were the rooms being stranded.
+    // places() is what puts the hub first, and it is asserted below.
+    expect(reachable(suite)[0]).toBe("common1");
+    expect(reachable(suite)).toContain(HUB);
   });
 
   it("agrees with a plain BFS over buildWalls()'s own openings", () => {
@@ -300,26 +342,44 @@ describe("places: the named destinations a reduced-motion viewer gets", () => {
   const ps = places(suite);
 
   it("offers the reachable rooms with the hall first", () => {
-    expect(ps.map((p) => p.id)).toEqual(["hall", "bedA", "bath", "bedB"]);
+    // The sort is doing real work here now, and this is where that shows. buildSuite()
+    // emits the rooms as common1, k, hall, bedA, unknown, bath, bedB, and the first two of
+    // those are reachable -- so reachable() hands places() a list that does NOT begin with
+    // the hall, and places() moves it to the front. The order after the hall is the
+    // suite's own, because the comparator only ranks the hub and Array.sort is stable.
+    expect(ps.map((p) => p.id)).toEqual(["hall", "common1", "k", "bedA", "bath", "bedB"]);
+    expect(reachable(suite)[0]).not.toBe(HUB);
   });
 
   it("puts the hall first even when it is not first in the room list", () => {
     /*
-     * The sort, isolated, because on the real suite it is doing nothing. buildSuite() emits
-     * the rooms as common1, k, hall, bedA, unknown, bath, bedB, and the two rooms ahead of
-     * the hall are exactly the two the missing hall-to-common-room door strands -- so the
-     * hall is already first among the reachable ones and `.sort(() => 0)` would pass the
-     * test above. It stops being dead code the moment that door lands. So the suite is
-     * handed over with its rooms shuffled, which changes nothing about the geometry:
-     * buildWalls() sorts its own grid lines and hangs doors by `separates`, not by index.
+     * The sort, isolated. It used to be doing nothing on the real suite -- the two rooms
+     * ahead of the hall in buildSuite()'s order were exactly the two the missing
+     * hall-to-common-room door stranded, so the hall was already first among the reachable
+     * ones and `.sort(() => 0)` would have passed the test above. That door has landed, so
+     * the test above now exercises the sort directly and this one is the harder case:
+     * reversed, the hall is fourth of six rather than first of six.
+     *
+     * Shuffling changes nothing about the geometry: buildWalls() sorts its own grid lines
+     * and hangs doors by `separates`, not by index.
      */
     const shuffled: Suite = {
       ...suite,
       rooms: [...suite.rooms].reverse(),
     };
     expect(shuffled.rooms.map((r) => r.id).indexOf(HUB)).toBe(4);
-    expect(places(shuffled).map((p) => p.id)).toEqual(["hall", "bedB", "bath", "bedA"]);
-    expect(reachable(shuffled)).toEqual(["bedB", "bath", "bedA", "hall"]);
+    expect(places(shuffled).map((p) => p.id)).toEqual([
+      "hall",
+      "bedB",
+      "bath",
+      "bedA",
+      "k",
+      "common1",
+    ]);
+    expect(reachable(shuffled)).toEqual(["bedB", "bath", "bedA", "hall", "k", "common1"]);
+    // Non-vacuity for the sort: the hall really is neither first nor last in what it is
+    // handed, so neither a no-op comparator nor a reverse would produce the answer above.
+    expect(reachable(shuffled).indexOf(HUB)).toBe(3);
   });
 
   it("carries each room's own label and centre", () => {
@@ -358,7 +418,13 @@ describe("route: null when there is no doorway chain", () => {
 
   it("is null exactly when the BFS says the rooms are in different components", () => {
     // The contract, checked pair by pair against a graph computed some other way. 49
-    // ordered pairs, 21 with a route and 28 without.
+    // ordered pairs, 37 with a route and 12 without.
+    //
+    // MEASURED, and both numbers are now the shape of one sealed room rather than of a
+    // split suite: six of the seven rooms are one component, so 6 x 6 = 36 ordered pairs
+    // route, plus unknown to itself, which is a walk of zero length. The 12 without are
+    // the strip paired with each of the other six, both ways. It was 21 and 28 before the
+    // hall-to-common-room door, which is 4 x 4 + 2 x 2 + 1 -- two components plus the seal.
     let withRoute = 0;
     for (const a of ids) {
       for (const b of ids) {
@@ -367,8 +433,8 @@ describe("route: null when there is no doorway chain", () => {
         if (want) withRoute++;
       }
     }
-    expect(withRoute).toBe(21);
-    expect(ids.length * ids.length - withRoute).toBe(28);
+    expect(withRoute).toBe(37);
+    expect(ids.length * ids.length - withRoute).toBe(12);
   });
 
   it("is null for every pair once the doors are too narrow for the walker", () => {
@@ -395,13 +461,19 @@ describe("route: the chain, and its shape", () => {
     }
   });
 
-  it("is one point for a room to itself, four for a two-room walk, seven for three", () => {
+  it("is one point for a room to itself and three more for every hop after the first", () => {
     // centre(from), then [near side of door, far side of door, centre of next room] per
-    // hop. Four points and seven points, and nothing in between.
+    // hop. One, four, seven, ten, and nothing in between.
+    //
+    // TEN IS NEW, and it is what the hall-to-common-room door bought: before it the suite's
+    // deepest walk was two hops, because K was in the other component and nothing three
+    // hops apart was joined at all. Bedroom A to K is now bedA -> hall -> common1 -> k.
     expect(route("hall", "hall", suite)).toEqual([standIn(suite.rooms[2]!)]);
     expect(route("hall", "bedB", suite)!.length).toBe(4);
     expect(route("bedA", "bedB", suite)!.length).toBe(7);
     expect(route("common1", "k", suite)!.length).toBe(4);
+    expect(routeRooms("bedA", "k", suite)).toEqual(["bedA", "hall", "common1", "k"]);
+    expect(route("bedA", "k", suite)!.length).toBe(10);
     for (const a of ids) {
       for (const b of ids) {
         const pts = route(a, b, suite);
@@ -469,10 +541,23 @@ describe("route: the waypoints are walkable, fed through step()", () => {
   const segs = segments(suite);
 
   it("has segments to walk at all", () => {
-    // Non-vacuity, measured: 21 routes over the default suite give 60 segments -- seven
-    // of the 21 are a room to itself and contribute none, eight are one hop and give three
-    // each, six are two hops and give six each.
-    expect(segs.length).toBe(60);
+    // Non-vacuity, measured: 37 routes over the default suite give 168 segments. The hop
+    // histogram, counted over ordered pairs: seven are a room to itself and contribute
+    // none, ten are one hop and give three each, fourteen are two hops and give six each,
+    // six are three hops and give nine each -- 3 * (10 + 28 + 18) = 168.
+    //
+    // It was 60 before the hall-to-common-room door, over 21 routes with nothing deeper
+    // than two hops. The door did not merely add its own segments: it put four more rooms
+    // within reach of each other, so the count went up by more than the doorway did.
+    expect(segs.length).toBe(168);
+    const hops: Record<number, number> = {};
+    for (const a of ids) {
+      for (const b of ids) {
+        const chain = graph.chain(a, b);
+        if (chain) hops[chain.length - 1] = (hops[chain.length - 1] ?? 0) + 1;
+      }
+    }
+    expect(hops).toEqual({ 0: 7, 1: 10, 2: 14, 3: 6 });
   });
 
   it("arrives at every waypoint rather than stopping against a wall", () => {
@@ -552,7 +637,10 @@ describe("route: the waypoints are walkable, fed through step()", () => {
 });
 
 describe("the sliders move the walls, so all of it again on randomised suites", () => {
-  it("routes every pair walkably over 300 suites", () => {
+  // 30 s for the same measured reason as walk.test.ts's 300-suite sweep: these two are the
+  // only tests in the unit suite near vitest's 5 s default, and a full run with other work
+  // on the cores is where that margin disappears. The sweep is the evidence; the clock is not.
+  it("routes every pair walkably over 300 suites", { timeout: 30_000 }, () => {
     const rnd = makeRnd(20260731);
     let routes = 0;
     let nulls = 0;
@@ -601,13 +689,41 @@ describe("the sliders move the walls, so all of it again on randomised suites", 
         }
       }
     }
-    // Non-vacuity, measured: 6,224 routes and 8,476 nulls over 300 suites, 17,772
-    // segments, worst waypoint clearance 0.576 ft and worst step residual 1.0e-13 ft.
-    // The residual bound is what the 12 unwalkable doorways showed up as before the
-    // sliver fix in walk.ts: they came back 1.75 to 2.25 ft short of the waypoint.
-    expect(routes).toBeGreaterThan(6000);
-    expect(nulls).toBeGreaterThan(8000);
-    expect(segs).toBeGreaterThan(17000);
+    /*
+     * NON-VACUITY, MEASURED: 10,480 routes and 4,220 nulls over 300 suites, 46,044
+     * segments, worst waypoint clearance 0.0356 ft and worst step residual 1.0e-13 ft.
+     * The residual bound is what the 12 unwalkable doorways showed up as before the
+     * sliver fix in walk.ts: they came back 1.75 to 2.25 ft short of the waypoint.
+     *
+     * IT WAS 6,224 / 8,476 / 17,772 BEFORE THE HALL-TO-COMMON-ROOM DOOR, and the nulls
+     * halving is the door's whole point rather than a slackened bound. Routes plus nulls
+     * is 14,700 either way, which is 300 x 49 -- every ordered pair of the seven rooms in
+     * every suite -- so the two numbers are one number counted twice.
+     *
+     * WHERE THE 4,220 COME FROM, counted per suite rather than inferred: 247 of the 300
+     * suites reach all six reachable rooms and contribute 12 nulls each, which is the
+     * strip paired with the other six both ways; 38 contribute 22, which is one further
+     * room cut off; 15 contribute 28, which is the OLD two-component shape, because in
+     * those 15 the hall and the common room share under 2 * RADIUS of wall and canPass()
+     * refuses the walker the door door() clipped to that face. 247 * 12 + 38 * 22 +
+     * 15 * 28 = 4,220 exactly.
+     *
+     * WHY THE WORST WAYPOINT CLEARANCE FELL FROM 0.576 TO 0.0356, WHICH IS NOT A DEFECT.
+     * The 0.576 was d2's, bedroom B's door, and it still measures 0.5755 -- it is simply
+     * no longer the worst. The new worst is d5 in suite 163, where commonDeep is 18.780
+     * and bedDepth 16.709, so the hall (u 17.209 to 20.878) and the common room (u 0 to
+     * 18.780) share only 1.5711 ft of wall and the door is clipped to all of it. The
+     * waypoint stands on the door's centreline at u 17.9947, and the nearest solid is the
+     * partition forming the jamb -- w4 on the hall side, w7 on the common side -- exactly
+     * half a door width away. So the clearance IS width / 2 - RADIUS = 0.78555 - 0.75 =
+     * 0.03556, on both sides, and it is positive for precisely the reason canPass() admits
+     * the door at all: canPass tests width > 2 * RADIUS, which is the same inequality. The
+     * bound below is therefore guaranteed by the filter thresholds() already applies, not
+     * by luck, and every one of the 46,044 segments was walked to within 1.0e-13 ft.
+     */
+    expect(routes).toBeGreaterThan(10000);
+    expect(nulls).toBeGreaterThan(4000);
+    expect(segs).toBeGreaterThan(45000);
     expect(moved).toBeGreaterThan(200);
     expect(worstClearance).toBeGreaterThan(0);
     expect(worstResidual).toBeLessThan(1e-6);
@@ -616,10 +732,18 @@ describe("the sliders move the walls, so all of it again on randomised suites", 
   it("keeps the hall as the hub and the strip sealed in every suite", () => {
     // The two topological facts every assertion above leans on. A slider that broke either
     // would make the sweep test a statement about a different suite than it claims.
+    //
+    // "THE HUB" IS NOW ASSERTED AS MEMBERSHIP AND AS places()'s ORDER, not as reachable()'s
+    // first element, and the change is the door rather than a weakening. reachable() returns
+    // the SUITE'S own room order and buildSuite() emits common1 and k ahead of the hall, so
+    // reachable(s)[0] is "common1" in every connected suite -- measured at i = 0. It read
+    // "hall" before only because those two rooms were the ones being stranded, which made a
+    // statement about a broken topology look like a statement about the hub. places() is the
+    // function that promises the hub first, and it is the one a control reads.
     const rnd = makeRnd(31337);
     for (let i = 0; i < 300; i++) {
       const s = buildSuite(jittered(rnd));
-      expect([i, reachable(s)[0]]).toEqual([i, HUB]);
+      expect([i, reachable(s).includes(HUB)]).toEqual([i, true]);
       expect([i, places(s)[0]!.id]).toEqual([i, HUB]);
       expect([i, reachable(s).includes("unknown")]).toEqual([i, false]);
       expect([i, route("hall", "unknown", s)]).toEqual([i, null]);
@@ -628,5 +752,9 @@ describe("the sliders move the walls, so all of it again on randomised suites", 
         expect([i, id, route(HUB, id, s) !== null]).toEqual([i, id, true]);
       }
     }
+    // Non-vacuity for the change of wording: the hall is genuinely not first in what
+    // reachable() returns, so "includes" is doing different work from "[0]" and this is
+    // not a bound that was quietly relaxed.
+    expect(reachable(buildSuite(jittered(makeRnd(31337))))[0]).toBe("common1");
   });
 });

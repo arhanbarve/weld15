@@ -213,7 +213,7 @@ describe("openings", () => {
     expect(unreachableRooms(suite)).toEqual([]);
   });
 
-  it("opens the three hall doors the resident describes, plus K off the common room", () => {
+  it("opens the three hall doors the resident describes, K off the common room, and the hall into it", () => {
     const doors = openings.filter((o) => o.kind === "door");
     const pair = (a: string, b: string) =>
       doors.some((d) => d.connects.includes(a) && d.connects.includes(b));
@@ -223,6 +223,82 @@ describe("openings", () => {
     // "attached to the common room" -- K is reached through it, not off the hall
     expect(pair("common1", "k")).toBe(true);
     expect(pair("hall", "k")).toBe(false);
+    // And the one that was missing until it was added, which is what joined the two
+    // halves of the suite: without it route("hall", "common1") was null and no viewer
+    // could be walked to the room the suite is named for. Measured, both before and
+    // after, in tests/route.test.ts and tests/walk.test.ts.
+    expect(pair("hall", "common1")).toBe(true);
+    // Six doors: the four interior ones above, the suite entry, and this one. Measured
+    // with the eleven openings -- five of them windows -- in the count below.
+    expect(doors.map((o) => o.id)).toEqual(["d0", "d1", "d2", "d3", "d4", "d5"]);
+    expect(openings.length).toBe(11);
+  });
+
+  it("slides the hall's door into the stretch the two rooms share, not the band's centre", () => {
+    /*
+     * THE MEASUREMENT THE CLAMP IN door() EXISTS FOR, and the reason it is not a
+     * refinement. w0 is one merged 21 ft band at v 15 to 15.5 running the whole leg
+     * depth: it separates the common room from bedroom A over u 0 to 16, and from the
+     * hall over u 16.5 to 20. Centred on the BAND a 3 ft door lands at u 9 to 12, which
+     * is in front of bedroom A -- so `connects` would say hall and common room while
+     * the hole opened out of the bedroom, walk.ts would cut the void there, and
+     * route.ts would stand the hall-side waypoint at u 10.5, v 16.5, inside bedroom A.
+     *
+     * MEASURED at the defaults: band w0, offset 16.5, width 3, i.e. u 16.5 to 19.5. The
+     * band's own centre is u 9 to 12 and the shared face is u 16.5 to 20, so the door is
+     * slid to the low end of that face -- its low jamb flush with the line where
+     * bedroom A's partition meets the hall. A door in the corner of the hall, and the
+     * whole 3 ft of the 3.5 ft the two rooms give it.
+     */
+    const door = openings.find(
+      (o) => o.kind === "door" && o.connects.includes("hall") && o.connects.includes("common1"),
+    )!;
+    expect(door).toBeDefined();
+    const band = walls.find((w) => w.id === door.wallId)!;
+    expect([band.id, band.u, band.v, band.du, band.dv]).toEqual(["w0", 0, 15, 21, 0.5]);
+    expect([door.offset, door.width]).toEqual([16.5, 3]);
+
+    const hall = suite.rooms.find((r) => r.id === "hall")!;
+    const common = suite.rooms.find((r) => r.id === "common1")!;
+    // The band runs in u, so the shared face is the overlap of the two rooms' u runs.
+    const faceLo = Math.max(band.u, hall.u, common.u);
+    const faceHi = Math.min(band.u + band.du, hall.u + hall.du, common.u + common.du);
+    expect([faceLo, faceHi]).toEqual([16.5, 20]);
+    expect(band.u + door.offset).toBe(faceLo);
+    expect(band.u + door.offset + door.width).toBeLessThanOrEqual(faceHi + 1e-9);
+
+    // Non-vacuity, and the whole point: the band centre is NOT where it went, and the
+    // band centre is inside bedroom A's stretch rather than the hall's.
+    const bandCentre = band.u + (band.du - door.width) / 2;
+    expect(bandCentre).toBe(9);
+    expect(bandCentre).toBeLessThan(faceLo);
+    const bedA = suite.rooms.find((r) => r.id === "bedA")!;
+    expect(bandCentre + door.width).toBeLessThanOrEqual(bedA.u + bedA.du);
+  });
+
+  it("keeps the four older doors exactly where the band centre already put them", () => {
+    // CLAMPED RATHER THAN RE-CENTRED, measured. door() keeps the band centre wherever it
+    // already lies inside the shared face, and slides only when it does not. All four
+    // doors that existed before the hall-to-common-room one are band-centred, and three
+    // other modules have measured them there by their coordinates -- furniture.ts's
+    // commonSlots() and clearOfBWalls(), drag.ts's DOOR_CLEARANCE note. Centring on the
+    // shared face instead would move K's door from v 6..9 to v 4.5..7.5 and make all
+    // three of those records false about a door that was already right.
+    // By the rooms it joins and not by its id, so a renumbering in walls.ts cannot quietly
+    // exempt a different door from the rule this states about four of them.
+    const isTheNewOne = (o: { connects: string[] }) =>
+      o.connects.includes("hall") && o.connects.includes("common1");
+    for (const o of openings.filter((x) => x.kind === "door" && !isTheNewOne(x))) {
+      if (o.connects.includes("outside")) continue; // the entry is hung by face, not by band
+      const w = walls.find((x) => x.id === o.wallId)!;
+      const alongV = !(w.du > w.dv);
+      const along = alongV ? w.dv : w.du;
+      expect([o.id, o.offset]).toEqual([o.id, (along - o.width) / 2]);
+    }
+    // K's door in the numbers those other modules cite, so a move shows up here first.
+    const k = openings.find((o) => o.kind === "door" && o.connects.includes("k"))!;
+    const kBand = walls.find((w) => w.id === k.wallId)!;
+    expect([kBand.v + k.offset, kBand.v + k.offset + k.width]).toEqual([6, 9]);
   });
 
   it("has a suite entry door in the hall's inner wall", () => {
@@ -287,5 +363,88 @@ describe("robustness across the sliders", () => {
         );
       }
     }
+  });
+
+  it("keeps every interior door inside the run its two rooms share, over 200 sets", () => {
+    /*
+     * THE PROPERTY, rather than the default suite's instance of it. "Within its band" is
+     * the assertion above and it is not enough: a merged band runs past rooms it does not
+     * divide, so a door can be inside the band and outside both of the rooms it claims to
+     * join. That is exactly what the hall-to-common-room door did before door() clamped
+     * it, and it is what this would have caught.
+     *
+     * MEASURED at this seed, and the counts are the non-vacuity that matters: 981 interior
+     * doors over the 200 sets, 200 of them slid off their band's centre and every one of
+     * those the hall-to-common-room door -- so the clamp bites in every set, not in a
+     * corner case. 70 of the 200 are also clipped narrower than 3 ft, the narrowest 1.115
+     * ft, which is the shared face being all the door there is room for. Without the door
+     * the same sweep gives 781 interior doors, none slid and none clipped.
+     *
+     * A clipped door can be narrower than the walker: walk.ts's canPass() refuses 15 of
+     * route.test.ts's 300 suites their hall-to-common-room door for that reason, and that
+     * is the honest answer rather than a 3 ft door hanging off the end of a 0.5 ft face.
+     */
+    let seed = 4242;
+    const rnd = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed / 0x7fffffff;
+    };
+    const jitter = (b: number, s: number) => b + (rnd() * 2 - 1) * s;
+
+    let doors = 0;
+    let slid = 0;
+    let clipped = 0;
+    let narrowest = Infinity;
+    for (let i = 0; i < 200; i++) {
+      const p: SuiteParams = {
+        ...DEFAULT_PARAMS,
+        sectionLength: jitter(44, 3),
+        hallWidth: jitter(4.5, 0.8),
+        bedDepth: jitter(16, 1),
+        commonAlong: jitter(15, 1),
+        commonDeep: jitter(20, 1.5),
+        bedAAlong: jitter(10, 1),
+        bathAlong: jitter(7.5, 1.5),
+        bathDeep: jitter(8, 1),
+        kDeep: jitter(10, 1),
+        kAlong: jitter(12, 1),
+      };
+      p.legDepth = p.hallWidth + p.partition + p.bedDepth;
+      const s = buildSuite(p);
+      const { walls: w, openings: o } = buildWalls(s);
+      for (const op of o) {
+        // The suite entry is excluded because "outside" is not a room this model has, so
+        // there is no second run to intersect; walls.ts hangs it by face for that reason.
+        if (op.kind !== "door" || op.connects.includes("outside")) continue;
+        doors++;
+        const band = w.find((x) => x.id === op.wallId)!;
+        const alongV = !(band.du > band.dv);
+        const lo = alongV ? band.v : band.u;
+        const along = alongV ? band.dv : band.du;
+        const rooms = op.connects.map((id) => s.rooms.find((r) => r.id === id)!);
+        const faceLo = Math.max(lo, ...rooms.map((r) => (alongV ? r.v : r.u)));
+        const faceHi = Math.min(
+          lo + along,
+          ...rooms.map((r) => (alongV ? r.v + r.dv : r.u + r.du)),
+        );
+        const label = `iteration ${i} ${op.id} (${op.connects.join("/")})`;
+        expect(lo + op.offset, `${label} starts before the shared face`).toBeGreaterThanOrEqual(
+          faceLo - 1e-9,
+        );
+        expect(
+          lo + op.offset + op.width,
+          `${label} runs past the shared face`,
+        ).toBeLessThanOrEqual(faceHi + 1e-9);
+        if (Math.abs(op.offset - (along - op.width) / 2) > 1e-9) slid++;
+        if (op.width < 3 - 1e-9) {
+          clipped++;
+          narrowest = Math.min(narrowest, op.width);
+        }
+      }
+    }
+    expect(doors).toBe(981);
+    expect(slid).toBe(200);
+    expect(clipped).toBe(70);
+    expect(narrowest).toBeCloseTo(1.1152, 4);
   });
 });

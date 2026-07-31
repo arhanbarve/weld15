@@ -18,11 +18,20 @@
  *   head-on          Aim at a stretch of partition that has no door in it and assert the
  *                    walker stays on its own side. No sliding path reaches the far side,
  *                    so the chord argument holds and the step size can be absurd.
- *   the components   buildWalls() emits four interior doors and they leave the suite in
- *                    two pieces plus one sealed room (see route.ts's header). So there is
- *                    no walk at all from the hall to the common room, and none into the
- *                    unknown strip from anywhere. A walker that arrives in one went
- *                    through plaster, whatever route it took.
+ *   the components   buildWalls() emits five interior doors and they leave the suite in one
+ *                    piece plus one sealed room. So there is no walk at all into the
+ *                    unknown strip from anywhere. A walker that arrives in it went through
+ *                    plaster, whatever route it took.
+ *
+ *                    THIS IS WEAKER THAN IT WAS AND IT IS NOT VACUOUS. It used to be two
+ *                    pieces plus the seal, because no door joined the hall to the common
+ *                    room -- so the assertion also forbade a walk between the suite's two
+ *                    halves, which was the strongest crossing statement available anywhere
+ *                    in this file. That door has landed and the halves are one component
+ *                    now, so what is left is the strip: one room, sealed on purpose, and
+ *                    the only room in the suite a walker must never reach. The 600,000-hop
+ *                    substep test below is what carries the interior guarantee the lost
+ *                    half of this statement used to sample from outside.
  *   the substeps     At a displacement of at most SUBSTEP the chord IS the path, so the
  *                    segment test is exact. 600,000 consecutive substep-scale hops with
  *                    no solid penetrated is the interior guarantee that the two
@@ -301,8 +310,11 @@ describe("canPass: doorway clearance against the radius", () => {
   });
 
   it("passes every door buildWalls() actually hangs", () => {
+    // Six: three off the hall, K off the common room, the suite entry, and the hall's own
+    // door into the common room. Five before that last one landed.
     const doors = openings.filter((o) => o.kind === "door");
-    expect(doors.length).toBe(5);
+    expect(doors.map((o) => o.id)).toEqual(["d0", "d1", "d2", "d3", "d4", "d5"]);
+    expect(doors.length).toBe(6);
     for (const o of doors) expect([o.id, canPass(o)]).toEqual([o.id, true]);
   });
 
@@ -375,7 +387,8 @@ describe("solidsOf: the bands, with the doorways cut out", () => {
 
   it("cuts a hole for every interior door", () => {
     const doors = openings.filter((o) => o.kind === "door" && !o.connects.includes("outside"));
-    expect(doors.length).toBe(4);
+    expect(doors.map((o) => o.id)).toEqual(["d0", "d1", "d2", "d3", "d5"]);
+    expect(doors.length).toBe(5);
     for (const o of doors) expect([o.id, solidAt(middleOf(o))]).toEqual([o.id, false]);
   });
 
@@ -455,11 +468,49 @@ describe("solidsOf: the bands, with the doorways cut out", () => {
   });
 
   it("conserves the band area, less the doors it cut", () => {
-    // Nothing invented and nothing lost: the pieces of one band tile it apart from the
-    // holes, so the total is the wall area minus four 3 ft doors times the partition.
+    /*
+     * Nothing invented and nothing lost: the pieces of one band tile it apart from the
+     * holes, so the total is the wall area minus one hole per interior door.
+     *
+     * DERIVED FROM THE OPENINGS RATHER THAN WRITTEN AS A CONSTANT, and the reason is that
+     * a door's width is not 3 ft in general. door() clips a door to the stretch its two
+     * rooms actually share, so a slider can make one narrower -- measured at 1.115 ft in
+     * tests/walls.test.ts's 200-set sweep -- and `5 * 3 * partition` would then be a
+     * number that happens to match at the defaults and silently stops meaning anything.
+     * Summing the widths says what the arithmetic is instead of restating its answer.
+     *
+     * MEASURED at the defaults: 7.5 sq ft over 15 bands and 20 solids. Five interior doors,
+     * each 3 ft wide in a 0.5 ft partition, is 5 * 1.5. It was 6 -- four doors -- before
+     * the hall-to-common-room one, and w0 has gone from one whole 21 x 0.5 band to two
+     * pieces, u 0 to 16.5 and u 19.5 to 21.
+     *
+     * THE PREMISE THE SUM DEPENDS ON is that each door is cut from exactly one band of
+     * exactly partition thickness, which is true at the defaults and NOT true in general:
+     * solidsOf() cuts the hole from every band across the doorway, and a partition split by
+     * a footprint grid line is two bands -- the sliver case pinned in the test below. So the
+     * premise is asserted rather than assumed, by counting: one extra solid per interior
+     * door and no more.
+     */
+    const cut = openings.filter((o) => o.kind === "door" && !o.connects.includes("outside"));
     const wallArea = ctx.walls.reduce((a, w) => a + w.du * w.dv, 0);
     const solidArea = ctx.solids.reduce((a, s) => a + s.du * s.dv, 0);
-    expect(wallArea - solidArea).toBeCloseTo(4 * 3 * P.partition, 9);
+    // The premise: every band is whole except the five each door splits in two.
+    expect(ctx.solids.length).toBe(ctx.walls.length + cut.length);
+    for (const o of cut) {
+      const w = ctx.walls.find((x) => x.id === o.wallId)!;
+      expect([o.id, Math.min(w.du, w.dv)]).toEqual([o.id, P.partition]);
+      expect([o.id, ctx.solids.filter((s) => s.wallId === o.wallId).length]).toEqual([o.id, 2]);
+    }
+    const expected = cut.reduce((a, o) => a + o.width * P.partition, 0);
+    expect(wallArea - solidArea).toBeCloseTo(expected, 9);
+    // And what that comes to here, so a changed door width shows up as a changed figure
+    // rather than only as a satisfied identity.
+    expect(expected).toBeCloseTo(7.5, 9);
+    expect(cut.map((o) => o.width)).toEqual([3, 3, 3, 3, 3]);
+    expect(ctx.solids.filter((s) => s.wallId === "w0")).toEqual([
+      { wallId: "w0", u: 0, v: 15, du: 16.5, dv: 0.5 },
+      { wallId: "w0", u: 19.5, v: 15, du: 1.5, dv: 0.5 },
+    ]);
   });
 
   it("cuts the door out of EVERY band across the doorway, not just the one it is hung in", () => {
@@ -599,11 +650,21 @@ describe("walk into every wall in turn", () => {
 
   it("finds a real approach to every one of the fifteen bands", () => {
     // Non-vacuity, and worth stating: an empty list passes every assertion below.
-    // Measured on the default suite: 36 approaches over 19 solids, and every one of the
+    // Measured on the default suite: 37 approaches over 20 solids, and every one of the
     // 15 bands is walked into from at least one side. A band whose only reachable face is
     // the outside of the facade masonry would contribute nothing, and none is.
-    expect(approaches.length).toBe(36);
+    //
+    // 36 over 19 solids before the hall-to-common-room door, and the one extra approach is
+    // that door's doing rather than a drift. It splits w0 into two pieces where there was
+    // one, u 0 to 16.5 and u 19.5 to 21. The long piece keeps the two approaches the whole
+    // band had -- from the common room to its south and bedroom A to its north, the only
+    // two faces of it a walker can stand clear of -- and the 1.5 ft stub beyond the door
+    // adds one, from the hall. Its other three starts are refused: two land in the band's
+    // own row and one lands inside w7, so none of them is clear.
+    expect(approaches.length).toBe(37);
+    expect(ctx.solids.length).toBe(20);
     expect(new Set(approaches.map((a) => a.s.wallId)).size).toBe(ctx.walls.length);
+    expect(approaches.filter((a) => a.s.wallId === "w0").length).toBe(3);
   });
 
   it("resolves outside the band it walked into", () => {
@@ -714,11 +775,17 @@ describe("tunnelling", () => {
    * The suite's doorway components, computed here from buildWalls()'s own openings rather
    * than read out of route.ts, so the two cannot agree by construction.
    *
-   * There are two of them plus one sealed room, which is a gap in walls.ts and not a
-   * choice made here: no door is hung between the hall and the common room. See
-   * route.ts's header. It makes an unusually strong tunnelling assertion available --
-   * there is no walk at all between the two halves -- so it is used rather than worked
-   * around, and tests/route.test.ts is where the topology itself is pinned.
+   * There is one of them plus one sealed room, and the seal is a choice rooms.ts explains:
+   * the 7.5 ft strip beside the bathroom has no door because "giving it a door would mean
+   * choosing whose door it is". So the crossing assertion the sweeps below make is about
+   * the strip, and only about the strip.
+   *
+   * IT USED TO BE TWO COMPONENTS PLUS THE SEAL, because no door was hung between the hall
+   * and the common room -- a gap in walls.ts rather than a choice, and it made an unusually
+   * strong tunnelling statement available: there was no walk at all between the suite's two
+   * halves. That door has landed, so that half of the statement is gone and what is left is
+   * weaker. tests/route.test.ts pins the topology itself; the 600,000-hop substep test is
+   * what now carries the guarantee the lost half sampled from the outside.
    */
   const componentOf = (() => {
     const edges = openings
@@ -747,8 +814,15 @@ describe("tunnelling", () => {
     return (id: string | null) => (id === null ? null : (comp.get(id) ?? null));
   })();
 
-  it("splits the default suite into three doorway components", () => {
-    // Non-vacuity for the sweep below: with one component the assertion is empty.
+  it("splits the default suite into two doorway components: the suite, and the sealed strip", () => {
+    // Non-vacuity for the sweeps below: with ONE component the assertion is empty, because
+    // there would be no pair of rooms a walker must not get between. Two is the minimum
+    // that leaves it saying anything, and the second is a single room -- so what the sweeps
+    // forbid is precisely "a walker got into the unknown strip", which is also what
+    // "holds every invariant over 300 suites" asserts directly at the bottom of this file.
+    //
+    // Three before the hall-to-common-room door: [bath bedA bedB hall], [common1 k],
+    // [unknown]. The first two are one group now.
     const groups = new Map<number, string[]>();
     for (const r of suite.rooms) {
       const c = componentOf(r.id)!;
@@ -756,7 +830,13 @@ describe("tunnelling", () => {
     }
     expect(
       [...groups.values()].map((g) => [...g].sort()).sort((a, b) => a[0]!.localeCompare(b[0]!)),
-    ).toEqual([["bath", "bedA", "bedB", "hall"], ["common1", "k"], ["unknown"]]);
+    ).toEqual([["bath", "bedA", "bedB", "common1", "hall", "k"], ["unknown"]]);
+    // The strip really is alone in its own component, which is the fact the crossing
+    // assertions rest on, and it is the only room that is.
+    expect(componentOf("unknown")).not.toBe(componentOf("hall"));
+    expect([...groups.values()].filter((g) => g.length === 1).map((g) => g[0])).toEqual([
+      "unknown",
+    ]);
   });
 
   /**
@@ -960,7 +1040,21 @@ describe("walk: one frame of input", () => {
 });
 
 describe("the sliders move the walls, so all of it again on randomised suites", () => {
-  it("holds every invariant over 300 suites and 24,000 absurd steps", () => {
+  /*
+   * 30 s, not vitest's 5.
+   *
+   * MEASURED: this sweep takes 4.1 s in isolation, which passes, and it failed once in a
+   * full run while three other agents were driving Playwright on the same cores. So the
+   * default left about 0.9 s of headroom on a machine under load, and the failure mode is
+   * a timeout that reads exactly like a geometry regression.
+   *
+   * Raising the budget rather than shrinking the sweep, for the reason playwright.config.ts
+   * gives about the same trade: 300 randomised suites is what makes this a property test
+   * rather than a check of one arrangement, and tunnelling only shows up on a slow frame,
+   * which is what the absurd step size simulates. Trimming it to fit a timer would remove
+   * the evidence to protect the clock.
+   */
+  it("holds every invariant over 300 suites and 24,000 absurd steps", { timeout: 30_000 }, () => {
     const rnd = makeRnd(4242);
     let steps = 0;
     let worst = Infinity;
@@ -994,8 +1088,13 @@ describe("the sliders move the walls, so all of it again on randomised suites", 
       }
     }
     // Non-vacuity: the sliders really did move, and the sweep really did run. Measured:
-    // 24,000 steps over 300 suites, 221 of them with the section length more than a foot
+    // 24,000 steps over 300 suites, 237 of them with the section length more than a foot
     // off the default, worst clearance -2.0e-15.
+    //
+    // The 237 was 221 before the hall-to-common-room door, and the sliders did not change.
+    // randomStand() draws until it finds a CLEAR point, so how many draws it takes depends
+    // on the solids -- and the door split w0 and moved every draw after the first suite.
+    // The count is a property of the seed's path through the generator, not of the suite.
     expect(steps).toBe(24000);
     expect(moved).toBeGreaterThan(200);
     expect(worst).toBeGreaterThan(-1e-9);
@@ -1050,11 +1149,17 @@ describe("the sliders move the walls, so all of it again on randomised suites", 
         }
       }
     }
-    // Non-vacuity, measured: 1,168 doorways over 300 suites, and 992 of them -- most --
-    // have the partition split into more than one band, which is how thoroughly the
-    // default suite's tidy arithmetic was hiding this. Without that second count the test
-    // would pass on a build that never produced a split at all.
-    expect(doors).toBeGreaterThan(1100);
+    // Non-vacuity, measured: 1,454 doorways over 300 suites, and 992 of them have the
+    // partition split into more than one band, which is how thoroughly the default suite's
+    // tidy arithmetic was hiding this. Without that second count the test would pass on a
+    // build that never produced a split at all.
+    //
+    // 1,168 and 992 before the hall-to-common-room door, so it contributed 286 crossings of
+    // the 300 -- the other 14 are suites where one side of it is too narrow to stand a
+    // walker clear of the band at all, and are skipped by the isClear() guard above. It
+    // contributed none of the splits: it is hung in w0, which the footprint grid does not
+    // cut, so the count of split partitions is unchanged at 992.
+    expect(doors).toBeGreaterThan(1400);
     expect(split).toBeGreaterThan(900);
   });
 });

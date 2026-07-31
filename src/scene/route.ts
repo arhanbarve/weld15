@@ -28,24 +28,32 @@
  * actually walk. Both nulls below are docs/phases/P7-P8.md's "returns null when no
  * doorway chain exists, which is the case unreachableRooms() exists to detect".
  *
- * MEASURED, not asserted, and it is not one room but three. reachable() on the default
- * suite returns ["hall", "bedA", "bath", "bedB"] while unreachableRooms() returns [],
- * because buildWalls() emits FOUR interior doors and they do not connect the suite:
+ * MEASURED, not asserted, and the answer changed once this module existed -- which is the
+ * whole reason it is worth recording rather than deleting.
  *
- *   the unknown strip      Deliberate, and rooms.ts says why: the 7.5 ft strip beside
- *     the bathroom touches bedroom A and has no door, because "giving it a door would
- *     mean choosing whose door it is". Sealed on purpose, and route() is right to
- *     refuse it. tests/route.test.ts pins this one as permanent.
- *   the common room and K  NOT deliberate, and it is a gap in walls.ts rather than
- *     here. buildOpenings() hangs door("hall","bedA"), ("hall","bath"), ("hall","bedB")
- *     and ("common1","k") and stops -- there is no door between the hall and the common
- *     room, although w0 already lists ["common1","hall"] in its `separates`, so
- *     `door("hall", "common1", 3)` would land in the right band. Until that is added,
- *     the suite's doorway graph is two components: hall + the three rooms off it, and
- *     common room + K reached through it. So route("hall", "common1") is null and a
- *     viewer cannot be walked to the room the suite is named for.
- *     tests/route.test.ts pins the components as MEASURED and says which assertion to
- *     change when the door lands, rather than pretending the topology is connected.
+ * WHAT IT WAS. reachable() on the default suite returned ["hall", "bedA", "bath", "bedB"]
+ * while unreachableRooms() returned [], because buildOpenings() hung door("hall","bedA"),
+ * ("hall","bath"), ("hall","bedB") and ("common1","k") and stopped: there was no door
+ * between the hall and the common room at all. The suite's doorway graph was two
+ * components -- hall plus the three rooms off it, and common room plus K reachable only
+ * through it -- so route("hall", "common1") was null and no viewer could be walked to the
+ * room the suite is named for. This module is what found that; nothing else in the project
+ * asked the question in a form that could fail.
+ *
+ * WHAT IT IS. The door is hung. w0 already listed ["common1","hall"] in its `separates`,
+ * and at the defaults the opening lands in that band at offset 16.5, width 3 -- u 16.5 to
+ * 19.5, slid to the low end of the 3.5 ft stretch where the two rooms actually face each
+ * other, because the band is 21 ft long and its own centre at u 9 to 12 is inside bedroom
+ * A. reachable() now returns all six rooms and route("hall", "common1") returns a path.
+ *
+ * THE STRIP IS STILL SEALED, and that one is deliberate: rooms.ts says the 7.5 ft strip
+ * beside the bathroom touches bedroom A and has no door because "giving it a door would
+ * mean choosing whose door it is". route() is right to refuse it, and
+ * tests/route.test.ts pins it as permanent rather than as a defect awaiting a fix.
+ *
+ * So the two functions still disagree, and the disagreement is now entirely the strip --
+ * one room, not three. That is the honest steady state: unreachableRooms() answers []
+ * because a door there is buildable, and reachable() omits it because none is hung.
  */
 
 import type { Rect, Suite } from "@/geo/rooms";
