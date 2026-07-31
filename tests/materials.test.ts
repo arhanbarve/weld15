@@ -444,11 +444,12 @@ describe("headless, where vitest and any SSR pass live", () => {
 // ------------------------------------------------------------------- palette
 
 describe("palette", () => {
-  it("returns exactly the eight keys in the contract", () => {
+  it("returns exactly the nine keys in the contract", () => {
     expect(Object.keys(materials()).sort()).toEqual([
       "brick",
       "crimson",
       "glazing",
+      "hardware",
       "masonry",
       "oak",
       "oakDeep",
@@ -484,9 +485,23 @@ describe("palette", () => {
     expect(lum(m.oakDeep.color)).toBeLessThan(lum(m.oak.color));
   });
 
-  it("is entirely non-metal", () => {
+  it("is entirely non-metal, except the one material that is furniture hardware", () => {
     for (const [k, mat] of Object.entries(materials())) {
+      if (k === "hardware") continue;
       expect(mat.metalness, k).toBe(0);
+    }
+  });
+
+  it("makes hardware a dark satin metal", () => {
+    const m = materials();
+    expect(m.hardware.metalness).toBeGreaterThan(0.5);
+    const [r, g, b] = bytes(hexOf(m.hardware.color));
+    expect(Math.max(r, g, b)).toBeLessThan(150);
+    // Satin, not mirror: rougher than the glazing highlight, sharper than plaster.
+    expect(m.hardware.roughness).toBeGreaterThan(m.slate.roughness);
+    expect(m.hardware.roughness).toBeLessThan(m.plaster.roughness);
+    for (const [k, v] of Object.entries(SCAN)) {
+      expect(hexOf(m.hardware.color), `hardware took the ${k} token`).not.toBe(v.toLowerCase());
     }
   });
 
@@ -570,6 +585,7 @@ describe("palette", () => {
       "crimson",
       "glazing",
       "grain",
+      "hardware",
       "masonry",
       "oak",
       "oakDeep",

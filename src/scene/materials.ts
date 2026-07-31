@@ -64,6 +64,14 @@ const BRICK = mix(DAY.crimson, DAY.oakDeep, 0.35);
 const SLATE = scale(mix(DAY.edge, DAY.sky, 0.5), 0.14);
 
 /**
+ * Furniture hardware -- drawer pulls, nothing else. No source gives a finish, so
+ * this is one documented operation on `edge`, in the manner of BRICK and SLATE
+ * rather than an invented hex: a third of the way toward black, which is what
+ * turns a mineral grey satin rather than leaving it reading as stone.
+ */
+const HARDWARE = scale(DAY.edge, 0.65);
+
+/**
  * Nominal oak board width, ft.
  *
  * No source in the project gives one: not weld.json, not the 1875 specification,
@@ -309,6 +317,7 @@ export type Palette = {
   oakDeep: THREE.MeshStandardMaterial;
   slate: THREE.MeshStandardMaterial;
   brick: THREE.MeshStandardMaterial;
+  hardware: THREE.MeshStandardMaterial;
 };
 
 let cache: Palette | null = null;
@@ -418,7 +427,16 @@ export function materials(): Palette {
     metalness: 0,
   });
 
-  cache = { plaster, oak, masonry, glazing, crimson, oakDeep, slate, brick };
+  // The one metal in the palette: drawer and dresser pulls. Satin, not mirror --
+  // enough metalness to read as hardware rather than painted wood, roughness high
+  // enough that it never throws a hard specular pinpoint under the single sun.
+  const hardware = new THREE.MeshStandardMaterial({
+    color: HARDWARE,
+    roughness: 0.45,
+    metalness: 0.85,
+  });
+
+  cache = { plaster, oak, masonry, glazing, crimson, oakDeep, slate, brick, hardware };
   return cache;
 }
 

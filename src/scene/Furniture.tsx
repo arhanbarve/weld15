@@ -2,67 +2,66 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
+import { mergeBufferGeometries } from "three-stdlib";
 import { type SuiteParams } from "@/geo/rooms";
-import { pieceBox, MATTRESS, SIZES, type FurnitureKind, type Piece } from "@/geo/furniture";
+import { pieceBox, SIZES, type FurnitureKind, type Piece } from "@/geo/furniture";
+import { partsOf, type Part, type PartMaterial } from "@/geo/pieces";
 import { suiteToThree, floorLevel } from "@/geo/place";
 import { materials } from "./materials";
 
 /**
- * The suite's fit-out, instanced per kind.
+ * The suite's fit-out, instanced per (kind, material).
  *
- * WHY PER KIND AND NOT PER PIECE
+ * WHY PER (KIND, MATERIAL) AND NOT PER PIECE
  * furniture.ts places 29 pieces at the defaults and would place more if the
  * occupancy rose. One mesh each is 29 draw calls against a budget of 25 for the
  * whole suite -- the fit-out alone would blow it and leave nothing for the room it
- * stands in. Batched by kind it is seven draw calls whatever the count, because an
- * InstancedMesh draws every instance in one submission. The eighth is the bedding.
+ * stands in. Batched by kind and material it is 11 draw calls whatever the
+ * piece count, because an InstancedMesh draws every instance in one submission
+ * and a kind's own geometry never varies between instances.
  *
- * WHY THE BEDDING IS ITS OWN BATCH
- * A bed is two materials: an oak frame and cloth on top of it. One instanced mesh
- * carries one material, so the bedding is a second batch of boxes sitting in the
- * frames, inset by the frame's own allowance. That inset is derived from SIZES and
- * MATTRESS rather than tabulated, so it stays correct if the frame allowance in
- * furniture.ts ever changes.
+ * WHY THE GEOMETRY IS BUILT ONCE, IN THE PIECE'S OWN TRUE FRAME
+ * partsOf(kind) (geo/pieces.ts) returns every part of a kind at its real
+ * construction, in the piece's own unrotated frame -- legs, rails, a headboard,
+ * a bank of drawer fronts. That geometry is shared by every instance of the
+ * kind; only the instance MATRIX differs, and it is now RIGID (translation and
+ * rotation, scale exactly 1) rather than the scaled-unit-cube the old version
+ * used, because a rotation applied to a scaled box would turn an asymmetric
+ * part -- a headboard, a drawer front -- into the wrong shape as well as the
+ * wrong place.
  *
- * WHY NOTHING HERE ROTATES A PIECE BY ITS YAW
- * A Piece's du and dv are UNROTATED, as furniture.ts's header says, and pieceBox()
- * is what applies the quarter turn. So every extent used below comes out of
- * pieceBox() and the only rotation applied is the suite's own yaw. Turning a box by
- * its yaw AND using pieceBox()'s extents would turn it twice: a bed 6.8 ft along u
- * would come out 6.8 ft along v, which is the sort of error that looks like a
- * layout bug rather than a rendering one.
+ * pieceBox() is READ HERE, ONLY FOR THE WORLD POSITION -- NOT FOR SCALE
+ * collide.ts's footprintOf() keeps a piece's anchor (u, v) fixed and swaps
+ * du/dv when the piece is turned 90 or 270, rather than rotating its footprint
+ * about the visual centre -- collide.ts's own header says a view that wants a
+ * true rotation "composes its own translation on top". pieceMatrix() is that
+ * translation: pieceBox(p)'s own centre is exactly where a true rotation about
+ * the piece's real geometric centre has to land for the rendered assembly to
+ * occupy precisely the box collide.ts, drag.ts and DragLayer's arithmetic pick
+ * already agree it occupies -- proven for all four yaws in
+ * tests/furniture-transform.test.ts, which is what a bed 6.833 ft along u
+ * coming out 6.833 ft along v (rather than swapped, rotated, and in the right
+ * place) would fail. What is NOT read is pieceBox()'s du/dv as a SCALE: the
+ * shared geometry is built once, at SIZES[kind]'s true unrotated size, and
+ * rotated by the piece's yaw exactly once. Scaling by the already-swapped
+ * extents and then rotating on top of that is the double turn the old header
+ * warned about; using pieceBox() for a translation is not it.
  *
  * There is no furniture in the room of kind "unknown", and that is furniture.ts's
  * decision, not a filter here: layout() fits out bedrooms and commons. Naming a use
  * for that room by furnishing it is exactly what the project will not do.
  */
 
-/**
- * Bedding thickness above the frame, ft. ASSUMED, like every furniture dimension
- * except the mattress: a mattress with a blanket turned over it.
- */
-const BEDDING_H = 0.45;
+type Palette = {
+  oakDeep: THREE.Material;
+  crimson: THREE.Material;
+  hardware: THREE.Material;
+};
 
-/**
- * How far the bedding sits inside the frame on each side.
- *
- * Derived, not tabulated. SIZES.bed is the mattress plus a frame allowance on each
- * of the four sides, so half the difference is that allowance -- and it stays right
- * if furniture.ts's allowance changes, which a hard-coded inch would not.
- */
-const BEDDING_INSET = (SIZES.bed.du - MATTRESS.du) / 2;
-
-type Palette = { oakDeep: THREE.Material; crimson: THREE.Material };
-
-/**
- * One kind's material.
- *
- * The sofa is crimson because MASTER.md gives crimson to "bedding, textiles" and a
- * sofa is upholstery; everything else is oak. Costs nothing -- the batching is per
- * kind already, so a per-kind material is free.
- */
-function materialFor(kind: FurnitureKind, pal: Palette): THREE.Material {
-  return kind === "sofa" ? pal.crimson : pal.oakDeep;
+function materialFor(kind: PartMaterial, pal: Palette): THREE.Material {
+  if (kind === "textile") return pal.crimson;
+  if (kind === "hardware") return pal.hardware;
+  return pal.oakDeep;
 }
 
 /**
@@ -76,7 +75,7 @@ function materialFor(kind: FurnitureKind, pal: Palette): THREE.Material {
 function useFurniturePalette(opacity: number): Palette {
   const pal = useMemo(() => {
     const m = materials();
-    const p = { oakDeep: m.oakDeep.clone(), crimson: m.crimson.clone() };
+    const p = { oakDeep: m.oakDeep.clone(), crimson: m.crimson.clone(), hardware: m.hardware.clone() };
     // The camera stands in these rooms; FrontSide culls every interior face.
     for (const x of Object.values(p)) x.side = THREE.DoubleSide;
     return p;
@@ -102,41 +101,69 @@ function useFurniturePalette(opacity: number): Palette {
 }
 
 /**
- * A world matrix for one axis-aligned suite-frame box.
- *
- * Every position goes through suiteToThree() and every rotation is the suite yaw
- * derived by suiteBasis(), which is the mechanism tests/suite-transform.test.ts
- * exists to keep. yaw arrives as a prop rather than being derived here so that this
- * module does not have to import Suite.tsx, which imports this one: a cycle between
- * the two would hand one of them a half-initialised copy of the other.
+ * One part as a positioned BufferGeometry, in the KIND's own local frame:
+ * recentred on the footprint SIZES[kind] declares, so the origin is the
+ * piece's true geometric centre and X/Z map to u/v exactly as suiteToThree()
+ * does for every other box in the scene. Y is left absolute -- the floor this
+ * kind of piece stands on is always y = 0 in this frame, and the instance
+ * matrix's own translation carries it to floorLevel(1).
  */
-function boxMatrix(
-  u: number,
-  v: number,
-  du: number,
-  dv: number,
-  y0: number,
-  y1: number,
-  yaw: number,
-  params: SuiteParams,
-): THREE.Matrix4 {
-  const c = suiteToThree(u + du / 2, v + dv / 2, (y0 + y1) / 2, params);
+function partGeometry(kind: FurnitureKind, part: Part): THREE.BufferGeometry {
+  const { du: fullDu, dv: fullDv } = SIZES[kind];
+  const g = new THREE.BoxGeometry(part.du, part.y1 - part.y0, part.dv);
+  g.translate(
+    part.u + part.du / 2 - fullDu / 2,
+    (part.y0 + part.y1) / 2,
+    part.v + part.dv / 2 - fullDv / 2,
+  );
+  return g;
+}
+
+/** Every part of `kind` that paints with `material`, merged into one geometry. */
+function kindMaterialGeometry(
+  kind: FurnitureKind,
+  material: PartMaterial,
+): THREE.BufferGeometry | null {
+  const parts = partsOf(kind).filter((p) => p.material === material);
+  if (parts.length === 0) return null;
+  const boxes = parts.map((p) => partGeometry(kind, p));
+  const merged = mergeBufferGeometries(boxes, false);
+  for (const b of boxes) b.dispose();
+  if (!merged) throw new Error(`Furniture: mergeBufferGeometries returned null for ${kind}/${material}`);
+  merged.computeBoundingSphere();
+  return merged;
+}
+
+/**
+ * The rigid world transform for one piece, at its true size.
+ *
+ * See the module header for why pieceBox() is read here for POSITION and
+ * never for the local geometry's SCALE. `suiteYaw` is suiteBasis(params).yaw,
+ * the same angle every other oriented box in the scene turns by to match
+ * suiteToThree()'s own embedding; `p.yaw` turns this ONE piece an additional
+ * amount within the suite. Piece.yaw is documented as clockwise in plan where
+ * 0 faces +v; three's Y-rotation is counter-clockwise looking down, hence the
+ * negation.
+ */
+export function pieceMatrix(p: Piece, suiteYaw: number, params: SuiteParams): THREE.Matrix4 {
+  const box = pieceBox(p);
+  const c = suiteToThree(box.u + box.du / 2, box.v + box.dv / 2, floorLevel(1), params);
   return new THREE.Matrix4().compose(
     new THREE.Vector3(c[0], c[1], c[2]),
-    new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0)),
-    new THREE.Vector3(du, y1 - y0, dv),
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(0, suiteYaw - (p.yaw * Math.PI) / 180, 0)),
+    new THREE.Vector3(1, 1, 1),
   );
 }
 
 /**
- * One InstancedMesh over a shared unit box.
+ * One InstancedMesh over a shared, real geometry.
  *
  * The trap here, and it is invisible until the camera moves: an InstancedMesh
- * inherits its bounding sphere from its GEOMETRY, which is a unit cube at the
- * world origin -- 900 ft from the suite. Frustum culling then drops the whole batch
- * the moment the origin leaves the frame, so the furniture vanishes at exactly the
- * stage it is meant to be seen. InstancedMesh.computeBoundingSphere() reads the
- * instance matrices instead, and has to be called again whenever they change.
+ * inherits its bounding sphere from its GEOMETRY, which for these merged parts
+ * sits near the piece's own centre rather than the world origin, but STILL has
+ * to be recomputed from the instance matrices whenever they change, or
+ * frustum culling drops the whole batch the moment the reference geometry's
+ * own sphere leaves the frame.
  */
 function Batch({
   matrices,
@@ -170,6 +197,9 @@ function Batch({
   );
 }
 
+const KINDS = Object.keys(SIZES) as FurnitureKind[];
+const MATERIAL_KINDS: PartMaterial[] = ["oak", "textile", "hardware"];
+
 /**
  * The fit-out for a suite.
  *
@@ -192,7 +222,7 @@ export function Furniture({
 }: {
   opacity: number;
   params: SuiteParams;
-  /** The suite yaw from suiteBasis(). See boxMatrix() for why it is a prop. */
+  /** The suite yaw from suiteBasis(). See pieceMatrix() for why it is a prop. */
   yaw: number;
   /** The arrangement to draw, from the store. */
   pieces: Piece[];
@@ -200,68 +230,57 @@ export function Furniture({
 }) {
   const pal = useFurniturePalette(opacity);
 
-  // One unit cube for every batch. Instance matrices carry the real extents, so
-  // the geometry is shared and the scaling costs nothing.
-  const box = useMemo(() => new THREE.BoxGeometry(1, 1, 1), []);
-  useEffect(() => {
-    return () => box.dispose();
-  }, [box]);
-
-  const batches = useMemo(() => {
-    const floor = floorLevel(1);
-
-    // Keyed off SIZES rather than a second list of kinds, so a kind added to
-    // furniture.ts gets a batch here without this file being edited.
-    const byKind = new Map<FurnitureKind, THREE.Matrix4[]>(
-      (Object.keys(SIZES) as FurnitureKind[]).map((k) => [k, []]),
-    );
-    const bedding: THREE.Matrix4[] = [];
-
-    for (const p of pieces) {
-      const f = pieceBox(p);
-      byKind.get(p.kind)?.push(
-        boxMatrix(f.u, f.v, f.du, f.dv, floor, floor + p.h, yaw, params),
-      );
-      if (p.kind !== "bed") continue;
-      const i = BEDDING_INSET;
-      bedding.push(
-        boxMatrix(
-          f.u + i,
-          f.v + i,
-          f.du - 2 * i,
-          f.dv - 2 * i,
-          floor + p.h,
-          floor + p.h + BEDDING_H,
-          yaw,
-          params,
-        ),
-      );
+  // Shared geometry, one per (kind, material) that actually has parts. Built
+  // once: it depends only on geo/pieces.ts, never on the suite or the
+  // arrangement.
+  const geometries = useMemo(() => {
+    const out = new Map<string, THREE.BufferGeometry>();
+    for (const kind of KINDS) {
+      for (const material of MATERIAL_KINDS) {
+        const g = kindMaterialGeometry(kind, material);
+        if (g) out.set(`${kind}:${material}`, g);
+      }
     }
+    return out;
+  }, []);
+  useEffect(() => {
+    return () => {
+      for (const g of geometries.values()) g.dispose();
+    };
+  }, [geometries]);
 
-    return { byKind: [...byKind].filter(([, m]) => m.length > 0), bedding };
+  // One set of rigid matrices per kind, shared by every material batch of
+  // that kind -- the transform is a property of the PIECE, not of which part
+  // material happens to be drawn with it.
+  const matricesByKind = useMemo(() => {
+    const byKind = new Map<FurnitureKind, THREE.Matrix4[]>(KINDS.map((k) => [k, []]));
+    for (const p of pieces) {
+      byKind.get(p.kind)?.push(pieceMatrix(p, yaw, params));
+    }
+    return byKind;
   }, [params, yaw, pieces]);
 
   if (opacity <= 0.001) return null;
 
   return (
     <group visible={visible}>
-      {batches.byKind.map(([kind, matrices]) => (
-        <Batch
-          key={kind}
-          matrices={matrices}
-          geometry={box}
-          material={materialFor(kind, pal)}
-          shadows={opacity > 0.99}
-        />
-      ))}
-      {batches.bedding.length > 0 ? (
-        <Batch
-          matrices={batches.bedding}
-          geometry={box}
-          material={pal.crimson}
-          shadows={opacity > 0.99}
-        />
-      ) : null}
+      {KINDS.flatMap((kind) => {
+        const matrices = matricesByKind.get(kind);
+        if (!matrices || matrices.length === 0) return [];
+        return MATERIAL_KINDS.flatMap((material) => {
+          const geometry = geometries.get(`${kind}:${material}`);
+          if (!geometry) return [];
+          return (
+            <Batch
+              key={`${kind}:${material}`}
+              matrices={matrices}
+              geometry={geometry}
+              material={materialFor(material, pal)}
+              shadows={opacity > 0.99}
+            />
+          );
+        });
+      })}
     </group>
   );
 }
