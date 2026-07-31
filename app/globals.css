@@ -260,6 +260,28 @@ button,
   color: var(--dim);
 }
 
+/* The buttons wrap too, and the wrap above is not enough on its own.
+   MEASURED, AND IT IS A FIX FOR A DEFECT THIS ROW SHIPPED. .hud-orbit wraps its own
+   three children -- label, button group, readout -- but the group is a nested flex
+   row, and a flex container defaults to `nowrap`. So the stage-5 first-person row's
+   seven buttons laid out as one unbreakable 445 px line inside a parent Hud.tsx caps
+   at 18 rem (288 px), and the overflow was centred: at 1280 x 720 the HUD box runs
+   x 481..799 and the button row ran x 417..863, putting `stand up`/`leave` and
+   `Bedroom B` 64 px outside it on each side. .hud-scrub button sets
+   `background: transparent`, so those two painted their glyphs straight onto the
+   WebGL frame -- which is what MASTER.md's "text over the void always sits on
+   --chip-scan, never directly on the gradient" rules out, and standing in the hall
+   put `Bedroom B` over lit plaster. Reproduced identically at 1440, 1280, 1024 and
+   768: the overflow is 128 px at every width, because both boxes are fixed.
+
+   Scoped to .hud-orbit rather than added to .hud-scrub itself, because the stage
+   scrubber's six numerals are 317 px and have never needed to wrap; widening that
+   rule would change a row that is not broken. Hud.tsx's FP_ROW_MAX docblock already
+   states the intent this delivers -- "the row wraps to three lines instead of one,
+   downward, where nothing is in the way" -- so this is the missing half of a
+   decision that was made, not a new one. */
+.hud-orbit .hud-scrub { flex-wrap: wrap; justify-content: center; }
+
 /* Held at a fixed width because the readout changes on every press and every frame
    of a drag, and a row that reflows as the digits change is the layout shift the
    delivery checklist rules out. The widest reading is "az -180° pol 88° 345 ft". */
