@@ -192,11 +192,13 @@ button,
   align-items: stretch;
 }
 
-/* Holds the fly-down, centred, when it is offered; an empty row costs no visible height
-   of its own when it is not. */
+/* Holds the fly-down and the reset-view button, centred, when either is offered; an empty
+   row costs no visible height of its own when neither is. The gap only shows at stage 0,
+   the one place both buttons can be mounted together. */
 .dock-row {
   display: flex;
   justify-content: center;
+  gap: 0.5rem;
 }
 
 /* The sun and the floor area, folded shut by default. Same ground and border as

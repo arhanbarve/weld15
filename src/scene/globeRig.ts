@@ -45,6 +45,10 @@ import { GLOBE_FAR_RATIO, R_EARTH_FT, globeClipAlt, nearFar } from "./altitude";
 
 const DEG = Math.PI / 180;
 
+function within(x: number, lo: number, hi: number): number {
+  return x < lo ? lo : x > hi ? hi : x;
+}
+
 export type Vec3 = [number, number, number];
 
 /**
@@ -185,4 +189,87 @@ export function assertRigVisible(alt: number): string | null {
     return `globe proxy clipped by the far plane at alt=${alt.toFixed(0)}: back at ${rig.cameraToBack.toFixed(0)} ft, far=${far.toFixed(0)} ft`;
   }
   return null;
+}
+
+/**
+ * Earth's true centre, in the site frame: straight down from Weld by the real radius.
+ *
+ * The SAME point globeRig() above rotates the proxy sphere's centre away from -- `dy =
+ * -R_EARTH_FT - cameraPos[1]` there is this point minus the camera's y. spinPose needs it
+ * as the pivot rather than as a derived offset, because turning the globe is a rotation of
+ * the CAMERA about the real Earth, not about the small stand-in sphere Globe.tsx draws.
+ */
+const EARTH_CENTRE: Vec3 = [0, -R_EARTH_FT, 0];
+
+/**
+ * Beyond this, the camera nears the axis three's lookAt uses to resolve roll -- the same
+ * degeneracy stages.ts's STAGE0_TILT_DEG docblock refuses 0.3 degrees of tilt for, at a cross
+ * product of 0.005. 80 leaves ten degrees of margin against the 90 where the singularity is
+ * exact.
+ */
+const PITCH_CLAMP_DEG = 80;
+
+/** Rotation about the site +Z axis (south): turns the X/Y (east/up) plane. */
+function rotateAboutZ(v: Vec3, deg: number): Vec3 {
+  const a = deg * DEG;
+  const c = Math.cos(a);
+  const s = Math.sin(a);
+  return [v[0] * c - v[1] * s, v[0] * s + v[1] * c, v[2]];
+}
+
+/** Rotation about the site +X axis (east): turns the Y/Z (up/south) plane. */
+function rotateAboutX(v: Vec3, deg: number): Vec3 {
+  const a = deg * DEG;
+  const c = Math.cos(a);
+  const s = Math.sin(a);
+  return [v[0], v[1] * c - v[2] * s, v[1] * s + v[2] * c];
+}
+
+/**
+ * The camera pose, rotated about the Earth's centre.
+ *
+ * Rotating about the line from Earth's centre through Weld (site +Y) spins the picture
+ * around the marker and shows no new geography. To bring another face round, the axis must
+ * be PERPENDICULAR to that line: yaw turns about site +Z (south), pitch about site +X
+ * (east). Both preserve |p - centre| exactly, so altitude above the surface is unchanged
+ * and the globe's angular size doesn't move while being turned.
+ *
+ * Both position and target are rotated, so the disc stays framed and it's the EARTH that
+ * turns under the camera -- rotating position alone would swing the camera to one side
+ * while still pointing at the same spot, which is a pan, not a spin.
+ *
+ * `k` scales the rotation: CameraRig passes (1 - t) descending through stage 0, so at the
+ * bottom of the leg the pose is exactly kf[1] however far the globe was turned -- without
+ * this a viewer could spin Cambridge over the horizon and descend into the wrong ocean.
+ */
+export function spinPose(
+  position: Vec3,
+  target: Vec3,
+  spin: { yawDeg: number; pitchDeg: number },
+  k: number,
+): { position: Vec3; target: Vec3 } {
+  const pitchDeg = within(spin.pitchDeg, -PITCH_CLAMP_DEG, PITCH_CLAMP_DEG);
+  const yaw = spin.yawDeg * k;
+  const pitch = pitchDeg * k;
+
+  const rotate = (p: Vec3): Vec3 => {
+    const rel: Vec3 = [p[0] - EARTH_CENTRE[0], p[1] - EARTH_CENTRE[1], p[2] - EARTH_CENTRE[2]];
+    const spun = rotateAboutX(rotateAboutZ(rel, yaw), pitch);
+    return [spun[0] + EARTH_CENTRE[0], spun[1] + EARTH_CENTRE[1], spun[2] + EARTH_CENTRE[2]];
+  };
+
+  return { position: rotate(position), target: rotate(target) };
+}
+
+/**
+ * Is a point on the proxy sphere on the near side of it?
+ *
+ * dot(n, v) > radius / distanceToCentre, where n is the point's outward normal and v the
+ * direction from the centre to the camera. That is the exact horizon condition, and it is
+ * here rather than inline in Globe.tsx because the marker's material has depthTest off --
+ * so nothing else stops it drawing straight through the Earth, and a marker visible on the
+ * far side is the defect that only appears once the globe can be turned.
+ */
+export function aboveHorizon(nDotV: number, radius: number, distanceToCentre: number): boolean {
+  return nDotV > radius / distanceToCentre;
 }

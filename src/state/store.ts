@@ -274,6 +274,17 @@ type Store = {
    */
   scrubbing: boolean;
 
+  /**
+   * How far the viewer has turned the globe at stage 0, or null for "as stages.ts posed it".
+   *
+   * NOT CARRIED BY A LINK, on the same argument url.ts makes about `flying` and
+   * `firstPerson`: it is where the recipient is looking, not what the model is. Null rather
+   * than {0, 0} so "untouched" is a distinct state and a reset button has something to
+   * restore.
+   */
+  globeSpin: { yawDeg: number; pitchDeg: number } | null;
+  setGlobeSpin: (s: { yawDeg: number; pitchDeg: number } | null) => void;
+
   setStage: (s: StageId) => void;
   setT: (t: number) => void;
   /** Stage and t together, with no cut and no reset. The master scrubber's only writer. */
@@ -550,6 +561,7 @@ export const useStore = create<Store>((set, get) => ({
   notice: null,
   cuts: 0,
   scrubbing: false,
+  globeSpin: null,
 
   // Every stage change drops the walker, and that is not tidiness. First person replaces
   // the stage's camera, so a walker surviving a jump to stage 2 would be a viewer standing
@@ -578,6 +590,7 @@ export const useStore = create<Store>((set, get) => ({
     // crossed into it. One set(), so no render ever sees the half-applied pair.
     set({ stage, t: Math.min(1, Math.max(0, t)), firstPerson: null, flying: false }),
   setScrubbing: (scrubbing) => set({ scrubbing }),
+  setGlobeSpin: (globeSpin) => set({ globeSpin }),
   next: () =>
     set((s) => ({
       stage: Math.min(LAST_STAGE, s.stage + 1) as StageId,
@@ -838,6 +851,7 @@ export const useStore = create<Store>((set, get) => ({
       notice: "Back to the sourced dimensions and the shipped fit-out.",
       cuts: 0,
       scrubbing: false,
+      globeSpin: null,
     }),
 
   /**

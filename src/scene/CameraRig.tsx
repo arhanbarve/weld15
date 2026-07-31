@@ -8,7 +8,8 @@ import { keyframes, cameraKeyframe, REDUCED_CUT } from "./stages";
 import { firstPersonPose } from "./FirstPerson";
 import { clampOrbit, orbitKeyframe, orbitOf, STAGE3_CLAMP, transitPose, MASSING_CENTER } from "./orbit";
 import { nearFar } from "./altitude";
-import { toJourney } from "./journey";
+import { fromJourney, toJourney } from "./journey";
+import { spinPose } from "./globeRig";
 
 /**
  * Drives the camera from the stage machine, and gives stage 3 a free orbit.
@@ -39,6 +40,20 @@ const DRAG_TURN_DEG = 360;
 
 /** Radius multiplier per notch of wheel. 100 is one notch of deltaY in Chrome. */
 const ZOOM_PER_NOTCH = 1.08;
+
+/** Share of the whole journey per notch of wheel. 50 notches end to end. */
+const SCRUB_PER_NOTCH = 0.02;
+
+/**
+ * How long `scrubbing` is held after the last wheel notch, ms.
+ *
+ * A wheel gesture has no pointerup to clear it on, unlike the master scrubber's own
+ * pointerdown/pointerup pair (Hud.tsx's onScrubbing). Held rather than toggled per notch so a
+ * steady flick of several notches in a row reads as one continuous hold rather than flickering
+ * the flag off between them; reset on every notch so the hold always covers 120 ms of stillness
+ * after the gesture actually stops.
+ */
+const SCRUB_HOLD_MS = 120;
 
 /**
  * How far the camera must move for window.__cam to record a new position, ft.
@@ -152,6 +167,10 @@ export function CameraRig() {
   const setHighContrast = useStore((s) => s.setHighContrast);
   const orbit = useStore((s) => s.orbit);
   const setOrbit = useStore((s) => s.setOrbit);
+  const globeSpin = useStore((s) => s.globeSpin);
+  const setGlobeSpin = useStore((s) => s.setGlobeSpin);
+  const setJourney = useStore((s) => s.setJourney);
+  const setScrubbing = useStore((s) => s.setScrubbing);
   const cuts = useStore((s) => s.cuts);
   const scrubbing = useStore((s) => s.scrubbing);
 
@@ -218,35 +237,49 @@ export function CameraRig() {
   }, [cuts, walking]);
 
   /**
-   * Pointer drag and wheel, at stage 3 only.
+   * Pointer drag and wheel, at every stage but the last.
    *
-   * Every other stage is a fixed shot and must stay one, so the listeners are
-   * attached and removed with the stage rather than gated inside a handler that
-   * runs on every move regardless.
+   * ONE EFFECT, DISPATCHING ON STAGE, replacing the stage-3-only effect this used to be.
+   * The listeners are still attached and removed with the stage, whatever they do at it, so a
+   * stage change always tears down exactly the right set:
    *
-   * The current orbit is read from the store on each event rather than closed over.
-   * Several pointermove events land between two React renders, and a closure over
-   * the rendered value would apply all of them to the same starting orbit -- which
-   * reads as a drag that fights back.
+   *   stage 0        drag turns the globe (writes `globeSpin`); wheel scrubs the journey.
+   *   stages 1, 2, 4 no drag; wheel scrubs the journey.
+   *   stage 3        drag orbits (writes `orbit`); wheel changes the orbit radius. UNCHANGED.
+   *   stage 5        not mounted at all -- the interior is not a zoom, and the walker owns
+   *                  the pointer (FirstPerson.tsx's own pointer-lock handling must not
+   *                  compete with a second listener on the same canvas).
    *
-   * clampOrbit is applied here and the store is left to hold whatever it is given.
-   * orbit.ts derived and brute-force verified those limits; a second clamp anywhere
-   * else is a second thing to keep in step with them.
+   * The current orbit/spin is read from the store on each event rather than closed over.
+   * Several pointermove events land between two React renders, and a closure over the
+   * rendered value would apply all of them to the same starting angle -- which reads as a
+   * drag that fights back.
+   *
+   * clampOrbit is applied here and the store is left to hold whatever it is given. orbit.ts
+   * derived and brute-force verified those limits; a second clamp anywhere else is a second
+   * thing to keep in step with them. globeSpin has NO clamp on write: spinPose (globeRig.ts)
+   * clamps pitchDeg on read, which is where the lookAt degeneracy actually bites, so the drag
+   * is free to keep accumulating past it rather than needing a matching clamp here.
    */
   useEffect(() => {
-    if (stage !== 3) return;
+    if (stage === LAST_STAGE) return;
     const el = gl.domElement;
     const base = keyframes(params)[3];
-    const current = () => useStore.getState().orbit ?? orbitOf(base);
+    const currentOrbit = () => useStore.getState().orbit ?? orbitOf(base);
+    const currentSpin = () => useStore.getState().globeSpin ?? { yawDeg: 0, pitchDeg: 0 };
 
     let dragging = false;
     let lastX = 0;
     let lastY = 0;
+    let scrubTimeout: ReturnType<typeof setTimeout> | undefined;
 
     const perPx = () => DRAG_TURN_DEG / Math.max(1, el.clientHeight);
 
     const onDown = (e: PointerEvent) => {
       if (e.button !== 0) return;
+      // Only stages 0 and 3 have anything for a drag to do; 1, 2 and 4 are fixed shots
+      // that scrub on the wheel alone, same as before this step.
+      if (stage !== 0 && stage !== 3) return;
       dragging = true;
       lastX = e.clientX;
       lastY = e.clientY;
@@ -260,18 +293,27 @@ export function CameraRig() {
       const dy = (e.clientY - lastY) * k;
       lastX = e.clientX;
       lastY = e.clientY;
-      const o = current();
-      // Signs are OrbitControls', which is also what "the surface under the cursor
-      // follows the cursor" gives: dragging right walks the camera round to the
-      // west, so azimuth rises; dragging down lifts it toward a plan, and polar is
-      // measured from straight up, so polar falls.
-      setOrbit(
-        clampOrbit({
-          azimuthDeg: o.azimuthDeg + dx,
-          polarDeg: o.polarDeg - dy,
-          radius: o.radius,
-        }),
-      );
+      if (stage === 3) {
+        const o = currentOrbit();
+        // Signs are OrbitControls', which is also what "the surface under the cursor
+        // follows the cursor" gives: dragging right walks the camera round to the
+        // west, so azimuth rises; dragging down lifts it toward a plan, and polar is
+        // measured from straight up, so polar falls.
+        setOrbit(
+          clampOrbit({
+            azimuthDeg: o.azimuthDeg + dx,
+            polarDeg: o.polarDeg - dy,
+            radius: o.radius,
+          }),
+        );
+      } else {
+        // stage === 0. Same signs as the orbit drag above, on the same "surface under
+        // the cursor follows the cursor" convention: dragging right turns the globe so
+        // the marker moves right with it, and dragging down tips the near pole toward
+        // the viewer -- see tests/e2e/wheel-and-spin.spec.ts's sign check.
+        const g = currentSpin();
+        setGlobeSpin({ yawDeg: g.yawDeg + dx, pitchDeg: g.pitchDeg - dy });
+      }
     };
 
     const onUp = (e: PointerEvent) => {
@@ -283,13 +325,29 @@ export function CameraRig() {
       // Not passive, because the page must not scroll under the gesture. The
       // listener is registered with { passive: false } for the same reason.
       e.preventDefault();
-      const o = current();
-      setOrbit(
-        clampOrbit({
-          ...o,
-          radius: o.radius * Math.pow(ZOOM_PER_NOTCH, e.deltaY / 100),
-        }),
-      );
+      if (stage === 3) {
+        const o = currentOrbit();
+        setOrbit(
+          clampOrbit({
+            ...o,
+            radius: o.radius * Math.pow(ZOOM_PER_NOTCH, e.deltaY / 100),
+          }),
+        );
+        return;
+      }
+      // Stages 0, 1, 2 and 4: the wheel scrubs the whole journey instead, in the same
+      // "down/forward is deeper" direction the master scrubber's own slider moves in.
+      const s = useStore.getState();
+      const u = toJourney(s.stage, s.t, params);
+      const next = Math.min(1, Math.max(0, u + (e.deltaY / 100) * SCRUB_PER_NOTCH));
+      const { stage: ns, t: nt } = fromJourney(next, params);
+      setJourney(ns, nt);
+      // Held rather than toggled on pointerdown/up, because a wheel gesture has neither.
+      // Without the hold, CameraRig's ease (step 3) fights each notch as it lands and the
+      // scrub reads as syrupy instead of smooth.
+      setScrubbing(true);
+      if (scrubTimeout !== undefined) clearTimeout(scrubTimeout);
+      scrubTimeout = setTimeout(() => setScrubbing(false), SCRUB_HOLD_MS);
     };
 
     // Touch drags need this or the browser claims the gesture and pointermove never
@@ -309,8 +367,9 @@ export function CameraRig() {
       el.removeEventListener("pointerup", onUp);
       el.removeEventListener("pointercancel", onUp);
       el.removeEventListener("wheel", onWheel);
+      if (scrubTimeout !== undefined) clearTimeout(scrubTimeout);
     };
-  }, [stage, gl, params, setOrbit]);
+  }, [stage, gl, params, setOrbit, setGlobeSpin, setJourney, setScrubbing]);
 
   useFrame((_, delta) => {
     const kf = keyframes(params);
@@ -344,8 +403,23 @@ export function CameraRig() {
             transitPose(orbitKeyframe(kf[3], orbit ?? orbitOf(kf[3])), kf[4], MASSING_CENTER, transit)
           : cameraKeyframe(kf, stage, t, reduced);
 
-    const wantPos = new THREE.Vector3(...want.position);
-    const wantTarget = new THREE.Vector3(...want.target);
+    /**
+     * Stage 0's turn, applied on top of the keyframe/path pose above.
+     *
+     * (1 - t), NOT a constant, because stage 0 is itself a descent (P9a) and this pose is
+     * the top of it. At t = 0 the globe is a place and the full turn shows; at t = 1 the
+     * camera has reached kf[1] -- Cambridge's own top -- and k = 0 collapses the spin to
+     * nothing, so however far the globe was turned, the descent still lands where stages.ts
+     * aimed it rather than wherever the turn last left off. globeRig.ts's spinPose carries
+     * the rest of the reasoning.
+     */
+    const posed =
+      stage === 0 && globeSpin
+        ? { ...want, ...spinPose(want.position, want.target, globeSpin, 1 - t) }
+        : want;
+
+    const wantPos = new THREE.Vector3(...posed.position);
+    const wantTarget = new THREE.Vector3(...posed.target);
 
     // COPIED, NEVER EASED, while somebody is walking. The walker IS the camera: an
     // exponential approach to it would lag every step and every turn by a few frames,
@@ -359,7 +433,7 @@ export function CameraRig() {
     if (walker !== null || reduced || scrubbing || !settled.current) {
       camera.position.copy(wantPos);
       target.current.copy(wantTarget);
-      camera.fov = want.fov;
+      camera.fov = posed.fov;
       camera.updateProjectionMatrix();
       settled.current = true;
     } else {
@@ -367,8 +441,8 @@ export function CameraRig() {
       const k = 1 - Math.exp(-delta * 3.2);
       camera.position.lerp(wantPos, k);
       target.current.lerp(wantTarget, k);
-      if (Math.abs(camera.fov - want.fov) > 0.01) {
-        camera.fov += (want.fov - camera.fov) * k;
+      if (Math.abs(camera.fov - posed.fov) > 0.01) {
+        camera.fov += (posed.fov - camera.fov) * k;
         camera.updateProjectionMatrix();
       }
       // Only while stage 3 IS a place, i.e. t === 0. Above that the pose is the transit to

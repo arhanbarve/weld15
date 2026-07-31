@@ -224,6 +224,7 @@ export function Hud() {
   const params = useStore((s) => s.params);
   const orbit = useStore((s) => s.orbit);
   const setOrbit = useStore((s) => s.setOrbit);
+  const setGlobeSpin = useStore((s) => s.setGlobeSpin);
   const cutaway = useStore((s) => s.cutaway);
   const setCutaway = useStore((s) => s.setCutaway);
   const occupancy = useStore((s) => s.occupancy);
@@ -549,6 +550,20 @@ export function Hud() {
                 aria-pressed={flying}
               >
                 {flying ? "Stop" : "Fly down to Weld"}
+              </button>
+            ) : null}
+            {/* [Reset the view], at the two stages that have one to reset: stage 0's turn
+                (globeSpin) and stage 3's free orbit (orbit). Both are session state rather
+                than model state -- neither is carried by a link, for the reason store.ts
+                gives on each field -- so nothing else puts either back. */}
+            {stage === 0 || stage === 3 ? (
+              <button
+                type="button"
+                className="fly"
+                onClick={() => (stage === 0 ? setGlobeSpin(null) : setOrbit(null))}
+                data-testid="reset-view"
+              >
+                Reset the view
               </button>
             ) : null}
           </div>
