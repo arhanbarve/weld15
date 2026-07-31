@@ -121,10 +121,16 @@ async function scanStage(page: Page, stage: number): Promise<string[]> {
     /*
      * The one INCOMPLETE result, accounted for rather than ignored.
      *
-     * Every scan reports exactly one: color-contrast, and its THIRTEEN nodes are all
-     * (it was fourteen until `.hud-num` took an opaque --void-deep ground in 5bcb253 --
-     * its contrast was 4.15:1 against a ground that moved with the frame, because 18% of
-     * Earth's lit limb came through --chip-scan behind it, and it is 5.06:1 flat now)
+     * Every scan reports exactly one: color-contrast, and its FIFTEEN nodes at stage 0
+     * (9 that axe cannot resolve against a gradient, 6 it calls too short) are all
+     * (the count has moved twice and is worth tracking rather than rounding: fourteen
+     * until `.hud-num` took an opaque --void-deep ground in 5bcb253 -- its contrast was
+     * 4.15:1 against a ground that moved with the frame, because 18% of Earth's lit limb
+     * came through --chip-scan behind it, and it is 5.06:1 flat now -- then thirteen,
+     * then fifteen when the high-contrast toggle added `button[data-testid=
+     * "contrast-toggle"]` and `.hud-orbit > span[aria-hidden="true"]`. Both are the
+     * gradient cause, and the toggle deliberately keeps --chip-scan so it looks like
+     * every other HUD button; an opaque ground would resolve it and single it out)
      * in other owners' chrome -- `.hud-stage`, `.hud-num`, the six stage buttons,
      * the two `.hud-t` rows, the sun readout, the area readout and Sources' summary.
      * Two causes, both read out of axe's own messages: "background color could not
