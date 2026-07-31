@@ -4,9 +4,21 @@ import { useEffect, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { LAST_STAGE, useStore, type StageId } from "@/state/store";
-import { keyframes, cameraKeyframe, REDUCED_CUT } from "./stages";
+import { keyframes, cameraKeyframe, REDUCED_CUT, funnel, FUNNEL_START, SHELL_GONE } from "./stages";
 import { firstPersonPose } from "./FirstPerson";
-import { clampOrbit, orbitKeyframe, orbitOf, STAGE3_CLAMP, transitPose, MASSING_CENTER } from "./orbit";
+import {
+  clampOrbit,
+  orbitKeyframe,
+  orbitOf,
+  STAGE3_CLAMP,
+  STAGE4_CLAMP,
+  stage4OrbitKeyframe,
+  stage4Pose,
+  transitPose,
+  MASSING_CENTER,
+  type Orbit,
+  type OrbitClamp,
+} from "./orbit";
 import { nearFar } from "./altitude";
 import { toJourney } from "./journey";
 
@@ -50,6 +62,9 @@ const ZOOM_PER_NOTCH = 1.08;
  */
 const MOVE_EPS = 0.01;
 
+/** MASSING_CENTER as a Vector3, built once rather than per frame. */
+const MASSING_CENTER_V3 = new THREE.Vector3(...MASSING_CENTER);
+
 /**
  * Positions kept per stage. The question the probe answers is about the first
  * moments after a stage change, so it keeps the FIRST N and then stops -- a ring
@@ -75,17 +90,24 @@ const MAX_PATH = 240;
  * way through 359 degrees. Direction is left exactly as the ease produced it.
  *
  * Pre-existing, and true of the pointer drag as much as of the keys.
+ *
+ * `center` and `clamp` are now parameters, not stage 3's constants baked in, so
+ * stage 4 can reuse this against MASSING_CENTER and STAGE4_CLAMP rather than
+ * against the look-at target and STAGE3_CLAMP -- see orbit.ts's STAGE4_CLAMP
+ * for why stage 4's radius guarantee has to be measured from MASSING_CENTER
+ * and not from kf[4].target.
  */
-function keepOutsideMassing(position: THREE.Vector3, target: THREE.Vector3): void {
-  const away = position.clone().sub(target);
+function keepOutsideMassing(
+  position: THREE.Vector3,
+  center: THREE.Vector3,
+  clamp: OrbitClamp = STAGE3_CLAMP,
+): void {
+  const away = position.clone().sub(center);
   const r = away.length();
   if (r < 1e-6) return;
-  const want = Math.min(
-    STAGE3_CLAMP.maxRadius,
-    Math.max(STAGE3_CLAMP.minRadius, r),
-  );
+  const want = Math.min(clamp.maxRadius, Math.max(clamp.minRadius, r));
   if (Math.abs(want - r) < 1e-9) return;
-  position.copy(target).add(away.multiplyScalar(want / r));
+  position.copy(center).add(away.multiplyScalar(want / r));
 }
 
 type CamProbe = {
@@ -201,7 +223,7 @@ export function CameraRig() {
   }, [cuts, walking]);
 
   /**
-   * Pointer drag and wheel, at stage 3 only.
+   * Pointer drag and wheel, at stages 3 and 4.
    *
    * Every other stage is a fixed shot and must stay one, so the listeners are
    * attached and removed with the stage rather than gated inside a handler that
@@ -215,12 +237,25 @@ export function CameraRig() {
    * clampOrbit is applied here and the store is left to hold whatever it is given.
    * orbit.ts derived and brute-force verified those limits; a second clamp anywhere
    * else is a second thing to keep in step with them.
+   *
+   * STAGE 4'S SEED IS NOT orbitOf(base). Stage 4's orbit is about MASSING_CENTER,
+   * not about kf[4].target (insideBedB) -- see orbit.ts's STAGE4_CLAMP and
+   * stage4OrbitKeyframe for why applying MASS_RADIUS-style clamping about the
+   * wrong pivot fails to keep the camera outside the massing at all. So the seed
+   * has to be orbitOf() of kf[4]'s own position measured from MASSING_CENTER, the
+   * same seeding tests/orbit.test.ts uses to prove stage4OrbitKeyframe reproduces
+   * kf[4] exactly before any drag.
    */
   useEffect(() => {
-    if (stage !== 3) return;
+    if (stage !== 3 && stage !== 4) return;
     const el = gl.domElement;
-    const base = keyframes(params)[3];
-    const current = () => useStore.getState().orbit ?? orbitOf(base);
+    const base = keyframes(params)[stage];
+    const clamp = stage === 3 ? STAGE3_CLAMP : STAGE4_CLAMP;
+    const seed = (): Orbit =>
+      stage === 3
+        ? orbitOf(base)
+        : orbitOf({ position: base.position, target: MASSING_CENTER, fov: base.fov });
+    const current = () => useStore.getState().orbit ?? seed();
 
     let dragging = false;
     let lastX = 0;
@@ -249,11 +284,14 @@ export function CameraRig() {
       // west, so azimuth rises; dragging down lifts it toward a plan, and polar is
       // measured from straight up, so polar falls.
       setOrbit(
-        clampOrbit({
-          azimuthDeg: o.azimuthDeg + dx,
-          polarDeg: o.polarDeg - dy,
-          radius: o.radius,
-        }),
+        clampOrbit(
+          {
+            azimuthDeg: o.azimuthDeg + dx,
+            polarDeg: o.polarDeg - dy,
+            radius: o.radius,
+          },
+          clamp,
+        ),
       );
     };
 
@@ -268,10 +306,13 @@ export function CameraRig() {
       e.preventDefault();
       const o = current();
       setOrbit(
-        clampOrbit({
-          ...o,
-          radius: o.radius * Math.pow(ZOOM_PER_NOTCH, e.deltaY / 100),
-        }),
+        clampOrbit(
+          {
+            ...o,
+            radius: o.radius * Math.pow(ZOOM_PER_NOTCH, e.deltaY / 100),
+          },
+          clamp,
+        ),
       );
     };
 
@@ -325,7 +366,12 @@ export function CameraRig() {
             // inside MASS_RADIUS at t ~= 0.58 even though both ends clear it, since a chord
             // between two points outside a sphere can still cut through the middle.
             transitPose(orbitKeyframe(kf[3], orbit ?? orbitOf(kf[3])), kf[4], MASSING_CENTER, transit)
-          : cameraKeyframe(kf, stage, t, reduced);
+          : stage === 4
+            ? // stage4Pose is BY IDENTITY cameraKeyframe(kf, 4, t, reduced) when orbit is
+              // null -- the regression fence tests/stages.test.ts pins -- so this branch
+              // is always taken at stage 4 rather than only when orbit is set.
+              stage4Pose(kf, t, reduced, orbit ? stage4OrbitKeyframe(kf[4], orbit) : null)
+            : cameraKeyframe(kf, stage, t, reduced);
 
     const wantPos = new THREE.Vector3(...want.position);
     const wantTarget = new THREE.Vector3(...want.target);
@@ -359,6 +405,15 @@ export function CameraRig() {
       // 124 ft out, and forcing the radius back inside it would pin the camera to the orbit
       // sphere and stall the move.
       if (stage === 3 && t === 0) keepOutsideMassing(camera.position, target.current);
+      // Stage 4's equivalent: only while the funnel has not yet fully resolved onto
+      // the path (funnel(t) < 1), and measured from MASSING_CENTER with STAGE4_CLAMP
+      // -- not from target.current, which is kf[4].target (insideBedB) and not the
+      // point stage 4's own radius guarantee is centred on. Once funnel(t) reaches 1
+      // the pose is the path's exactly, which is already inside the building by
+      // design, and correcting it back outside would fight the crossing itself.
+      else if (stage === 4 && orbit && funnel(t) < 1) {
+        keepOutsideMassing(camera.position, MASSING_CENTER_V3, STAGE4_CLAMP);
+      }
     }
 
     camera.lookAt(target.current);

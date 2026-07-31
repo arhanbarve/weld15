@@ -686,3 +686,109 @@ describe("setScrubbing", () => {
     expect(useStore.getState().scrubbing).toBe(false);
   });
 });
+
+/**
+ * `orbit` stops surviving a change of anchor.
+ *
+ * Stage 3's orbit is about kf[3].target = [0, 42, 0]; stage 4's is about
+ * MASSING_CENTER (orbit.ts's stage4OrbitKeyframe). The same three numbers
+ * read at the other stage is not a stale pose, it is the WRONG one -- a
+ * valid-looking camera position about a pivot the viewer never chose one
+ * relative to. `orbitStage` is what lets a stage change tell that apart from
+ * "returning to the stage this orbit already belongs to", which must still
+ * work exactly as it always has.
+ */
+describe("orbit survives only a return to its own anchor stage", () => {
+  const SOME_ORBIT = { azimuthDeg: 12, polarDeg: 40, radius: 200 };
+
+  it("keeps the orbit and its stage across a round trip through a non-anchor stage", () => {
+    useStore.getState().setStage(3);
+    useStore.getState().setOrbit(SOME_ORBIT);
+    expect(useStore.getState().orbitStage).toBe(3);
+
+    useStore.getState().setStage(2);
+    expect(useStore.getState().orbit).toEqual(SOME_ORBIT);
+    expect(useStore.getState().orbitStage).toBe(3);
+
+    useStore.getState().setStage(3);
+    expect(useStore.getState().orbit).toEqual(SOME_ORBIT);
+    expect(useStore.getState().orbitStage).toBe(3);
+  });
+
+  it("clears a stage-3 orbit on a direct move to stage 4", () => {
+    useStore.getState().setStage(3);
+    useStore.getState().setOrbit(SOME_ORBIT);
+    useStore.getState().setStage(4);
+    expect(useStore.getState().orbit).toBeNull();
+    expect(useStore.getState().orbitStage).toBeNull();
+  });
+
+  it("clears a stage-4 orbit on a direct move to stage 3", () => {
+    useStore.getState().setStage(4);
+    useStore.getState().setOrbit(SOME_ORBIT);
+    useStore.getState().setStage(3);
+    expect(useStore.getState().orbit).toBeNull();
+  });
+
+  it("clears a stale orbit even on a jump that skips the anchor stage entirely", () => {
+    // The gap a simpler "only clear on a direct 3<->4 move" rule would leave: set at
+    // stage 3, wander to stage 2 (orbit persists, unread), then jump straight to stage
+    // 4 without passing through 3 again. The orbit is still stage 3's and must not
+    // apply at stage 4 just because nothing happened to touch it in between.
+    useStore.getState().setStage(3);
+    useStore.getState().setOrbit(SOME_ORBIT);
+    useStore.getState().setStage(2);
+    expect(useStore.getState().orbit).toEqual(SOME_ORBIT); // still there, still stage 3's
+    useStore.getState().setStage(4);
+    expect(useStore.getState().orbit).toBeNull();
+  });
+
+  it("clears via next()/prev() the same way as setStage()", () => {
+    useStore.getState().setStage(3);
+    useStore.getState().setOrbit(SOME_ORBIT);
+    useStore.getState().next(); // 3 -> 4
+    expect(useStore.getState().orbit).toBeNull();
+
+    useStore.getState().setStage(4);
+    useStore.getState().setOrbit(SOME_ORBIT);
+    useStore.getState().prev(); // 4 -> 3
+    expect(useStore.getState().orbit).toBeNull();
+  });
+
+  it("clears via setJourney() too, since the master scrubber can cross 3 <-> 4", () => {
+    useStore.getState().setStage(3);
+    useStore.getState().setOrbit(SOME_ORBIT);
+    useStore.getState().setJourney(4, 0);
+    expect(useStore.getState().orbit).toBeNull();
+  });
+
+  it("leaves the orbit alone when the stage does not actually change", () => {
+    useStore.getState().setStage(3);
+    useStore.getState().setOrbit(SOME_ORBIT);
+    useStore.getState().setStage(3);
+    expect(useStore.getState().orbit).toEqual(SOME_ORBIT);
+  });
+
+  it("resetAll clears both fields", () => {
+    useStore.getState().setStage(3);
+    useStore.getState().setOrbit(SOME_ORBIT);
+    useStore.getState().resetAll();
+    expect(useStore.getState().orbit).toBeNull();
+    expect(useStore.getState().orbitStage).toBeNull();
+  });
+
+  it("hydrate derives orbitStage from the incoming stage, not the wire format", () => {
+    useStore.getState().hydrate({
+      stage: 4,
+      t: 0.5,
+      params: DEFAULT_SNAPSHOT.params,
+      pieces: DEFAULT_SNAPSHOT.pieces,
+      cutaway: "none",
+      hour: 9,
+      date: "2026-07-31",
+      orbit: SOME_ORBIT,
+      occupancy: 4,
+    });
+    expect(useStore.getState().orbitStage).toBe(4);
+  });
+});
