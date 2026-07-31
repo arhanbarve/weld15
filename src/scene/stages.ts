@@ -55,6 +55,17 @@ const GABLE_FOV = 50;
 const GABLE_FRAMING = 1.35;
 
 /**
+ * How far outside the gable kf[4] stands, ft. Derived from GABLE_FOV and
+ * GABLE_FRAMING rather than a local inside buildKeyframes(), so that
+ * orbit.ts's STAGE4_CLAMP derives from the SAME number instead of a copy --
+ * the mistake this file's own header on gableBack once made (a hard-coded
+ * distance surviving a change of fov) is exactly what a second copy would
+ * repeat in a second file.
+ */
+export const GABLE_BACK =
+  (WELD.ridge * GABLE_FRAMING) / (2 * Math.tan(((GABLE_FOV / 2) * Math.PI) / 180));
+
+/**
  * Vertical field of view for the shot that ends the descent, degrees.
  *
  * 62, unchanged from when it framed a bedroom corner, and it is if anything more
@@ -343,11 +354,9 @@ function buildKeyframes(params: SuiteParams): Record<StageId, Keyframe> {
   // height plus headroom, divided by the tangent of the half fov. Written as a
   // function of GABLE_FOV so the two cannot drift apart, which is how the 40
   // survived a change of fov in the first place.
-  const gableBack =
-    (WELD.ridge * GABLE_FRAMING) / (2 * Math.tan(((GABLE_FOV / 2) * Math.PI) / 180));
   const gableOutside = suiteToThree(
     bedB.u + bedB.du / 2,
-    params.sectionLength + gableBack,
+    params.sectionLength + GABLE_BACK,
     floor + WELD.ridge / 2,
     params,
   );

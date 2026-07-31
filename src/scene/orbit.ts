@@ -33,7 +33,7 @@ import weld from "@/data/weld.json";
 import { normalizeAngle } from "@/geo/frames";
 import type { Vec3 } from "@/geo/frames";
 import { WELD } from "@/geo/place";
-import type { Keyframe } from "./stages";
+import { GABLE_BACK, type Keyframe } from "./stages";
 
 export type Orbit = { azimuthDeg: number; polarDeg: number; radius: number };
 
@@ -99,6 +99,62 @@ export const STAGE3_CLAMP: OrbitClamp = {
   minPolarDeg: 15,
   maxPolarDeg: 88,
 };
+
+/**
+ * Stage 4's own orbit limits.
+ *
+ * NOT a plain copy of STAGE3_CLAMP's reasoning, even though the numbers rhyme.
+ * STAGE3_CLAMP's minRadius = MASS_RADIUS is safe because orbitKeyframe()
+ * clamps radius FROM THE TARGET it is given, and kf[3].target = [0, 42, 0]
+ * sits ON the building's vertical axis -- the proof below STAGE3_CLAMP's own
+ * declaration depends on that. kf[4].target is insideBedB, a point inside a
+ * specific bedroom, nowhere near that axis; clamping radius-from-insideBedB
+ * to MASS_RADIUS would NOT keep the camera outside the massing sphere
+ * centred on MASSING_CENTER -- the same gap transitPose's own docblock warns
+ * about for a keyframe's look-at target versus the clamp's real centre.
+ *
+ * So stage 4's orbit is built by stage4OrbitKeyframe() below, which clamps
+ * radius about MASSING_CENTER directly (position = MASSING_CENTER +
+ * sphericalOffset) and only THEN substitutes kf[4].target as where the
+ * camera looks. That makes minRadius = MASS_RADIUS an equality, not an
+ * inequality that happens to hold for one particular target: position is
+ * built AT that radius from the origin, so a clamped radius of MASS_RADIUS
+ * puts the camera exactly MASS_RADIUS from MASSING_CENTER, for any azimuth
+ * and any polar in range -- no on-axis argument required.
+ *
+ * maxRadius = 2 * GABLE_BACK. CHOSEN: GABLE_BACK is stages.ts's own stand-off
+ * for kf[4] (~123.6 ft), and twice it lets the viewer pull back far enough to
+ * see Weld's gable whole without reaching stage 3's 344.7 ft, where Weld stops
+ * being the subject and becomes one building among the campus's.
+ *
+ * minPolarDeg / maxPolarDeg = 15 / 88, unchanged, the same argument as stage 3.
+ */
+export const STAGE4_CLAMP: OrbitClamp = {
+  minRadius: MASS_RADIUS,
+  maxRadius: 2 * GABLE_BACK,
+  minPolarDeg: 15,
+  maxPolarDeg: 88,
+};
+
+/**
+ * Stage 4's free-orbit pose: circles MASSING_CENTER, looks at kf[4].target.
+ *
+ * The pivot for the radius clamp (MASSING_CENTER) and the point the camera
+ * looks at (kf[4].target, insideBedB) are deliberately DIFFERENT points --
+ * exactly the separation transitPose makes between `center` and a keyframe's
+ * own `target`. Reuses orbitKeyframe with target = MASSING_CENTER to get a
+ * position built at the clamped radius from the origin, then swaps in
+ * kf4.target for the look-at before returning, the same substitution
+ * transitPose's own NO_CLAMP call makes.
+ */
+export function stage4OrbitKeyframe(kf4: Keyframe, o: Orbit): Keyframe {
+  const { position } = orbitKeyframe(
+    { position: MASSING_CENTER, target: MASSING_CENTER, fov: kf4.fov },
+    o,
+    STAGE4_CLAMP,
+  );
+  return { position, target: kf4.target, fov: kf4.fov };
+}
 
 const DEG = Math.PI / 180;
 
