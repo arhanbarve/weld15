@@ -82,6 +82,26 @@ type Store = {
   reducedMotion: boolean;
 
   /**
+   * The high-contrast rendering flag: thicker campus strokes, denser building masses.
+   *
+   * ON THE SAME FOOTING AS `reducedMotion`, and that is the whole design of the field.
+   * It is seeded from `prefers-contrast: more` -- the platform signal, so a viewer who has
+   * already told their OS does not have to find a button -- and it is NOT carried by a
+   * link and NOT reset by resetAll(), for the reason url.ts gives about reducedMotion: it
+   * is the recipient's own accessibility preference, not part of the model somebody
+   * shared. hydrate() therefore leaves it alone, exactly as it leaves reducedMotion alone.
+   *
+   * WHERE IT DIFFERS: reducedMotion has no control, so nothing can disagree with the
+   * media query. This one has a button in the HUD, which is what MASTER.md asks for, so
+   * the seed is a default rather than a mirror -- Hud.tsx owns that distinction and
+   * records how it keeps the two from fighting.
+   *
+   * The two values it changes are MASTER.md's, not this file's: strokes to 2.5 CSS px and
+   * the mass fill to 0.22. Campus.tsx honours them and publishes what it used.
+   */
+  highContrast: boolean;
+
+  /**
    * The civil date the sun is computed for, "YYYY-MM-DD", Cambridge local.
    *
    * A date and an hour rather than one `Date` because that is what the two
@@ -196,6 +216,7 @@ type Store = {
   prev: () => void;
   skipToSuite: () => void;
   setReducedMotion: (v: boolean) => void;
+  setHighContrast: (v: boolean) => void;
   setParams: (p: Partial<SuiteParams>) => void;
   setDate: (d: string) => void;
   setHour: (h: number) => void;
@@ -429,6 +450,7 @@ export const useStore = create<Store>((set, get) => ({
   t: 0,
   params: DEFAULT_PARAMS,
   reducedMotion: false,
+  highContrast: false,
   date: DEFAULT_DATE,
   hour: DEFAULT_HOUR,
   orbit: null,
@@ -451,6 +473,9 @@ export const useStore = create<Store>((set, get) => ({
     set((s) => ({ stage: Math.max(0, s.stage - 1) as StageId, t: 0, firstPerson: null })),
   skipToSuite: () => set({ stage: LAST_STAGE, t: 1, firstPerson: null }),
   setReducedMotion: (reducedMotion) => set({ reducedMotion }),
+  // No validation and no notice: it is a boolean with one writer, and unlike setCutaway
+  // it is not reachable from a URL -- see the field above for why a link cannot carry it.
+  setHighContrast: (highContrast) => set({ highContrast }),
   /**
    * Move a dimension, and answer for the furniture standing on it.
    *
@@ -660,6 +685,9 @@ export const useStore = create<Store>((set, get) => ({
     });
   },
 
+  // reducedMotion and highContrast are absent for the reason hydrate() gives below: they
+  // are the reader's own accessibility preferences, and a button labelled "start over"
+  // that switched somebody's high contrast back off would be the app overruling them.
   resetAll: () =>
     set({
       params: DEFAULT_PARAMS,
@@ -680,8 +708,10 @@ export const useStore = create<Store>((set, get) => ({
    * No validation because decode() has already run all of it -- the same suite gates
    * whyIllegal() runs, plus placeIsLegal() per piece -- and re-checking here would be
    * a second implementation of a contract that is already property-tested. What this
-   * must NOT touch is reducedMotion: it comes from the recipient's own media query,
-   * and url.ts refuses to carry it for the same reason.
+   * must NOT touch is reducedMotion -- or highContrast, which arrived later on exactly
+   * the same footing: both come from the recipient's own media query, and url.ts refuses
+   * to carry either for the same reason. Neither is in the parameter list, so this is a
+   * property of the signature and not of a line below.
    */
   hydrate: (s) =>
     set({

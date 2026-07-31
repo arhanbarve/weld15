@@ -39,6 +39,11 @@ describe("the shipped opening state", () => {
     expect(s.cutaway).toBe("none");
     expect(s.occupancy).toBe(DEFAULT_OCCUPANCY);
     expect(s.selected).toBe(null);
+    // High contrast opens OFF, and this assertion is about the default rather than about
+    // the feature: Hud.tsx seeds the flag from `prefers-contrast: more`, and a store that
+    // shipped `true` would put every viewer in high contrast on a machine with no such
+    // preference and no media query would ever say otherwise.
+    expect(s.highContrast).toBe(false);
     // The point of sharing the object rather than re-deriving it: the app's own
     // opening state is a fixed point of the format.
     expect(decode(encode({ ...DEFAULT_SNAPSHOT, pieces: s.pieces }))?.pieces).toEqual(s.pieces);
@@ -360,6 +365,51 @@ describe("resetAll", () => {
     expect(s.cutaway).toBe("none");
     expect(s.selected).toBe(null);
     expect(s.notice).toMatch(/sourced dimensions/);
+  });
+});
+
+/**
+ * The high-contrast flag, and the one thing about it that is a decision rather than a
+ * setter.
+ *
+ * MASTER.md §Accessibility gates asks for the toggle and states its effect -- strokes to
+ * 2.5 px, `--mass` opacity to 0.22 -- and Campus.tsx honours those two numbers;
+ * tests/e2e/contrast.spec.ts is where they are measured, because they are a line width and
+ * a fill opacity inside a WebGL frame. What is testable HERE is the field's standing: it is
+ * the reader's own accessibility preference, on the same footing as `reducedMotion`, so
+ * neither a shared link nor a reset button may touch it. Both of those are one line of
+ * plausible tidiness away from being wrong, which is why they are gated rather than
+ * commented.
+ */
+describe("high contrast", () => {
+  it("has exactly one writer, and it writes both ways", () => {
+    useStore.setState({ highContrast: false });
+    useStore.getState().setHighContrast(true);
+    expect(useStore.getState().highContrast).toBe(true);
+    useStore.getState().setHighContrast(false);
+    expect(useStore.getState().highContrast).toBe(false);
+  });
+
+  it("survives resetAll, because a reset is about the model and not about the reader", () => {
+    useStore.getState().setHighContrast(true);
+    useStore.getState().setParams({ ceiling: 9 });
+    useStore.getState().resetAll();
+    // The model went back; the preference did not. A "start over" that switched somebody's
+    // high contrast off would be the app overruling them.
+    expect(useStore.getState().params).toEqual(DEFAULT_PARAMS);
+    expect(useStore.getState().highContrast).toBe(true);
+    useStore.getState().setHighContrast(false);
+  });
+
+  it("survives hydrate, for the reason reducedMotion does: a link carries the model", () => {
+    useStore.getState().setHighContrast(true);
+    const s = decode(encode({ ...DEFAULT_SNAPSHOT, stage: 3, cutaway: "roofOff" }))!;
+    useStore.getState().hydrate(s);
+    expect(useStore.getState().stage, "the snapshot did not arrive").toBe(3);
+    // url.ts refuses to encode either preference, so a recipient's own setting is what
+    // decides how the model they were sent is drawn.
+    expect(useStore.getState().highContrast).toBe(true);
+    useStore.getState().setHighContrast(false);
   });
 });
 

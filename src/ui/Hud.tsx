@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { LAST_STAGE, STAGES, pieceLabel, useStore, type StageId } from "@/state/store";
 import { buildSuite } from "@/geo/rooms";
 import { footprintArea } from "@/geo/walls";
@@ -277,6 +277,8 @@ export function Hud() {
   const setT = useStore((s) => s.setT);
   const skip = useStore((s) => s.skipToSuite);
   const reduced = useStore((s) => s.reducedMotion);
+  const high = useStore((s) => s.highContrast);
+  const setHighContrast = useStore((s) => s.setHighContrast);
   const date = useStore((s) => s.date);
   const hour = useStore((s) => s.hour);
   const setDate = useStore((s) => s.setDate);
@@ -415,6 +417,44 @@ export function Hud() {
     return () => window.clearTimeout(id);
   }, [walking, walkRoom, walkReading]);
 
+  /**
+   * Whether the viewer has pressed the contrast button, which decides who wins.
+   *
+   * A ref rather than state because nothing renders differently for it: it exists only so
+   * the media-query listener below can tell "the platform changed its mind" from "the
+   * viewer has already told me otherwise".
+   */
+  const contrastChosen = useRef(false);
+
+  /**
+   * `prefers-contrast: more` SEEDS high contrast; the button overrides it.
+   *
+   * The seed is the important half and it is the same move CameraRig makes for
+   * `prefers-reduced-motion`: somebody who has already set the preference at the OS level
+   * has said what they need, and making them find a control in a HUD to say it again is
+   * the accessibility failure, not the fix. So the flag opens at `mq.matches`.
+   *
+   * WHY THE `change` LISTENER IS CONDITIONAL, WHICH IS THE ONE DIFFERENCE FROM CameraRig.
+   * `reducedMotion` has no control anywhere in the app, so its listener can mirror the
+   * query unconditionally -- nothing can disagree with it. This flag has a button, and an
+   * unconditional listener would mean a viewer who switched high contrast OFF here had it
+   * silently switched back on by an unrelated OS change. Once the button has been pressed,
+   * the person is the authority and the query is only the default they started from.
+   *
+   * It lives in Hud.tsx rather than beside CameraRig's because this is chrome's business
+   * and because the control it seeds is in this file: two writers of one flag in two
+   * components is how they come to disagree.
+   */
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-contrast: more)");
+    setHighContrast(mq.matches);
+    const onChange = () => {
+      if (!contrastChosen.current) setHighContrast(mq.matches);
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [setHighContrast]);
+
   useEffect(() => {
     // Null means the camera is still on the keyframe, so there is nothing to
     // report yet: announcing on arrival at stage 3 would be an interruption
@@ -469,6 +509,56 @@ export function Hud() {
     return () => window.removeEventListener("keydown", onKey);
   }, [stage, selected, walking]);
 
+  /**
+   * `[` and `]` step the stage, which MASTER.md asks for by name.
+   *
+   * On the window for the reason the piece keys above are: the thing being moved is the
+   * camera and the canvas has nothing inside it to focus. The guard set is therefore
+   * load-bearing in the same way, and it is deliberately NOT the same set:
+   *
+   *   NO stage gate    and this is the difference worth stating. The piece handler is
+   *                    mounted only at the last stage because arrow keys belong to the
+   *                    orbit group at stage 3 and to the walker at stage 5. Stage
+   *                    navigation is meaningful at every one of the six, and no other
+   *                    handler in the app claims a bracket -- ORBIT_CONTROLS' keys and
+   *                    PIECE_KEYS above are the whole set, and neither contains one.
+   *   the target gate  same gate, same reason, and here it is the one that matters most:
+   *                    `[` typed into a field must never move the camera. The stage-4
+   *                    threshold slider and the two sun controls are all <input>, and a
+   *                    date field genuinely takes typed characters.
+   *   first person     P7's guard, and it applies harder here than to a nudge: setStage
+   *                    drops the walker, so an unguarded bracket would eject somebody
+   *                    mid-stride from a stage they never asked to leave. Mounted by the
+   *                    flag rather than branched inside, like the piece handler.
+   *   no modifiers     Cmd+[ and Ctrl+[ are the browser's own Back on more than one
+   *                    platform. Claiming the unmodified key only means a viewer going
+   *                    back through history does not also lose their stage on the way.
+   *
+   * `e.key`, not `e.code`: MASTER names the characters, and PIECE_KEYS and NUDGE_BY_KEY
+   * are both keyed the same way, so a layout that puts `[` elsewhere still works. `{` and
+   * `}` are absent on purpose -- they are a different keystroke, unlike `=`/`+`, where
+   * ORBIT_CONTROLS carries both because the UNSHIFTED press is the one people make.
+   */
+  useEffect(() => {
+    if (walking) return;
+    const onKey = (e: KeyboardEvent) => {
+      const step = e.key === "[" ? -1 : e.key === "]" ? 1 : 0;
+      if (step === 0 || e.ctrlKey || e.metaKey || e.altKey) return;
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || el?.isContentEditable) return;
+      e.preventDefault();
+      // prev() and next() rather than setStage(stage +/- 1): they already clamp at 0 and
+      // LAST_STAGE, reset `t` and drop the walker, and they are the same two actions the
+      // store exposes to everything else. A second opinion about the ends of the range in
+      // this file is a second thing to keep in step.
+      if (step < 0) useStore.getState().prev();
+      else useStore.getState().next();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [walking]);
+
   return (
     <>
       <UrlSync />
@@ -510,7 +600,12 @@ export function Hud() {
           {reduced ? <span className="hud-flag">reduced motion</span> : null}
         </div>
 
-        <div className="hud-scrub" role="group" aria-label="Stage">
+        {/* aria-keyshortcuts on the GROUP rather than on each button, because the two keys
+            step through the group and do not activate any one of its six members. It is
+            here so the shortcut is discoverable from the control it drives instead of
+            being folklore -- the same reason fp-leave carries aria-keyshortcuts="Escape".
+            The handler is the window keydown above; this attribute only advertises it. */}
+        <div className="hud-scrub" role="group" aria-label="Stage" aria-keyshortcuts="[ ]">
           {STAGES.map((s) => (
             <button
               key={s.id}
@@ -748,6 +843,53 @@ export function Hud() {
         <div className="hud-t" data-testid="area-readout">
           <span>floor area</span>
           <span className="tabular">{area.toFixed(0)} sq ft</span>
+        </div>
+
+        {/* HIGH CONTRAST. MASTER.md §Accessibility gates asks for the toggle and states
+            what it does: strokes to 2.5px, --mass opacity to 0.22. Campus.tsx honours both
+            and publishes what it used; this is only the switch.
+
+            MOUNTED AT EVERY STAGE, which is a deliberate break from the two rows above --
+            they are stage-gated by mount because an orbit key at stage 0 would be a
+            control that declines to work. This one is not that: it is a viewer's rendering
+            preference, in the same class as `prefers-reduced-motion`, and it always takes
+            effect. What varies is only whether the campus is on screen to show it, which
+            is stages 1 to 3 (stages.ts's visibility()). A preference control that vanishes
+            when you go looking for it is worse than one whose effect is elsewhere -- and
+            the checklist's audit is the evidence: it scanned for this control at ALL SIX
+            stages and reported an empty list.
+
+            IT REUSES .hud-orbit AND .hud-scrub, so the 44 x 44 target, the border, the
+            hover, the `.on` state and the wrapping all come from the stage-3 row's rules
+            rather than from a new block in app/globals.css. That row already carries a note
+            saying reuse is the intent, and it means this control adds no CSS at all.
+
+            THE STATE IS NOT A TINT. aria-pressed carries it to a reader, the FACE changes
+            word ("normal" / "high"), and `.on` adds the --mark border and weight 600 --
+            three signals, two of them nothing to do with colour, which is what every other
+            toggle in this app already does and what MASTER.md requires of all of them. */}
+        <div className="hud-orbit" role="group" aria-label="Rendering">
+          <span aria-hidden="true">contrast</span>
+          <div className="hud-scrub">
+            <button
+              type="button"
+              onClick={() => {
+                // Latched before the write, so the media-query listener above stops
+                // overruling this person for the rest of the session.
+                contrastChosen.current = true;
+                setHighContrast(!high);
+              }}
+              aria-pressed={high}
+              // A stable name with the state on aria-pressed, rather than a name that
+              // changes: a toggle whose accessible name moves is announced as a different
+              // control every time it is pressed.
+              aria-label="High contrast: thicker campus strokes and denser building masses"
+              data-testid="contrast-toggle"
+              className={high ? "on" : ""}
+            >
+              {high ? "high" : "normal"}
+            </button>
+          </div>
         </div>
       </div>
 
