@@ -7,6 +7,7 @@ import { LAST_STAGE, useStore } from "@/state/store";
 import { visibility, thresholdOpacity } from "./stages";
 import { CameraRig } from "./CameraRig";
 import { FirstPerson } from "./FirstPerson";
+import { FlyDown } from "./FlyDown";
 import { Lighting } from "./Lighting";
 import { Globe } from "./Globe";
 import { Campus } from "./Campus";
@@ -115,6 +116,15 @@ export default function Experience() {
               a permanent 0.07 ft of lag and, on a slow frame, a visible one. */}
           <FirstPerson />
           <CameraRig />
+          {/* AFTER CameraRig, on the mirror image of the argument that puts FirstPerson before
+              it. FlyDown writes `t` to the store and CameraRig reads it, so running it after
+              means the camera uses THIS frame's t on the NEXT frame -- one frame of lag, at a
+              rate of about a fiftieth of a stage per frame, which is invisible. Running it
+              first would be worse than lagging: setT triggers a React render, and a render
+              between FlyDown and CameraRig in the same frame would have CameraRig read a t that
+              had already moved on, so the flight would advance twice per frame and run at
+              double speed. */}
+          <FlyDown />
           <Perf />
 
           <Globe visible={vis.globe} />

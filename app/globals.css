@@ -243,6 +243,49 @@ button,
   min-height: 44px;
 }
 
+/* ---------- the fly-down ---------- */
+
+/* VISIBLE, unlike .skip, and that is the whole difference between them. .skip is an escape
+   hatch that lives off-screen until it is focused; this is a feature, and a feature nobody can
+   see is not offered. It sits directly above the HUD and centred on it, because the HUD is what
+   it drives -- it advances the same `t` the scrubber in there moves, and putting the two next to
+   each other is what makes that legible without a label saying so.
+
+   Bottom offset is the HUD's own bottom plus room for the HUD itself. Deliberately not inside
+   .hud: the HUD's height changes with the stage (stage 3 adds the orbit row, stage 5 the
+   first-person row), and a control that moved up and down the screen as the stage changed would
+   be harder to hit than one that stays put. Hud.tsx only mounts this below FLY_DOWN_END, where
+   the HUD is at its shortest and the gap is stable. */
+.fly {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--s2) + 8.5rem);
+  z-index: var(--z-hud);
+  background: var(--chip-scan);
+  color: var(--ink);
+  border: 1px solid var(--mark);
+  border-radius: 2px;
+  padding: 0.6rem 1rem;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  min-height: 44px;
+  cursor: pointer;
+  transition: border-color var(--dur-micro) var(--ease-out-quint);
+}
+.fly:hover {
+  border-color: var(--ink);
+}
+/* Pressed reads as pressed. aria-pressed carries it for a screen reader; this is the same
+   fact for everyone else, and it is the border rather than the fill so the control does not
+   change size when it changes state. */
+.fly[aria-pressed="true"] {
+  border-color: var(--ink);
+  color: var(--mark);
+}
+
 /* ---------- stage 3 orbit keys ---------- */
 
 /* The row reuses .hud-scrub for its buttons, so the 44 x 44 target, the border and
