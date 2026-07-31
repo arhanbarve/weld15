@@ -167,8 +167,10 @@ export function CameraRig() {
    * line through whatever stands in between -- which is precisely the defect P7 paid back:
    * stages.ts recorded a straight camera path from bedroom B to the hall passing through
    * the partition and standing half a foot off it, at the near plane, with the frame going
-   * empty. A viewer who walks into bedroom A and presses Escape would fly the same line.
-   * So leaving is a cut, on purpose.
+   * empty. So leaving is a cut, on purpose -- though since P10 there is no button that
+   * leaves first person mid-stride any more: standing is a property of stage 5, and the
+   * only way `walking` flips is an actual stage change (`[`, a link, a reset), which is
+   * exactly the case `[stage, walking]` already un-settles for.
    */
   useEffect(() => {
     settled.current = false;
