@@ -593,3 +593,96 @@ describe("first person", () => {
     expect(useStore.getState().notice).toBe(null);
   });
 });
+
+/**
+ * P10: telling a cut from a move.
+ *
+ * `cuts` is what CameraRig will un-settle on instead of `stage`, so what matters here is
+ * exactly which actions bump it and which do not -- setStage, next, prev, skipToSuite and
+ * both ends of first person are jumps; setT, setJourney and flyStep are the continuous
+ * motion the counter has to stay silent for, or the fly-down would pop at every stage it
+ * crosses.
+ */
+describe("cuts", () => {
+  it("bumps by exactly one for each of the five cut actions", () => {
+    const before = useStore.getState().cuts;
+    useStore.getState().setStage(2);
+    expect(useStore.getState().cuts).toBe(before + 1);
+
+    useStore.getState().next();
+    expect(useStore.getState().cuts).toBe(before + 2);
+
+    useStore.getState().prev();
+    expect(useStore.getState().cuts).toBe(before + 3);
+
+    useStore.getState().skipToSuite();
+    expect(useStore.getState().cuts).toBe(before + 4);
+
+    useStore.getState().enterFirstPerson();
+    expect(useStore.getState().firstPerson, "the suite stands somebody up").not.toBeNull();
+    expect(useStore.getState().cuts).toBe(before + 5);
+
+    useStore.getState().leaveFirstPerson();
+    expect(useStore.getState().cuts).toBe(before + 6);
+  });
+
+  it("does not move for setT, setJourney or flyStep, the continuous ones", () => {
+    const before = useStore.getState().cuts;
+    useStore.getState().setT(0.4);
+    useStore.getState().setJourney(2, 0.6);
+    useStore.getState().flyStep();
+    expect(useStore.getState().cuts).toBe(before);
+  });
+
+  it("resets to zero and false on resetAll, and hydrate leaves both alone", () => {
+    useStore.getState().setStage(3);
+    expect(useStore.getState().cuts).toBeGreaterThan(0);
+    useStore.getState().setScrubbing(true);
+    useStore.getState().resetAll();
+    expect(useStore.getState().cuts).toBe(0);
+    expect(useStore.getState().scrubbing).toBe(false);
+
+    useStore.getState().setStage(1);
+    useStore.getState().setScrubbing(true);
+    const beforeCuts = useStore.getState().cuts;
+    const s = decode(encode({ ...DEFAULT_SNAPSHOT, stage: 4 }))!;
+    useStore.getState().hydrate(s);
+    expect(useStore.getState().stage, "the snapshot did arrive").toBe(4);
+    expect(useStore.getState().cuts, "hydrate is not a cut").toBe(beforeCuts);
+    expect(useStore.getState().scrubbing, "hydrate does not touch session facts").toBe(true);
+  });
+});
+
+describe("setJourney", () => {
+  it("sets stage and t together, and leaves cuts unchanged", () => {
+    const beforeCuts = useStore.getState().cuts;
+    useStore.getState().setJourney(4, 0.5);
+    const after = useStore.getState();
+    expect(after.stage).toBe(4);
+    expect(after.t).toBe(0.5);
+    expect(after.cuts).toBe(beforeCuts);
+  });
+
+  it("clamps t to [0, 1]", () => {
+    useStore.getState().setJourney(2, -0.5);
+    expect(useStore.getState().t).toBe(0);
+    useStore.getState().setJourney(2, 1.5);
+    expect(useStore.getState().t).toBe(1);
+  });
+
+  it("clears the walker, for the reason setStage does: the walker owns a different camera", () => {
+    useStore.getState().enterFirstPerson();
+    expect(useStore.getState().firstPerson).not.toBeNull();
+    useStore.getState().setJourney(2, 0.3);
+    expect(useStore.getState().firstPerson).toBeNull();
+  });
+});
+
+describe("setScrubbing", () => {
+  it("writes the flag both ways", () => {
+    useStore.getState().setScrubbing(true);
+    expect(useStore.getState().scrubbing).toBe(true);
+    useStore.getState().setScrubbing(false);
+    expect(useStore.getState().scrubbing).toBe(false);
+  });
+});
