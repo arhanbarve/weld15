@@ -713,6 +713,44 @@ export function cameraKeyframe(
 }
 
 /**
+ * How much of stage 4's pose is the PATH's rather than the viewer's, at
+ * progress t.
+ *
+ * 1 at and after SHELL_GONE, which is the whole guarantee this exists for:
+ * from the frame the brick reaches zero opacity, the pose is the path's
+ * exactly, so the camera crosses the gable perpendicular and every
+ * downstream promise -- the routed walk, route.ts's standoff, the 0.5 ft
+ * near plane -- is exactly as untouched as it was before stage 4 could be
+ * dragged at all.
+ *
+ * 0 at and below FUNNEL_START, so a drag at the top of the stage is fully
+ * the viewer's and the control feels direct rather than rubber-banded.
+ *
+ * 0.15 is CHOSEN. It has to sit below thresholdOpacity()'s shell ramp, which
+ * starts at 0.2: the funnel should have begun pulling the pose back onto the
+ * path before the building starts dissolving, or the viewer watches the
+ * camera swing while the brick is already going.
+ */
+export const FUNNEL_START = 0.15;
+
+export function funnel(t: number): number {
+  if (t <= FUNNEL_START) return 0;
+  if (t >= SHELL_GONE) return 1;
+  const u = (t - FUNNEL_START) / (SHELL_GONE - FUNNEL_START);
+  return u * u * (3 - 2 * u); // smoothstep: zero derivative at both ends,
+} // so neither the drag nor the path starts with a jerk
+
+// stage4Pose() -- composing funnel(t) with the viewer's held orbit into a full
+// pose -- lives in orbit.ts, not here, alongside stage4OrbitKeyframe() and
+// transitPose(). It needs transitPose's spherical-about-MASSING_CENTER blend
+// (a straight blend() here dipped into the real massing at t ~= 0.36 for an
+// orbit near STAGE4_CLAMP's own minRadius -- the same failure mode
+// transitPose's own docblock records finding for the stage 3 -> 4 transit),
+// and this module must not import orbit.ts: orbit.ts already imports
+// GABLE_BACK and `type Keyframe` from here, and importing back would be a
+// real cycle rather than the type-only one that direction is.
+
+/**
  * Which stages need the campus, Weld's shell, and the interior mounted.
  *
  * MOUNTING, NOT OPACITY, and P9 makes the distinction matter. This is a function of the stage

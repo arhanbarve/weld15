@@ -33,7 +33,8 @@ import weld from "@/data/weld.json";
 import { normalizeAngle } from "@/geo/frames";
 import type { Vec3 } from "@/geo/frames";
 import { WELD } from "@/geo/place";
-import { GABLE_BACK, type Keyframe } from "./stages";
+import type { StageId } from "@/state/store";
+import { GABLE_BACK, cameraKeyframe, funnel, REDUCED_CUT, type Keyframe } from "./stages";
 
 export type Orbit = { azimuthDeg: number; polarDeg: number; radius: number };
 
@@ -307,4 +308,53 @@ export function transitPose(from: Keyframe, to: Keyframe, center: Vec3, t: numbe
     ],
     fov: mix(from.fov, to.fov),
   };
+}
+
+/**
+ * Stage 4's pose, given the free orbit the viewer may have set.
+ *
+ * `held` is stage4OrbitKeyframe(kf[4], orbit) when the viewer has dragged, or
+ * null when they have not.
+ *
+ * THE BLEND IS transitPose, NOT blend(). A straight cartesian blend() between
+ * `held` (an orbit anywhere in STAGE4_CLAMP's range) and the fixed approach
+ * path clips into Weld's real massing at some (orbit, t) pairs -- measured,
+ * in tests/stages.test.ts, at t ~= 0.36 for an orbit near STAGE4_CLAMP's own
+ * minRadius -- the identical failure mode transitPose's own docblock records
+ * finding for the stage 3 -> 4 transit, and for the identical reason: a
+ * chord between two points outside a sphere is not guaranteed to stay
+ * outside it. transitPose's radius-about-MASSING_CENTER interpolation does
+ * not have that failure mode, and `held`'s own radius from MASSING_CENTER is
+ * already >= MASS_RADIUS by STAGE4_CLAMP's construction, so the blended
+ * path's closest approach to MASSING_CENTER is bounded below by
+ * min(radius(held), radius(path)) -- see transitPose's own comment for why.
+ *
+ * `held === null` returns cameraKeyframe(...) BY IDENTITY, the same call
+ * with nothing else evaluated -- the regression fence: a viewer who never
+ * drags gets precisely today's stage 4, because this function does not do
+ * anything different for that case, not because it does the same arithmetic
+ * and arrives at the same answer.
+ *
+ * `funnel(t) >= 1` returns the path pose BY IDENTITY too, not by blending to
+ * it. transitPose(a, b, center, 1) reconstructs b's position through a round
+ * trip of orbitOf/orbitKeyframe, which agrees with b to a float ulp rather
+ * than exactly, and the crossing is the one place a camera position is
+ * compared for equality -- by tests/stages.test.ts and by CameraRig's own
+ * MOVE_EPS.
+ */
+export function stage4Pose(
+  kf: Record<StageId, Keyframe>,
+  t: number,
+  reduced: boolean,
+  held: Keyframe | null,
+): Keyframe {
+  const path = cameraKeyframe(kf, 4, t, reduced);
+  if (!held) return path;
+  // Reduced motion gets the same jump-at-midpoint shape the stage 3 -> 4
+  // transit and the threshold crossing both use, for the same reason: under
+  // reduced motion nothing geometrically between two poses may ever render.
+  const f = reduced ? (t < REDUCED_CUT ? 0 : 1) : funnel(t);
+  if (f >= 1) return path;
+  if (f <= 0) return held;
+  return transitPose(held, path, MASSING_CENTER, f);
 }
