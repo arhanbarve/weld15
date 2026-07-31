@@ -264,6 +264,7 @@ type Store = {
     hour: number;
     date: string;
     orbit: Orbit | null;
+    occupancy: number;
   }) => void;
 };
 
@@ -723,6 +724,11 @@ export const useStore = create<Store>((set, get) => ({
       hour: s.hour,
       date: s.date,
       orbit: s.orbit,
+      // Set, NOT re-fitted. `pieces` above is the sender's actual arrangement and it
+      // arrives whole; running layout() at this occupancy instead would throw away
+      // every piece they moved. So the two arrive independently, exactly as they sat
+      // in the sender's own store -- which is also why setOccupancy does not re-fit.
+      occupancy: s.occupancy,
       // Cleared for the reason `selected` is: a link carries the model, not where the
       // recipient is standing in it. url.ts does not encode either field.
       firstPerson: null,

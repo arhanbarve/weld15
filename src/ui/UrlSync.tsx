@@ -132,6 +132,7 @@ export function UrlSync() {
         hour: s.hour,
         date: s.date,
         orbit: s.orbit,
+        occupancy: s.occupancy,
       };
       const q = encode(snap);
       lastQ = q;
@@ -148,7 +149,7 @@ export function UrlSync() {
     };
 
     /**
-     * The eight carried fields, by REFERENCE for the three that are objects.
+     * The nine carried fields, by REFERENCE for the three that are objects.
      *
      * Not JSON.stringify of the tuple, which is the obvious way to write this and is
      * wrong here: an orbit drag writes the store on every frame, and stringifying 29
@@ -160,7 +161,22 @@ export function UrlSync() {
      */
     const key = () => {
       const s = useStore.getState();
-      return [s.stage, s.t, s.params, s.pieces, s.cutaway, s.hour, s.date, s.orbit] as const;
+      // occupancy is HERE and not only in write(). It changes without changing any
+      // other field -- setOccupancy deliberately does not re-fit, so moving the
+      // slider and not pressing Refit leaves `pieces` identical -- so a key that
+      // omitted it would carry the new occupancy in the snapshot and never schedule
+      // the write that puts it in the address bar.
+      return [
+        s.stage,
+        s.t,
+        s.params,
+        s.pieces,
+        s.cutaway,
+        s.hour,
+        s.date,
+        s.orbit,
+        s.occupancy,
+      ] as const;
     };
     let last = key();
 

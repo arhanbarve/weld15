@@ -34,6 +34,11 @@
  *     carried it would let a sender override someone else's accessibility
  *     preference, which is not shared state; it is their state.
  *
+ * WHAT IS CARRIED THAT ONCE WAS NOT
+ *   - occupancy, added in VERSION 2. It is not derivable from the pieces and it is
+ *     not the recipient's own state, so it belonged in neither list above and was
+ *     simply missing. See the field's docblock on Snapshot for what that cost.
+ *
  * WHY THE LATTICE IS ONE INCH AND NOT collide.ts's 0.5 FT GRID
  * The phase spec says to quantise onto the 0.5 ft grid, and that is right for
  * *drag* -- but it cannot carry the furniture. A bed frame is 82 in long
@@ -165,6 +170,28 @@ export type Snapshot = {
   /** Civil date, "YYYY-MM-DD". */
   date: string;
   orbit: Orbit | null;
+  /**
+   * How many students the suite is fitted out for, 1..4.
+   *
+   * CARRIED, AND IT WAS NOT ALWAYS. Version 1 of this format left it out, and
+   * measured on the deployed build that showed up as a link sent at three students
+   * reopening at four: the recipient saw the sender's three-student arrangement --
+   * `pieces` is carried in full, so the PICTURE was right -- above a panel that
+   * read "4" and a Refit button that would silently rearrange the suite into one
+   * the sender never had. Every other omission in this file is argued for in the
+   * header's "what is not carried" list; this one was absent from it, which is
+   * what marked it as a gap rather than a decision.
+   *
+   * It cannot be derived from `pieces`, which is the reason it needs a field of
+   * its own rather than a recount at the far end: store.ts's `occupancy` docblock
+   * records that layout() saturates at four because bedroomSlots() puts at most two
+   * beds in a bedroom, so a four-bed fit-out and a five-student intent produce the
+   * same piece list. It also survives editing -- dragging a bed away does not make
+   * the suite a three-student suite.
+   *
+   * One byte on the wire, as a varint of a number in 1..4.
+   */
+  occupancy: number;
 };
 
 /**
@@ -212,7 +239,36 @@ export const SNAPSHOT_PARAM = "s";
 // the right order; a full 32 would cost two more bytes to defend against an
 // adversary who could just encode a valid string instead.
 
-const VERSION = 1;
+/**
+ * The format's version byte, and the first thing decode() checks.
+ *
+ * 2 adds `occupancy` after the date. The bump is the point rather than a formality:
+ * a v1 string is a byte-for-byte prefix of a v2 one up to that field and then
+ * diverges, so a v1 link read as v2 would take the low byte of the first length as
+ * an occupancy and shift every field after it. The trailer would almost always
+ * catch that -- 1 in 65,536 would not -- and "almost always" is not the guarantee
+ * this file makes. Refusing on the version byte makes it exact: an old link decodes
+ * to null, and null means the recipient opens at the defaults, which is this
+ * module's stated answer for every string it cannot read.
+ *
+ * What that costs is real and is the price of the fix: links shared before this
+ * change open at the default suite instead of the sender's. There is no third
+ * option -- a v1 payload does not contain the occupancy, so nothing can be
+ * recovered from it except by guessing, and guessing is how a link comes to lie.
+ */
+const VERSION = 2;
+
+/**
+ * What `occupancy` is allowed to be on the wire.
+ *
+ * A copy of store.ts's OCCUPANCY_RANGE, and a copy for the reason DEFAULT_SNAPSHOT's
+ * date and hour are copies: store.ts imports DEFAULT_SNAPSHOT from this file, so an
+ * import the other way is the cycle the header rules out. tests/url.test.ts asserts
+ * the copy against the store's own constant, which is the only thing that stops the
+ * two from drifting.
+ */
+const MIN_OCCUPANCY = 1;
+const MAX_OCCUPANCY = 4;
 
 /** Lattice divisors. Divisors, never multipliers -- see the header. */
 const PER_FOOT = 12;
@@ -340,6 +396,9 @@ export const DEFAULT_SNAPSHOT: Snapshot = {
   hour: 9,
   date: "2026-09-15",
   orbit: null,
+  // store.ts's DEFAULT_OCCUPANCY, copied for the cycle reason above and pinned
+  // against it in tests/url.test.ts.
+  occupancy: 4,
 };
 
 // --- the two public functions ---------------------------------------------
@@ -370,6 +429,13 @@ export function encode(s: Snapshot): string {
     putUint(out, flagsOf(s));
     putUint(out, count(s.hour, PER_HOUR));
     putInt(out, dateToDays(s.date));
+    // After the date and before the lengths, which is where decode() reads it. A
+    // scalar of its own rather than two more bits in flagsOf(): the flags word is
+    // already carrying a two-bit enum plus three booleans, and MODE_MASK's own note
+    // asks for a version bump before that layout is widened. One varint byte for a
+    // number in 1..4 buys the whole field without touching a bit layout that three
+    // other values depend on.
+    putUint(out, s.occupancy);
     for (const k of LENGTH_KEYS) putInt(out, count(s.params[k], PER_FOOT));
     if (s.orbit) {
       putInt(out, count(s.orbit.azimuthDeg, PER_CENTI));
@@ -432,6 +498,13 @@ export function decode(q: string): Snapshot | null {
     const hour = getUint(r) / PER_HOUR;
     const date = daysToDate(getInt(r));
 
+    // Refused rather than clamped, and that is the same call validate() makes about
+    // every other field: a link that comes back at a different occupancy than it went
+    // out is the failure this field was added to stop, so an out-of-range value means
+    // the string is not one this version wrote.
+    const occupancy = getUint(r);
+    if (occupancy < MIN_OCCUPANCY || occupancy > MAX_OCCUPANCY) return null;
+
     const lengths = {} as Record<LengthKey, number>;
     for (const k of LENGTH_KEYS) lengths[k] = getInt(r) / PER_FOOT;
     const params: SuiteParams = {
@@ -491,6 +564,7 @@ export function decode(q: string): Snapshot | null {
       hour,
       date,
       orbit,
+      occupancy,
     };
     validate(s, suite);
     return s;
@@ -560,6 +634,11 @@ function validate(s: Snapshot, suite: Suite): void {
   if (!inRange(s.t, 0, 1)) reject();
   if (!inRange(s.hour, 0, 24)) reject();
   if (!CUTAWAY_MODES.includes(s.cutaway)) reject();
+  // Integer as well as in range: putUint would silently truncate 2.5 to 2, and a
+  // snapshot that encodes to something other than itself is exactly what this
+  // function exists to refuse.
+  if (!Number.isInteger(s.occupancy)) reject();
+  if (!inRange(s.occupancy, MIN_OCCUPANCY, MAX_OCCUPANCY)) reject();
   dateToDays(s.date);
 
   if (s.orbit) {

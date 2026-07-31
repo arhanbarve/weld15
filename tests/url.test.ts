@@ -4,7 +4,7 @@ import { SIZES, layout, pieceBox, type FurnitureKind, type Piece } from "@/geo/f
 import { buildSuite, DEFAULT_PARAMS, type Suite, type SuiteParams } from "@/geo/rooms";
 import { MAX_SECTION_LENGTH } from "@/scene/weldGeometry";
 import { CUTAWAY_MODES, type CutawayMode } from "@/scene/cutaway";
-import { useStore } from "@/state/store";
+import { DEFAULT_OCCUPANCY, OCCUPANCY_RANGE, useStore } from "@/state/store";
 import { DEFAULT_SNAPSHOT, SNAPSHOT_PARAM, decode, encode, type Snapshot } from "@/state/url";
 
 /** Same deterministic pseudo-random generator style as tests/collide.test.ts. */
@@ -130,7 +130,21 @@ function randomPieces(rnd: Rnd, suite: Suite): Piece[] {
   return out;
 }
 
-function randomSnapshot(rnd: Rnd): Snapshot {
+/**
+ * `i` drives occupancy, and it is an index rather than another draw on purpose.
+ *
+ * This generator's stream is TUNED: the round-trip test below asserts that 300
+ * snapshots reach every cutaway mode, every stage, both facades and a section
+ * length within an inch of MAX_SECTION_LENGTH. Every one of those is a property of
+ * where this particular seed lands, so taking one more value off `rnd` here shifts
+ * the whole sequence and quietly re-rolls all of them -- measured when occupancy
+ * was first added this way: maxSection fell from 50.1692 to 50.1667 and the test
+ * failed for a reason that had nothing to do with the field being added.
+ *
+ * Cycling 1..4 off the loop counter costs no randomness and covers the range
+ * exactly, which is more than a uniform draw over four values guarantees anyway.
+ */
+function randomSnapshot(rnd: Rnd, i = 0): Snapshot {
   const params = randomParams(rnd);
   return {
     stage: pickOne(rnd, [0, 1, 2, 3, 4, 5] as const),
@@ -148,6 +162,10 @@ function randomSnapshot(rnd: Rnd): Snapshot {
             polarDeg: intIn(rnd, 0, 18_000) / 100,
             radius: intIn(rnd, 100, 30_000) / 100,
           },
+    // The whole legal range, so the property tests below carry every value the
+    // panel can produce rather than only the default. See the docblock above for
+    // why this is the index and not another draw.
+    occupancy: OCCUPANCY_RANGE.min + (i % (OCCUPANCY_RANGE.max - OCCUPANCY_RANGE.min + 1)),
   };
 }
 
@@ -178,6 +196,11 @@ const realistic: Snapshot = {
   hour: 17.5,
   date: "2026-12-21",
   orbit: { azimuthDeg: -113.25, polarDeg: 42.5, radius: 121.75 },
+  // Not DEFAULT_OCCUPANCY, for the reason the cutaway above is not "none": a
+  // fixture that agrees with the default cannot tell a field that round-trips
+  // from a field that is dropped and refilled from the default on the way back.
+  // That is the exact defect this field was added for, and 3 is what catches it.
+  occupancy: 3,
 };
 
 describe("DEFAULT_SNAPSHOT", () => {
@@ -194,6 +217,19 @@ describe("DEFAULT_SNAPSHOT", () => {
     expect(DEFAULT_SNAPSHOT.cutaway).toBe(s.cutaway);
     expect(DEFAULT_SNAPSHOT.orbit).toBe(s.orbit);
     expect(DEFAULT_SNAPSHOT.params).toEqual(s.params);
+    // Same gate, same reason: url.ts copies MIN_OCCUPANCY/MAX_OCCUPANCY out of
+    // OCCUPANCY_RANGE because it cannot import the store as a value, and this is
+    // what stops the copy from drifting. The bounds are asserted through the door
+    // rather than directly -- they are not exported -- so this pins them by what
+    // encode() accepts and refuses at each end of the range.
+    expect(DEFAULT_SNAPSHOT.occupancy).toBe(s.occupancy);
+    expect(DEFAULT_SNAPSHOT.occupancy).toBe(DEFAULT_OCCUPANCY);
+    for (const n of [OCCUPANCY_RANGE.min, OCCUPANCY_RANGE.max]) {
+      expect(encode({ ...realistic, occupancy: n })).not.toBe("");
+    }
+    for (const n of [OCCUPANCY_RANGE.min - 1, OCCUPANCY_RANGE.max + 1]) {
+      expect(encode({ ...realistic, occupancy: n })).toBe("");
+    }
   });
 
   it("carries the shipped fit-out and is a fixed point of encode/decode", () => {
@@ -234,6 +270,7 @@ describe("round trip", () => {
       orbit: new Set<boolean>(),
       stages: new Set<number>(),
       cutaway: new Set<CutawayMode>(),
+      occupancy: new Set<number>(),
     };
     let minSection = Infinity;
     let maxSection = -Infinity;
@@ -241,7 +278,7 @@ describe("round trip", () => {
     let pieces = 0;
 
     for (let i = 0; i < 300; i++) {
-      const s = randomSnapshot(rnd);
+      const s = randomSnapshot(rnd, i);
       const q = encode(s);
       if (q === "") continue;
       shareable++;
@@ -253,6 +290,7 @@ describe("round trip", () => {
       seen.orbit.add(s.orbit !== null);
       seen.stages.add(s.stage);
       seen.cutaway.add(s.cutaway);
+      seen.occupancy.add(s.occupancy);
       minSection = Math.min(minSection, s.params.sectionLength);
       maxSection = Math.max(maxSection, s.params.sectionLength);
       pieces += s.pieces.length;
@@ -272,6 +310,9 @@ describe("round trip", () => {
     // the one that overlaps where the facade flag used to live -- untested.
     expect(seen.cutaway, "every cutaway mode").toEqual(new Set(CUTAWAY_MODES));
     expect(seen.stages.size, "every stage").toBe(6);
+    // All four occupancies, which is what makes "every field varied" true of the
+    // field VERSION 2 added rather than only of the ones that came before it.
+    expect(seen.occupancy, "every occupancy").toEqual(new Set([1, 2, 3, 4]));
     // Section lengths across the legal range, up to Weld's waist.
     expect(minSection).toBeLessThan(45);
     expect(maxSection).toBeGreaterThan(MAX_SECTION_LENGTH - 1 / 12);
@@ -324,6 +365,59 @@ describe("round trip", () => {
       expect(encode({ ...realistic, pieces: [{ ...p, id }] }), id).toBe("");
     }
     expect(encode({ ...realistic, pieces: [{ ...p, id: "bedA-bed-0" }] })).not.toBe("");
+  });
+});
+
+/**
+ * The field VERSION 2 added, and the defect it answers.
+ *
+ * Measured on the deployed build before the fix, driving the real app: set the
+ * occupancy slider to 3, press Refit, copy the link, open it in a second page.
+ * The fit-out came back identical -- 25 pieces, byte for byte -- and the
+ * occupancy came back 4, because the wire format had no field for it. The
+ * recipient then saw a three-student arrangement under a panel reading four, and
+ * pressing Refit rebuilt the suite as something the sender had never had.
+ *
+ * The tests below are what makes that non-reproducible. The first is the round
+ * trip itself; the rest are the guards, because a field that decodes to the wrong
+ * value is the same failure as a field that is not carried at all.
+ */
+describe("occupancy", () => {
+  it("survives the round trip at every value the panel offers", () => {
+    for (let n = OCCUPANCY_RANGE.min; n <= OCCUPANCY_RANGE.max; n++) {
+      const snap: Snapshot = { ...realistic, occupancy: n };
+      expect(decode(encode(snap)), `occupancy ${n}`).toEqual(snap);
+    }
+  });
+
+  it("is carried independently of the fit-out that was laid out for it", () => {
+    // The point of the field, stated as a test. These two snapshots differ ONLY in
+    // occupancy -- the same 29 pieces in both -- so a format that recomputed the
+    // occupancy from the pieces, or dropped it and refilled from the default, would
+    // encode them identically and this would fail.
+    const three: Snapshot = { ...realistic, occupancy: 3 };
+    const four: Snapshot = { ...realistic, occupancy: 4 };
+    expect(three.pieces).toBe(four.pieces);
+    expect(encode(three)).not.toBe(encode(four));
+    expect(decode(encode(three))!.occupancy).toBe(3);
+    expect(decode(encode(four))!.occupancy).toBe(4);
+  });
+
+  it("refuses anything outside 1..4, and anything that is not a whole number", () => {
+    for (const n of [0, -1, 5, 100, 2.5, 3.0001, NaN, Infinity]) {
+      expect(encode({ ...realistic, occupancy: n }), String(n)).toBe("");
+    }
+  });
+
+  it("costs one byte", () => {
+    // The whole cost of the fix, in the unit the header's 355-character budget is
+    // written in. A varint of a number under 128 is one byte, and base64 turns
+    // three bytes into four, so one more byte moves the string by at most two
+    // characters -- which is why the length bounds below did not have to move.
+    const a = encode({ ...realistic, occupancy: 1 });
+    const b = encode({ ...realistic, occupancy: 4 });
+    expect(a.length).toBe(b.length);
+    expect(Math.abs(a.length - encode(realistic).length)).toBeLessThanOrEqual(2);
   });
 });
 
@@ -686,9 +780,18 @@ describe("decode is total", () => {
       bad[COUNT_AT + 2] = kind;
       expect(decode(sign(bad)), `kind ${kind}`).toBe(null);
     }
-    const badVersion = [...body];
-    badVersion[0] = 2;
-    expect(decode(sign(badVersion))).toBe(null);
+    // The version byte, either side of the one this file writes. 1 is the load-
+    // bearing half and it is the guarantee VERSION's own docblock makes: a v1
+    // string has no occupancy field, so read as v2 it would take the low byte of
+    // the first length as one and shift every field after it. The trailer would
+    // catch that 65,535 times in 65,536, and the version check makes it exact --
+    // an old link decodes to null, and null means the recipient opens at the
+    // defaults rather than at a suite the sender never had.
+    for (const v of [0, 1, 3, 255]) {
+      const badVersion = [...body];
+      badVersion[0] = v;
+      expect(decode(sign(badVersion)), `version ${v}`).toBe(null);
+    }
     // Unused flag bits. A hand-edit that sets one is not a string this version
     // wrote, and quietly ignoring it would make the format silently extensible.
     // The flags byte is where the encoder says it is, not where the byte layout
@@ -929,7 +1032,12 @@ describe("length", () => {
     expect(json.length).toBeGreaterThan(15 * q.length);
 
     // A coordinate costs a small integer, not a float.
-    expect(empty.length).toBe(63);
+    //
+    // 64, and it was 63 before VERSION 2. The whole difference is occupancy's one
+    // varint byte, which base64 rounds up to one more character. Pinned exactly
+    // rather than bounded, because the fixed cost is this module's own number and
+    // a change to it should have to be typed here on purpose.
+    expect(empty.length).toBe(64);
     const perPiece = (q.length - empty.length) / realistic.pieces.length;
     expect(perPiece).toBeGreaterThan(9);
     expect(perPiece).toBeLessThan(11);
