@@ -149,6 +149,7 @@ export function CameraRig() {
   const params = useStore((s) => s.params);
   const reduced = useStore((s) => s.reducedMotion);
   const setReduced = useStore((s) => s.setReducedMotion);
+  const setHighContrast = useStore((s) => s.setHighContrast);
   const orbit = useStore((s) => s.orbit);
   const setOrbit = useStore((s) => s.setOrbit);
   const cuts = useStore((s) => s.cuts);
@@ -165,6 +166,22 @@ export function CameraRig() {
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, [setReduced]);
+
+  /**
+   * The contrast preference, mirrored unconditionally.
+   *
+   * Moved from Hud.tsx (P10 step 6), which also deleted the contrast toggle button --
+   * the seed used to be overridable by a button press via a `contrastChosen` guard, and
+   * there is no button left to out-vote the media query. This is a straight mirror of the
+   * OS preference, exactly like prefers-reduced-motion above.
+   */
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-contrast: more)");
+    setHighContrast(mq.matches);
+    const onChange = () => setHighContrast(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [setHighContrast]);
 
   /**
    * A subscription to WHETHER somebody is walking, not to where they are.

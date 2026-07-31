@@ -354,9 +354,9 @@ export function Hud() {
   }, [walking, walkRoom, walkReading]);
 
   // The contrast toggle, its ref and its `prefers-contrast` effect lived here through P9.
-  // P10 moves the seed into CameraRig (step 6, not this one) and retires the button outright
-  // -- see MASTER.md's note on that step. `highContrast`/`setHighContrast` stay on the store;
-  // nothing in this file writes them until step 6 lands.
+  // P10 step 6 moved the seed into CameraRig, beside prefers-reduced-motion, and retired
+  // the button outright. `highContrast`/`setHighContrast` stay on the store; nothing in
+  // this file writes them.
 
   useEffect(() => {
     // Null means the camera is still on the keyframe, so there is nothing to
