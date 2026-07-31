@@ -68,9 +68,15 @@ describe("the manifest describes what actually shipped", () => {
     // actually captured at, so the extra grid density is interpolation. The manifest must keep the
     // two figures separate rather than presenting the grid as the resolution -- docs/SOURCES.md
     // says so and this is the assertion behind it.
+    //
+    // EXPECTED VALUE IS PER-LEVEL, NOT A SHARED CONSTANT, because P10 moved L3 to USDA NAIP while
+    // L2 and L4 are still MassGIS: 0.492 ft (leaf-off) and 0.9842519685 ft (NAIP's 0.3 m, leaf-on)
+    // are both real flown resolutions, just from different sources. This map will need another
+    // update when a later task moves more levels off MassGIS.
+    const EXPECTED_NATIVE_FT: Record<string, number> = { L2: 0.492, L3: 0.9842519685, L4: 0.492 };
     for (const id of ["L2", "L3", "L4"]) {
       const p = manifest.levels[id]!.provenance;
-      expect(p.nativeResolutionFt, `${id} native resolution`).toBeCloseTo(0.492, 3);
+      expect(p.nativeResolutionFt, `${id} native resolution`).toBeCloseTo(EXPECTED_NATIVE_FT[id]!, 3);
     }
   });
 });
