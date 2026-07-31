@@ -496,6 +496,11 @@ export function Hud() {
         cutaway={cutaway}
         orbit={orbit}
         reducedMotion={reduced}
+        /* The room and not the walker, built from `walkRoom` -- the primitive selector
+           above -- so this prop changes when a doorway is crossed rather than sixty times
+           a second. A11yAlt's own prop docblock records why the description names the
+           room instead of reporting a position, and the memo it feeds depends on it. */
+        firstPerson={walking ? { room: walkRoom } : null}
       />
 
       <div className={stage === LAST_STAGE ? "hud hud-room" : "hud"} data-testid="hud">

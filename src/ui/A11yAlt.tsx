@@ -68,6 +68,7 @@ import type { FurnitureKind, Piece } from "@/geo/furniture";
 import { cameraInSuite, CUTAWAY_WORDS, type CutawayMode } from "@/scene/cutaway";
 import { cameraKeyframe, keyframes, thresholdOpacity } from "@/scene/stages";
 import { orbitOf, type Orbit } from "@/scene/orbit";
+import { EYE } from "@/scene/walk";
 import type { StageId } from "@/state/store";
 
 export type A11yAltProps = {
@@ -97,6 +98,30 @@ export type A11yAltProps = {
   orbit: Orbit | null;
   /** The recipient's own media query, as the store read it. */
   reducedMotion: boolean;
+  /**
+   * The room the walker is standing in, when somebody is in first person, else null.
+   *
+   * A PROP BECAUSE THE STAGE IS NO LONGER ENOUGH. Everything else here is derived from
+   * the stage and `t` through cameraKeyframe(), and for five and a half stages that is
+   * the camera. First person breaks it: the walker moves the camera without changing the
+   * stage, so a description built from the keyframe said "Standing in Hall" while the
+   * viewer walked into bedroom A. Not a stale sentence but a wrong one, and wrong is
+   * worse than absent for the reader who has no picture to correct it against.
+   *
+   * THE ROOM AND NOT THE POSITION, WHICH IS A DELIBERATE TRADE AND NOT AN OVERSIGHT.
+   * FirstPerson.tsx writes the walker sixty times a second while a key is held, and
+   * Hud.tsx -- which renders this -- already carries a comment refusing to subscribe to
+   * the walker object for exactly that reason: it renders the whole HUD, so a per-frame
+   * subscription re-renders all of it per frame. `room` changes when a doorway is
+   * crossed, which is a handful of times per visit.
+   *
+   * So the description names the room and describes the room, rather than reporting a
+   * position to the inch. That is also the more useful sentence: "you are in bedroom A,
+   * which is 10 by 16 feet" tells a non-visual reader where they are, where "8 feet 3
+   * inches inward from the window wall" needs the plan in your head to mean anything,
+   * and would be stale by the time it was announced through the 500 ms throttle anyway.
+   */
+  firstPerson: { room: string | null } | null;
 };
 
 /* ---------------------------------------------------------------- formatting */
@@ -267,6 +292,7 @@ function whereIs(
   suite: Suite,
   orbit: Orbit | null,
   reducedMotion: boolean,
+  firstPerson: { room: string | null } | null,
 ): Where {
   const kf = keyframes(suite.params);
 
@@ -306,6 +332,40 @@ function whereIs(
         `building. The interior is already mounted behind the brick at this stage, which ` +
         `is why the cutaway controls come alive here rather than at stage 5. ` +
         `${orbit === null ? "The camera is still on the stage's own keyframe." : "The camera has been moved from the stage's keyframe."}`,
+    };
+  }
+
+  /*
+   * THE WALKER OVERRIDES THE KEYFRAME, and it is answered before the keyframe is
+   * computed rather than after, because while somebody is walking the keyframe is not
+   * where the camera is. Asking it anyway produced a confident sentence about a room the
+   * viewer had left, which for a reader with no picture is the failure mode worse than
+   * saying nothing.
+   *
+   * The room's own rect comes from the suite, so the dimensions quoted here are the same
+   * GIVEN and INFERRED numbers the table below lists and the panel's sliders drive --
+   * there is no second source for them, which is the property that keeps this sentence
+   * from drifting away from the model it describes.
+   */
+  if (firstPerson) {
+    const room = firstPerson.room ? suite.rooms.find((r) => r.id === firstPerson.room) : undefined;
+    if (!room) {
+      return {
+        short: "Walking, in a doorway between two rooms.",
+        full:
+          `Walking in first person at eye height, ${ftIn(EYE)} above the floor, currently in ` +
+          `a doorway rather than in either of the rooms it joins. The camera is under your ` +
+          `control rather than on the stage's keyframe.`,
+      };
+    }
+    return {
+      short: `Walking in ${room.label}.`,
+      full:
+        `Walking in first person in ${room.label}, ${ftIn(EYE)} above the floor at eye ` +
+        `height. The room is ${ft(room.du)} inward from the window wall by ${ft(room.dv)} ` +
+        `along the building, ${sqft(room.du * room.dv)}. The camera is under your control ` +
+        `rather than on the stage's keyframe, so this follows you rather than the stage; ` +
+        `it names the room you are in and is announced when you cross a doorway.`,
     };
   }
 
@@ -356,17 +416,22 @@ function whereIs(
 const ANNOUNCE_MS = 500;
 
 export function A11yAlt(props: A11yAltProps): JSX.Element {
-  const { stage, stageName, t, suite, pieces, occupancy, cutaway, orbit, reducedMotion } = props;
+  const { stage, stageName, t, suite, pieces, occupancy, cutaway, orbit, reducedMotion, firstPerson } =
+    props;
   const [open, setOpen] = useState(false);
 
   /*
-   * Memoised on the five things the sentence actually depends on, not on `props`.
+   * Memoised on the six things the sentence actually depends on, not on `props`.
    * A props object is a fresh identity every render, so [props] would recompute
    * keyframes() -- which calls buildSuite() -- on every unrelated re-render.
+   *
+   * `firstPerson` is safe as a dep because Hud.tsx builds it from the room id alone, so
+   * it changes when a doorway is crossed rather than per frame -- see its own docblock for
+   * why that is the shape rather than the position.
    */
   const where = useMemo(
-    () => whereIs(stage, t, suite, orbit, reducedMotion),
-    [stage, t, suite, orbit, reducedMotion],
+    () => whereIs(stage, t, suite, orbit, reducedMotion, firstPerson),
+    [stage, t, suite, orbit, reducedMotion, firstPerson],
   );
   const gross = useMemo(() => footprintArea(suite), [suite]);
 

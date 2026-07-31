@@ -121,7 +121,10 @@ async function scanStage(page: Page, stage: number): Promise<string[]> {
     /*
      * The one INCOMPLETE result, accounted for rather than ignored.
      *
-     * Every scan reports exactly one: color-contrast, and its fourteen nodes are all
+     * Every scan reports exactly one: color-contrast, and its THIRTEEN nodes are all
+     * (it was fourteen until `.hud-num` took an opaque --void-deep ground in 5bcb253 --
+     * its contrast was 4.15:1 against a ground that moved with the frame, because 18% of
+     * Earth's lit limb came through --chip-scan behind it, and it is 5.06:1 flat now)
      * in other owners' chrome -- `.hud-stage`, `.hud-num`, the six stage buttons,
      * the two `.hud-t` rows, the sun readout, the area readout and Sources' summary.
      * Two causes, both read out of axe's own messages: "background color could not
@@ -233,6 +236,53 @@ test.describe("P8 -- the model has a text alternative", () => {
     // expectation rather than a regression, and the fact that it failed is the gate working.
     expect(said[5]).toContain("Hall");
     console.log(said.map((s, i) => `stage ${i}: ${s}`).join("\n"));
+  });
+
+  /*
+   * The description has to follow the WALKER, not the stage.
+   *
+   * P7 introduced the one thing that moves the camera without changing the stage, and
+   * whereIs() derived its position from cameraKeyframe(stage, t) -- so the sentence said
+   * "Standing in Hall" while somebody walked into bedroom A. It was found by reading the
+   * component, which is the wrong way round for this project: an accessibility property
+   * written where it has no effect is its most repeated defect, three times over, and the
+   * cure was always a gate that reads the rendered page. So this is that gate.
+   *
+   * It walks by the reduced-motion place menu rather than by holding keys, and that is not
+   * a shortcut: goToPlace() is the alternative that exists so a reduced-motion viewer can
+   * move at all, it lands the walker in a known room deterministically, and it therefore
+   * asserts the same override with none of the timing that makes a key-held walk flaky
+   * under SwiftShader. walk.spec.ts holds the keys.
+   */
+  test("the written description follows the walker into another room", async ({ page }) => {
+    await open(page);
+    await gotoStage(page, 5);
+    await page.getByTestId("a11y-alt-toggle").click();
+    const live = page.getByTestId("a11y-alt-live");
+
+    // Standing on the stage-5 keyframe, which P7 put in the hall.
+    await expect(live).toContainText("Hall");
+
+    await page.getByTestId("fp-enter").click();
+    await page.getByTestId("fp-go-bedA").click();
+
+    // The sentence now names bedroom A, and says it is walking rather than standing --
+    // both, because naming the room while still claiming to be on the keyframe would be
+    // half a fix, and the wording is what tells a reader the camera is theirs now.
+    await expect(live).toContainText("Bedroom A", { timeout: 20_000 });
+    await expect(live).toContainText("Walking");
+    const walked = await live.textContent();
+
+    // And it goes back, so the override is not a one-way latch.
+    await page.getByTestId("fp-go-hall").click();
+    await expect(live).toContainText("Hall", { timeout: 20_000 });
+    expect(walked, `walked sentence: ${walked}`).not.toContain("Hall");
+
+    // Leaving first person hands the sentence back to the stage.
+    await page.keyboard.press("Escape");
+    await expect(live).toContainText("Standing", { timeout: 20_000 });
+    await expect(live).not.toContainText("Walking");
+    console.log(`walking: ${walked}`);
   });
 
   test("announcements are throttled across a camera move", async ({ page }) => {
