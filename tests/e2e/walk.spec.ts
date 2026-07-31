@@ -2,8 +2,10 @@ import { test, expect, type Page } from "@playwright/test";
 import { buildSuite, DEFAULT_PARAMS } from "@/geo/rooms";
 import { buildWalls, suiteFootprint } from "@/geo/walls";
 import { containedBy, pointInPolygon } from "@/geo/collide";
-import { canPass, clearance, walkContext, RADIUS } from "@/scene/walk";
-import { fromThree } from "@/geo/frames";
+import { canPass, clearance, walkContext, RADIUS, PITCH_LIMIT } from "@/scene/walk";
+import { fromThree, siteToBuilding } from "@/geo/frames";
+import { floorLevel, CLEAR_HALF_U, GABLE_INNER_V } from "@/geo/place";
+import { thresholds } from "@/scene/route";
 import weld from "@/data/weld.json";
 
 /**
@@ -47,6 +49,8 @@ type Walk = {
   u: number;
   v: number;
   heading: number;
+  /** radians, negative is down -- the current look angle. */
+  pitch: number;
   room: string | null;
   clearance: number;
   locked: boolean;
@@ -58,6 +62,7 @@ type Walk = {
 type Cam = {
   stage: number;
   position: [number, number, number];
+  target: [number, number, number];
   firstPerson: boolean;
   path: [number, number, number][];
 };
@@ -139,9 +144,12 @@ async function openInTheRoom(page: Page): Promise<string[]> {
   return errors;
 }
 
-/** Stand up, and wait until the walker is actually being advanced. */
-async function standUp(page: Page) {
-  await page.getByTestId("fp-enter").click();
+/**
+ * Wait until the walker seeded on arrival is actually being advanced -- no click of any
+ * kind. store.ts seeds a walker the instant stage 5 is reached (P10 step 3), so this poll
+ * IS the gate for "you arrive standing": if it passes, nobody pressed anything.
+ */
+async function awaitWalker(page: Page) {
   await expect.poll(async () => (await walkOf(page)).active, { timeout: 20_000 }).toBe(true);
   await expect.poll(async () => (await walkOf(page)).frames, { timeout: 20_000 }).toBeGreaterThan(2);
 }
@@ -211,53 +219,126 @@ function turned(a: number, b: number): number {
   return d > Math.PI ? 2 * Math.PI - d : d;
 }
 
+/** Pitch recomputed from the camera's own position and target, radians, negative down. */
+function camPitch(c: Cam): number {
+  const [px, py, pz] = c.position;
+  const [tx, ty, tz] = c.target;
+  const horiz = Math.hypot(tx - px, tz - pz);
+  return Math.atan2(ty - py, horiz);
+}
+
+/**
+ * A three.js world point back to the suite's own frame, in feet -- plain vector math, no
+ * three.js. fromThree() undoes toThree()'s y-up swap and siteToBuilding() undoes the axis
+ * rotation; the last step undoes suiteToBuilding()'s own facade reflection and section
+ * offset, which is place.ts's only inverse this file needs.
+ */
+function threeToSuite(v: [number, number, number]): { u: number; v: number } {
+  const site = fromThree(v);
+  const b = siteToBuilding({ x: site.x, y: site.y });
+  const east = P.facade === "east";
+  return {
+    u: east ? CLEAR_HALF_U - b.u : b.u + CLEAR_HALF_U,
+    v: b.v - GABLE_INNER_V + P.sectionLength,
+  };
+}
+
+/** Smallest signed difference a - b, radians, in (-pi, pi]. */
+function angleDiff(a: number, b: number): number {
+  let d = (a - b) % (2 * Math.PI);
+  if (d > Math.PI) d -= 2 * Math.PI;
+  if (d < -Math.PI) d += 2 * Math.PI;
+  return d;
+}
+
+/**
+ * Turn on the keys until the walker faces `target`, in the suite frame.
+ *
+ * WHICH KEY TURNS WHICH WAY is not assumed: screenTurnSign() flips A and D between the
+ * two facades. It is not found by trial either -- an earlier version of this held `d` for
+ * a real 150 ms and kept whichever key had shrunk the gap to `target`, which breaks on a
+ * target close to directly behind the walker: that gap sits right at the heading's own
+ * (-pi, pi] wrap seam, and a burst long enough to cross the seam turns the walker the
+ * RIGHT amount and comes out the wrong side of it, where the before/after comparison
+ * reads as if the turn had gone the wrong way. Measured: a walker facing -3.06 rad held
+ * `d` for its probe, the true turn was -0.33 rad, and wrapping put the result at +2.89 --
+ * closer to the seam's far side than to `target`, so the probe wrongly concluded `d` was
+ * wrong and held `a` for the rest of the turn, walking the suite the length of the hall
+ * and out through the doorway at the OTHER end. `turnSign` is read straight off the
+ * walker's own probe instead: it says whether `d` adds to the heading or subtracts from
+ * it, which is exactly what deciding a direction needs and what no amount of turning can
+ * get wrong by wrapping around.
+ */
+async function turnToward(page: Page, target: { u: number; v: number }, tol = 0.03) {
+  const from = await walkOf(page);
+  const desired = Math.atan2(target.u - from.u, target.v - from.v);
+  const diff0 = angleDiff(desired, from.heading);
+  const key = diff0 > 0 === (from.turnSign === 1) ? "d" : "a";
+  await page.keyboard.down(key);
+  const until = Date.now() + 15_000;
+  let prevAbs = Math.abs(diff0);
+  while (Date.now() < until) {
+    const s = await walkOf(page);
+    const abs = Math.abs(angleDiff(desired, s.heading));
+    // TURN_RATE moves the heading 7 to 10+ degrees per rendered frame under SwiftShader --
+    // several times tol's width -- so waiting to land INSIDE the window can skip clean
+    // over it every single frame and only come near it again a full rotation later.
+    // Stopping the instant the gap stops shrinking catches the turn at its closest frame
+    // instead of gambling on an exact landing.
+    if (abs <= tol || abs > prevAbs) break;
+    prevAbs = abs;
+  }
+  await page.keyboard.up(key);
+}
+
+/** Whether a sample has arrived within half a foot of a plan point. */
+const near = (s: Walk, t: { u: number; v: number }) => Math.hypot(t.u - s.u, t.v - s.v) < 0.5;
+
+/**
+ * Walk to within half a foot of `target`, steering the whole way there rather than
+ * turning once and trusting the aim to hold over the distance.
+ *
+ * turnToward's own closest approach is bounded by a single rendered frame's worth of
+ * turn -- 7 to 10+ degrees under SwiftShader -- and a few degrees of residual aim over a
+ * room-scale walk is a lateral miss well past near()'s half a foot: measured, a 0.15 rad
+ * (8.8 deg) residual over a 9.3 ft approach missed by 1.4 ft, which is what left this walk
+ * spending its whole budget short of the doorway rather than reaching it. `w` stays held
+ * for the whole approach -- forward and turn are independent axes, so both can be asked
+ * for at once -- and a turn key corrects course whenever the bearing to `target` has
+ * drifted, held for exactly one PROCESSED FRAME rather than a guessed duration: a duration
+ * held across a real wait is this suite's own known failure mode under worker contention
+ * (see holdUntil's docblock above), where a tap can be delivered, or released, far later
+ * than asked and overshoot by exactly as much. Watching `frames` advance is proof the tap
+ * actually reached the app, on whatever frame it lands on.
+ */
+async function walkToward(page: Page, target: { u: number; v: number }, tol = 0.5, maxMs = 30_000) {
+  await turnToward(page, target, 0.15);
+  const until = Date.now() + maxMs;
+  await page.keyboard.down("w");
+  try {
+    while (Date.now() < until) {
+      const s = await walkOf(page);
+      if (near(s, target)) return;
+      const desired = Math.atan2(target.u - s.u, target.v - s.v);
+      const diff = angleDiff(desired, s.heading);
+      if (Math.abs(diff) <= 0.05) continue;
+      const key = diff > 0 === (s.turnSign === 1) ? "d" : "a";
+      const before = s.frames;
+      await page.keyboard.down(key);
+      const stepUntil = Date.now() + 2_000;
+      let cur = s;
+      while (Date.now() < stepUntil && cur.frames <= before) cur = await walkOf(page);
+      await page.keyboard.up(key);
+    }
+  } finally {
+    await page.keyboard.up("w");
+  }
+}
+
 test.describe("P7 -- somebody can stand in Weld 15 and walk it", () => {
-  test("stands up and leaves again, by keyboard alone", async ({ page }) => {
-    const errors = await openInTheRoom(page);
-
-    // Operated by keyboard, not by pointer: focus the control and press Enter, which is
-    // what a keyboard user does and what pointer lock cannot be reached by. MASTER.md
-    // requires a keyboard equivalent for every canvas interaction and pointer lock is a
-    // mouse affordance, so this is the gate that says first person is not mouse-only.
-    const enter = page.getByTestId("fp-enter");
-    await enter.focus();
-    await expect(enter).toBeFocused();
-    await page.keyboard.press("Enter");
-    await expect.poll(async () => (await walkOf(page)).active, { timeout: 20_000 }).toBe(true);
-
-    const at = await walkOf(page);
-    // The hall, because places() puts the hub first and every room in this suite is entered
-    // from it. And clear before the first frame, which is step()'s precondition.
-    expect(at.room).toBe("hall");
-    expect(violation(at)).toBeNull();
-    expect(await cameraInWeld(page), "the camera is inside Weld's real footprint").toBe(true);
-    expect((await camOf(page)).firstPerson, "the camera pose comes from the walker").toBe(true);
-    // The notice says how to get out. Escape being folklore is what "do not trap the user"
-    // is about.
-    expect((await weldOf(page)).notice).toMatch(/Escape/);
-    await expect(page.getByTestId("fp-keys")).toContainText("Esc");
-
-    // ESCAPE LEAVES. One press, from wherever focus is.
-    await page.keyboard.press("Escape");
-    await expect.poll(async () => (await walkOf(page)).active, { timeout: 20_000 }).toBe(false);
-    await expect.poll(async () => (await camOf(page)).firstPerson, { timeout: 20_000 }).toBe(false);
-    // And the camera is back on the stage's own shot, which is in the hall -- the P7 debt.
-    expect(await cameraInWeld(page)).toBe(true);
-    await expect(page.getByTestId("fp-enter")).toBeVisible();
-
-    // Pointer lock is an enhancement, and whether it engaged at all is recorded rather than
-    // asserted: this environment is headless Chromium, where it may be refused outright.
-    await standUp(page);
-    const box = (await page.locator("canvas").boundingBox())!;
-    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    await page.waitForTimeout(400);
-    console.log(`pointer lock engaged: ${(await walkOf(page)).locked}`);
-    expect(errors, errors.join("\n")).toEqual([]);
-  });
-
   test("walks the hall end to end without leaving the suite", async ({ page }) => {
     const errors = await openInTheRoom(page);
-    await standUp(page);
+    await awaitWalker(page);
 
     const hall = SUITE.rooms.find((r) => r.id === "hall")!;
     const start = await walkOf(page);
@@ -320,7 +401,7 @@ test.describe("P7 -- somebody can stand in Weld 15 and walk it", () => {
 
   test("walks into every wall in turn and is pushed back out of it", async ({ page }) => {
     const errors = await openInTheRoom(page);
-    await standUp(page);
+    await awaitWalker(page);
 
     /*
      * Eight bearings, forty-five degrees apart, walked into whatever is there.
@@ -432,17 +513,28 @@ test.describe("P7 -- somebody can stand in Weld 15 and walk it", () => {
 
     /*
      * AND THE BEHAVIOUR, in the running app: a walker asked to cross one actually gets
-     * through. standIn(bedB) sits on the centreline of d2, the door between bedroom B and
-     * the hall -- measured, the threshold's centre is (16.25, 39.00) and the room's centre
-     * is (8, 39.00) -- so from there the crossing is a straight walk along +u. Arriving in
-     * a room faces -u (store.ts's arrivalHeading), so S walks backwards along +u without
-     * needing a turn at all.
+     * through. There is no fp-go-bedB button to jump there any more -- P10 step 3 deletes
+     * goToPlace() along with it -- so this walks to bedroom B on the keys first, the same
+     * way a real viewer would, and then crosses back out through d2, the door between the
+     * hall and bedroom B (measured, its centre is (16.25, 39.00)).
      */
-    await page.getByTestId("fp-go-bedB").click();
-    await expect.poll(async () => (await walkOf(page)).room, { timeout: 20_000 }).toBe("bedB");
+    await awaitWalker(page);
+    const d2 = thresholds(SUITE).find((t) => t.rooms.includes("hall") && t.rooms.includes("bedB"))!;
+    const atHall = d2.rooms[0] === "hall" ? d2.at[0] : d2.at[1];
+    const bedB = SUITE.rooms.find((r) => r.id === "bedB")!;
+    const bedBCentre = { u: bedB.u + bedB.du / 2, v: bedB.v + bedB.dv / 2 };
+
+    await walkToward(page, atHall);
+    await turnToward(page, bedBCentre);
+    const into = await holdUntil(page, ["w"], (s) => s.room === "bedB", "cross d2 into bedroom B");
+    expect(reached(into), `stopped at (${endOf(into).u.toFixed(2)}, ${endOf(into).v.toFixed(2)})`).toBe(
+      true,
+    );
+
+    await turnToward(page, atHall);
     const seen = await holdUntil(
       page,
-      ["s"],
+      ["w"],
       (s) => s.room === "hall",
       "back out of bedroom B through its own door",
     );
@@ -459,64 +551,12 @@ test.describe("P7 -- somebody can stand in Weld 15 and walk it", () => {
     expect(errors, errors.join("\n")).toEqual([]);
   });
 
-  test("the reduced-motion alternative moves the camera, in one step", async ({ browser }) => {
-    const ctx = await browser.newContext({ reducedMotion: "reduce" });
-    const page = await ctx.newPage();
-    const errors = await openInTheRoom(page);
-    expect((await weldOf(page)).reducedMotion, "the media query reached the store").toBe(true);
-
-    /*
-     * A JUMP CUT, MEASURED AS ONE. CameraRig keeps the distinct camera positions since the
-     * last stage change or first-person toggle on window.__cam.path, at a 0.01 ft threshold,
-     * and that is the only way to state "no intermediate position" from outside -- it is a
-     * property of a sequence of frames, which a screenshot cannot show. The same device
-     * carries docs/phases/P4-P5.md's reduced-motion gate for the stage 4 crossing.
-     *
-     * Entering first person resets the path, so the first destination leaves exactly one
-     * entry and the second leaves two: one new camera position per jump, and no fly.
-     */
-    await page.getByTestId("fp-go-hall").click();
-    await expect.poll(async () => (await walkOf(page)).room, { timeout: 20_000 }).toBe("hall");
-    await page.waitForTimeout(600);
-    const first = await camOf(page);
-    expect(first.firstPerson).toBe(true);
-    expect(first.path.length, `path after arriving in the hall: ${first.path.length}`).toBe(1);
-
-    await page.getByTestId("fp-go-bedB").click();
-    await expect.poll(async () => (await walkOf(page)).room, { timeout: 20_000 }).toBe("bedB");
-    await page.waitForTimeout(600);
-    const second = await camOf(page);
-    expect(second.path.length, `path after jumping to bedroom B: ${second.path.length}`).toBe(2);
-    // It MOVED, and by the distance between the two rooms rather than by a jitter. The hall
-    // and bedroom B centres are 13.9 ft apart in the suite frame at the shipped params.
-    const moved = Math.hypot(
-      second.position[0] - first.position[0],
-      second.position[2] - first.position[2],
-    );
-    expect(moved, `the camera moved ${moved.toFixed(2)} ft`).toBeGreaterThan(10);
-    expect(await cameraInWeld(page)).toBe(true);
-    expect(violation(await walkOf(page))).toBeNull();
-
-    // Reachable by keyboard as well, which is the other half of the requirement: a control
-    // only a mouse can reach is not an alternative for everyone who needs one.
-    const bedA = page.getByTestId("fp-go-bedA");
-    await bedA.focus();
-    await page.keyboard.press("Enter");
-    await expect.poll(async () => (await walkOf(page)).room, { timeout: 20_000 }).toBe("bedA");
-    // And the control says which room you are in structurally, not by colour.
-    await expect(bedA).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByTestId("fp-go-bedB")).toHaveAttribute("aria-pressed", "false");
-
-    expect(errors, errors.join("\n")).toEqual([]);
-    await ctx.close();
-  });
-
   test("walking stays inside the suite's draw-call budget", async ({ page }) => {
     const errors = await openInTheRoom(page);
     const idle = await perfOf(page);
     expect(idle.calls, "the probe is live").toBeGreaterThan(0);
 
-    await standUp(page);
+    await awaitWalker(page);
     // Ten feet of walking, so the sample is taken while the camera is genuinely moving
     // rather than on the frame the key went down.
     const from = await walkOf(page);
@@ -551,6 +591,134 @@ test.describe("P7 -- somebody can stand in Weld 15 and walk it", () => {
     expect(walkingPerf.triangles, "the room is still being drawn").toBeGreaterThan(1000);
     expect(walkingPerf.shadows).toBe(true);
     expect(walkingPerf.casters).toBeGreaterThanOrEqual(8);
+    expect(errors, errors.join("\n")).toEqual([]);
+  });
+
+  test("look up and down", async ({ page }) => {
+    const errors = await openInTheRoom(page);
+    await awaitWalker(page);
+
+    const tol = (0.5 * Math.PI) / 180;
+    const camTol = (0.1 * Math.PI) / 180;
+    const before = await walkOf(page);
+
+    const down = await holdUntil(
+      page,
+      ["f"],
+      (s) => s.pitch <= -PITCH_LIMIT + 1e-4,
+      "look down to the limit",
+    );
+    expect(reached(down), `pitch stopped at ${((endOf(down).pitch * 180) / Math.PI).toFixed(2)} deg`).toBe(
+      true,
+    );
+    const atFloor = endOf(down);
+    expect(
+      Math.abs(atFloor.pitch + PITCH_LIMIT),
+      `probe pitch ${((atFloor.pitch * 180) / Math.PI).toFixed(3)} deg`,
+    ).toBeLessThan(tol);
+    const camDown = camPitch(await camOf(page));
+    expect(
+      Math.abs(camDown - atFloor.pitch),
+      `probe ${((atFloor.pitch * 180) / Math.PI).toFixed(3)} deg, camera ${((camDown * 180) / Math.PI).toFixed(3)} deg`,
+    ).toBeLessThan(camTol);
+    // Pitch must never move you: the plan point is exactly what it was before either hold.
+    expect(atFloor.u, "looking down moved u").toBe(before.u);
+    expect(atFloor.v, "looking down moved v").toBe(before.v);
+
+    const up = await holdUntil(page, ["r"], (s) => s.pitch >= PITCH_LIMIT - 1e-4, "look up to the limit");
+    expect(reached(up), `pitch stopped at ${((endOf(up).pitch * 180) / Math.PI).toFixed(2)} deg`).toBe(
+      true,
+    );
+    const atCeiling = endOf(up);
+    expect(
+      Math.abs(atCeiling.pitch - PITCH_LIMIT),
+      `probe pitch ${((atCeiling.pitch * 180) / Math.PI).toFixed(3)} deg`,
+    ).toBeLessThan(tol);
+    const camUp = camPitch(await camOf(page));
+    expect(
+      Math.abs(camUp - atCeiling.pitch),
+      `probe ${((atCeiling.pitch * 180) / Math.PI).toFixed(3)} deg, camera ${((camUp * 180) / Math.PI).toFixed(3)} deg`,
+    ).toBeLessThan(camTol);
+    expect(atCeiling.u, "looking up moved u").toBe(before.u);
+    expect(atCeiling.v, "looking up moved v").toBe(before.v);
+    expect(errors, errors.join("\n")).toEqual([]);
+  });
+
+  test("the floor is in the frame", async ({ page }) => {
+    const errors = await openInTheRoom(page);
+    await awaitWalker(page);
+    await holdUntil(page, ["f"], (s) => s.pitch <= -PITCH_LIMIT + 1e-4, "look down to the limit");
+
+    /*
+     * A RAY, NOT A SCREENSHOT. window.__cam publishes position and target in three.js
+     * world space, so the floor -- suiteToThree's height parameter, which lands straight
+     * on three's y -- is a plane at floorLevel(1) and the intersection is plain vector
+     * math: no renderer, no pixels, the same recomputation this file already does for
+     * containment and clearance.
+     */
+    const cam = await camOf(page);
+    const floorY = floorLevel(1);
+    const [px, py, pz] = cam.position;
+    const [tx, ty, tz] = cam.target;
+    const d: [number, number, number] = [tx - px, ty - py, tz - pz];
+    expect(d[1], "the camera is looking down").toBeLessThan(0);
+    const t = (floorY - py) / d[1];
+    expect(t, "the floor is ahead of the camera, not behind it").toBeGreaterThan(0);
+    const hit: [number, number, number] = [px + d[0] * t, floorY, pz + d[2] * t];
+    const at = threeToSuite(hit);
+
+    const hall = SUITE.rooms.find((r) => r.id === "hall")!;
+    expect(at.u, `hit at (${at.u.toFixed(2)}, ${at.v.toFixed(2)})`).toBeGreaterThanOrEqual(hall.u - 1e-6);
+    expect(at.u).toBeLessThanOrEqual(hall.u + hall.du + 1e-6);
+    expect(at.v).toBeGreaterThanOrEqual(hall.v - 1e-6);
+    expect(at.v).toBeLessThanOrEqual(hall.v + hall.dv + 1e-6);
+
+    const walker = await walkOf(page);
+    const dist = Math.hypot(at.u - walker.u, at.v - walker.v);
+    expect(dist, `the floor hit is ${dist.toFixed(2)} ft from the walker`).toBeLessThan(2);
+    expect(errors, errors.join("\n")).toEqual([]);
+  });
+
+  test("arrival is continuous", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+    page.on("pageerror", (e) => errors.push(e.message));
+    await page.goto("/");
+    await page.locator("canvas").waitFor();
+    await page.getByTestId("stage-5").click();
+
+    /*
+     * THE 8 DEGREE SNAP, AS A GATE. Before P10 step 1, kf[5]'s pitch was a separately
+     * hand-tuned shot and a walker's own starting look was a different number, so the
+     * frame the fly-down arrived on and the frame first person started from disagreed --
+     * measured at 8 degrees. standingPose() is now the one source both read, and a walker
+     * is seeded in the same store update that flips the stage, so every sample from the
+     * moment stage 5 is reached should already show the settled pitch, with nothing left
+     * to ease toward.
+     */
+    const target = (-7.965 * Math.PI) / 180;
+    const tol = (0.2 * Math.PI) / 180;
+    const until = Date.now() + 1500;
+    let samples = 0;
+    while (Date.now() < until) {
+      const c = await camOf(page);
+      if (c.stage !== 5) continue;
+      samples++;
+      expect(c.firstPerson, "the arrival pose came from the walker").toBe(true);
+      const p = camPitch(c);
+      expect(Math.abs(p - target), `pitch ${((p * 180) / Math.PI).toFixed(3)} deg`).toBeLessThan(tol);
+    }
+    expect(samples, "no samples landed at stage 5").toBeGreaterThan(0);
+    expect(errors, errors.join("\n")).toEqual([]);
+  });
+
+  test("nothing teleports", async ({ page }) => {
+    const errors = await openInTheRoom(page);
+    // Every place-menu button P10 removed, and the two testids that used to bracket a
+    // session in first person -- gone along with goToPlace() and leaveFirstPerson().
+    await expect(page.getByTestId(/^fp-go-/)).toHaveCount(0);
+    await expect(page.getByTestId("fp-enter")).toHaveCount(0);
+    await expect(page.getByTestId("fp-leave")).toHaveCount(0);
     expect(errors, errors.join("\n")).toEqual([]);
   });
 });

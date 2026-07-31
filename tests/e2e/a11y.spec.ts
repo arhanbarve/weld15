@@ -1,5 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { test, expect, type Page } from "@playwright/test";
+import { buildSuite, DEFAULT_PARAMS } from "@/geo/rooms";
+import { thresholds } from "@/scene/route";
 
 /**
  * P8's accessibility gate: axe-core clean on all six stages, and the written
@@ -29,6 +31,123 @@ type Weld = { stage: number };
 
 /** UrlSync publishes this on every store change; it is how a gate waits for real state. */
 const weld = (page: Page) => page.evaluate(() => (window as unknown as { __weld: Weld }).__weld);
+
+type Walk = {
+  room: string | null;
+  heading: number;
+  u: number;
+  v: number;
+  turnSign: number;
+  frames: number;
+};
+
+/** window.__walk, published by FirstPerson.tsx, in the suite frame -- see walk.spec.ts. */
+const walkOf = (page: Page) => page.evaluate(() => (window as unknown as { __walk: Walk }).__walk);
+
+const SUITE = buildSuite(DEFAULT_PARAMS);
+const DOOR_HALL_BEDA = thresholds(SUITE).find(
+  (t) => t.rooms.includes("hall") && t.rooms.includes("bedA"),
+)!;
+
+/** Smallest signed difference a - b, radians, in (-pi, pi]. */
+function angleDiff(a: number, b: number): number {
+  let d = (a - b) % (2 * Math.PI);
+  if (d > Math.PI) d -= 2 * Math.PI;
+  if (d < -Math.PI) d += 2 * Math.PI;
+  return d;
+}
+
+/**
+ * Turn on the keys until the walker faces `target`, in the suite frame -- walk.spec.ts's
+ * own turnToward(), duplicated rather than shared, since this project keeps each e2e file
+ * self-contained.
+ *
+ * WHICH KEY TURNS WHICH WAY is not assumed: screenTurnSign() flips A and D between the two
+ * facades. It is not found by trial either -- an earlier version of this held `d` for a
+ * real 150 ms and kept whichever key had shrunk the gap to `target`, which breaks on a
+ * target close to directly behind the walker: that gap sits right at the heading's own
+ * (-pi, pi] wrap seam, and a burst long enough to cross the seam turns the walker the RIGHT
+ * amount and comes out the wrong side of it, where the before/after comparison reads as if
+ * the turn had gone the wrong way -- which is how the walker ended up in the wrong room.
+ * `turnSign` is read straight off the walker's own probe instead: it says whether `d` adds
+ * to the heading or subtracts from it, which is exactly what deciding a direction needs.
+ */
+async function turnToward(page: Page, target: { u: number; v: number }, tol = 0.03) {
+  const from = await walkOf(page);
+  const desired = Math.atan2(target.u - from.u, target.v - from.v);
+  const diff0 = angleDiff(desired, from.heading);
+  const key = diff0 > 0 === (from.turnSign === 1) ? "d" : "a";
+  await page.keyboard.down(key);
+  const until = Date.now() + 15_000;
+  let prevAbs = Math.abs(diff0);
+  while (Date.now() < until) {
+    const s = await walkOf(page);
+    const abs = Math.abs(angleDiff(desired, s.heading));
+    // TURN_RATE moves the heading 7 to 10+ degrees per rendered frame under SwiftShader --
+    // several times tol's width -- so waiting to land INSIDE the window can skip clean
+    // over it every single frame and only come near it again a full rotation later.
+    // Stopping the instant the gap stops shrinking catches the turn at its closest frame
+    // instead of gambling on an exact landing.
+    if (abs <= tol || abs > prevAbs) break;
+    prevAbs = abs;
+  }
+  await page.keyboard.up(key);
+}
+
+/** Hold W until `stop` is true of the walker's own sample. */
+async function walkUntil(page: Page, stop: (s: Walk) => boolean, maxMs = 20_000): Promise<Walk> {
+  await page.keyboard.down("w");
+  const until = Date.now() + maxMs;
+  let s = await walkOf(page);
+  try {
+    while (Date.now() < until && !stop(s)) s = await walkOf(page);
+  } finally {
+    await page.keyboard.up("w");
+  }
+  return s;
+}
+
+/** Whether a sample has arrived within half a foot of a plan point. */
+const near = (s: Walk, t: { u: number; v: number }) => Math.hypot(t.u - s.u, t.v - s.v) < 0.5;
+
+/**
+ * Walk to within half a foot of `target`, steering the whole way there rather than
+ * turning once and trusting the aim to hold over the distance -- walk.spec.ts's own
+ * walkToward(), duplicated for the reason turnToward() above already is.
+ *
+ * turnToward's own closest approach is bounded by a single rendered frame's worth of
+ * turn -- 7 to 10+ degrees under SwiftShader -- and a few degrees of residual aim over a
+ * room-scale walk is a lateral miss well past near()'s half a foot, which is what left
+ * this walk spending its whole budget short of the doorway rather than reaching it. `w`
+ * stays held for the whole approach and a turn key corrects course whenever the bearing
+ * to `target` has drifted, held for exactly one PROCESSED FRAME rather than a guessed
+ * duration -- a duration held across a real wait is this suite's own known failure mode
+ * under worker contention, where a tap can be delivered, or released, far later than
+ * asked and overshoot by exactly as much.
+ */
+async function walkToward(page: Page, target: { u: number; v: number }, tol = 0.5, maxMs = 30_000) {
+  await turnToward(page, target, 0.15);
+  const until = Date.now() + maxMs;
+  await page.keyboard.down("w");
+  try {
+    while (Date.now() < until) {
+      const s = await walkOf(page);
+      if (Math.hypot(target.u - s.u, target.v - s.v) < tol) return;
+      const desired = Math.atan2(target.u - s.u, target.v - s.v);
+      const diff = angleDiff(desired, s.heading);
+      if (Math.abs(diff) <= 0.05) continue;
+      const key = diff > 0 === (s.turnSign === 1) ? "d" : "a";
+      const before = s.frames;
+      await page.keyboard.down(key);
+      const stepUntil = Date.now() + 2_000;
+      let cur = s;
+      while (Date.now() < stepUntil && cur.frames <= before) cur = await walkOf(page);
+      await page.keyboard.up(key);
+    }
+  } finally {
+    await page.keyboard.up("w");
+  }
+}
 
 /** The app, booted and hydrated, with the description mounted. */
 async function open(page: Page) {
@@ -254,11 +373,13 @@ test.describe("P8 -- the model has a text alternative", () => {
    * written where it has no effect is its most repeated defect, three times over, and the
    * cure was always a gate that reads the rendered page. So this is that gate.
    *
-   * It walks by the reduced-motion place menu rather than by holding keys, and that is not
-   * a shortcut: goToPlace() is the alternative that exists so a reduced-motion viewer can
-   * move at all, it lands the walker in a known room deterministically, and it therefore
-   * asserts the same override with none of the timing that makes a key-held walk flaky
-   * under SwiftShader. walk.spec.ts holds the keys.
+   * IT WALKS BY HOLDING KEYS NOW, not by a place menu. goToPlace() and the fp-go-* buttons
+   * it drove are gone (P10 step 3): standing at stage 5 is automatic, and the only way
+   * anywhere from it is the keys walk.spec.ts drives -- A/D to aim at the doorway between
+   * the hall and bedroom A, W to cross it, the same turnToward()/walkUntil() this file
+   * grew for the purpose. The corresponding SwiftShader-flakiness worry the old comment
+   * named is walk.spec.ts's to own, since its holds are already condition-based rather
+   * than duration-based for exactly that reason.
    */
   test("the written description follows the walker into another room", async ({ page }) => {
     await open(page);
@@ -266,28 +387,32 @@ test.describe("P8 -- the model has a text alternative", () => {
     await page.getByTestId("a11y-alt-toggle").click();
     const live = page.getByTestId("a11y-alt-live");
 
-    // Standing on the stage-5 keyframe, which P7 put in the hall.
+    // Standing on the stage-5 keyframe, which P7 put in the hall -- and already walking,
+    // since a walker is seeded automatically the instant stage 5 is reached (P10 step 3).
     await expect(live).toContainText("Hall");
 
-    await page.getByTestId("fp-enter").click();
-    await page.getByTestId("fp-go-bedA").click();
+    const bedA = SUITE.rooms.find((r) => r.id === "bedA")!;
+    const bedACentre = { u: bedA.u + bedA.du / 2, v: bedA.v + bedA.dv / 2 };
+    const atHall = DOOR_HALL_BEDA.rooms[0] === "hall" ? DOOR_HALL_BEDA.at[0] : DOOR_HALL_BEDA.at[1];
+    const atBedA = DOOR_HALL_BEDA.rooms[0] === "hall" ? DOOR_HALL_BEDA.at[1] : DOOR_HALL_BEDA.at[0];
 
-    // The sentence now names bedroom A, and says it is walking rather than standing --
-    // both, because naming the room while still claiming to be on the keyframe would be
-    // half a fix, and the wording is what tells a reader the camera is theirs now.
+    await walkToward(page, atHall);
+    await turnToward(page, bedACentre);
+    await walkUntil(page, (s) => s.room === "bedA");
+
+    // The sentence now names bedroom A, and says it is walking -- both, because naming
+    // the room while still claiming to be on the keyframe would be half a fix, and the
+    // wording is what tells a reader the camera is theirs now.
     await expect(live).toContainText("Bedroom A", { timeout: 20_000 });
     await expect(live).toContainText("Walking");
     const walked = await live.textContent();
 
     // And it goes back, so the override is not a one-way latch.
-    await page.getByTestId("fp-go-hall").click();
+    await walkToward(page, atBedA);
+    await turnToward(page, atHall);
+    await walkUntil(page, (s) => s.room === "hall");
     await expect(live).toContainText("Hall", { timeout: 20_000 });
     expect(walked, `walked sentence: ${walked}`).not.toContain("Hall");
-
-    // Leaving first person hands the sentence back to the stage.
-    await page.keyboard.press("Escape");
-    await expect(live).toContainText("Standing", { timeout: 20_000 });
-    await expect(live).not.toContainText("Walking");
     console.log(`walking: ${walked}`);
   });
 
