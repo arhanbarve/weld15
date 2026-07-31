@@ -632,3 +632,126 @@ button,
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* ---------- P8 the MASTER.md checklist pass ----------
+
+   Five rules, each one a MEASURED failure of a box in design-system/MASTER.md's delivery
+   checklist, found by driving the rendered page rather than by reading this file. Nothing
+   above this comment is touched. Every number below came from a browser at 1280 x 720,
+   DPR 1, against the dev server. */
+
+/* Contrast: the stage-number chip gets its own opaque ground.
+
+   MEASURED at stage 0. The glyph is 11 px at weight 400 in --mark, and the ground read back
+   over its own 7 x 14 px rect at (610, 485) -- the element's text set to transparent, the
+   rect screenshotted, the pixels decoded -- was mean rgb(6,22,41) with a 95th percentile of
+   rgb(19,39,59). That is 4.97:1 on the mean and 4.15:1 on the p95, against MASTER's 4.5
+   floor for body text, and 11 px unbold IS body by MASTER's own definition.
+
+   The p95 is the whole story: --chip-scan is rgba(4,20,38,0.82), so 18% of whatever the
+   canvas is drawing arrives through it, and at stage 0 that is the lit limb of the Earth
+   landing behind a mid-luminance crimson. The same glyph measures 4.80:1 at stage 5, where
+   the room behind it is darker than the globe -- so the ratio was moving with the frame,
+   which is the failure mode rather than the symptom.
+
+   MASTER's own contrast ledger predicted it: --mark on --void is 4.46:1 computed, and the
+   ledger marks that pair "large text and graphics only -- never body".
+
+   --void-deep is exactly --chip-scan composited over --void, so over the scan this is the
+   colour that was already there and the chip looks unchanged; what goes away is the 18%.
+   AFTER: 5.06:1 computed against #041426, and no longer a function of what is behind it.
+   The crimson border stays -- it is a graphic, it needs 3:1, and it carries the second
+   signal that keeps this chip off "colour is the only indicator".
+   Same move, same reason, as .a11y-alt-panel's opaque ground below. */
+.hud-num {
+  background: var(--void-deep);
+}
+
+/* Touch target: every .hud-t input, not two of the three.
+
+   MEASURED: [data-testid="threshold-t"] at stage 4 renders 176 x 16 px. MASTER's floor is
+   44 x 44, and for a range input the height of the box IS the hit area for the thumb.
+
+   Hud.tsx wrote this down before it happened. Its TAP constant carries the note "`.hud-t
+   input` sets a width and no height, so a native date field and a range track both come out
+   around 20 px tall", applies minHeight: 44 inline to the two sun controls, and says it
+   "would sit better as a rule beside `.hud-t input`" -- left inline because moving it would
+   have edited those two. The threshold slider is the third .hud-t input, added later, and it
+   never got the inline style. So the rule goes here, where it covers all three by
+   construction and cannot be missed by a fourth.
+   AFTER: 176 x 44. The two sun controls are unchanged; they were already 44 from the inline
+   style, which this now makes redundant rather than wrong. */
+.hud-t input {
+  min-height: 44px;
+}
+
+/* Cursor: a slider and a date field are clickable things.
+
+   MEASURED cursor: `default` on every range and date input in the app -- sun-date, sun-hour,
+   threshold-t and Panel.module.css's seventeen .track sliders -- against MASTER's delivery
+   checklist line "cursor-pointer on every clickable element". Every <button> and <summary>
+   in the app already reads `pointer`; these are the only controls that did not.
+   An element+attribute selector, so it reaches the CSS-module sliders without this file
+   needing to know a generated class name. */
+input[type="range"],
+input[type="date"] {
+  cursor: pointer;
+}
+
+/* The rooms table is crushed to zero height. This is the flexbox min-height rule.
+
+   MEASURED at 1280x720, 1440x900, 1440x1200 and 1024x768 -- all four -- with the written
+   description open: .a11y-alt-scroll has clientHeight 0 while its scrollHeight is 281.
+   The seven-room table inside it lays out at 281.4 px and its first row lands at y 869.9,
+   outside a container 0 px tall. So the table A11yAlt exists to provide is not rendered at
+   all, at every desktop size, and the focusable scroll container is a 385 x 0 tab stop whose
+   focus ring has no height.
+
+   WHY, exactly, because the shape of it decides the fix. .a11y-alt-panel is a flex column
+   with max-height: calc(100dvh - 12rem) and its content is 1126 px against 1006 available at
+   1440x1200, so every child is under shrink pressure. A flex item's automatic minimum size
+   is its content -- but only while its overflow is `visible`. This one is the only child with
+   overflow-x: auto, so it is the only child whose min-height resolves to 0, and it therefore
+   absorbs the ENTIRE deficit while every paragraph beside it keeps its natural height. Measured
+   heights of the siblings: h2 20.8, p 80.6, p 100.7, p 181.3, ul 95 -- none shrank. The scroller
+   went to 0.
+
+   flex: none, so it is sized by its content and shrinks by nothing; the panel already has
+   overflow-y: auto and takes the overflow, which is what it is for.
+   AFTER: clientHeight 320, scrollHeight 320, all seven rows laid out inside the box, tab stop
+   385 x 320. 320 rather than the 281 the table measured while crushed, because the caption rule
+   below now wraps that caption from one line onto three. The dock's box is unchanged at
+   [14, 430, 66, 644] and still clears the HUD [481, 799, 14, 360] and the sources disclosure
+   [14, 95, 660, 706] at stage 5, which is what tests/e2e/a11y.spec.ts asserts. */
+.a11y-alt-scroll {
+  flex: none;
+}
+
+/* Line length: the table's caption ran to 128 characters.
+
+   MEASURED with the description open: the caption's longest line is 128ch, against MASTER's
+   "Line length capped 65-75ch". It is one line because its containing block is the table,
+   the table is 1218 px wide inside the horizontal scroller, and nothing capped the caption.
+   Two sentences of instruction for how to read the table are exactly the text that must not
+   be 128 characters wide.
+
+   24rem AND NOT 68ch, which is the second thing measured here. 68ch of this caption's own IBM
+   Plex Mono is about 490 px, and the scroller's visible column is 385 px -- so a 68ch cap wraps
+   the caption to two compliant lines and then clips both of them, and you have to scroll the
+   table sideways to finish reading the instructions for how to read the table. 24rem is the
+   width the column actually has: .a11y-alt-dock is 26rem and .a11y-alt-panel takes 0.9rem of
+   padding each side. MEASURED at 384 px against the scroller's 385.
+
+   position: sticky with left: 0 because the caption lives INSIDE the horizontal scroller. The
+   table is 1218 px against 385 visible, so it is genuinely scrolled sideways in use, and a
+   caption that scrolls out of frame with the columns it is explaining is the same defect one
+   step further on.
+   AFTER: three lines of 51ch, 51ch and 24ch -- all under MASTER's 65-75ch cap -- every one of
+   them inside the scroller's box, and still at the scroller's own left edge with scrollLeft
+   driven to 600. */
+.a11y-alt-table caption {
+  max-width: 24rem;
+  white-space: normal;
+  position: sticky;
+  left: 0;
+}
