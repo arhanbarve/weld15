@@ -4,11 +4,11 @@ import { extrude, normalizeRing } from "@/geo/extrude";
 import { buildEdgeGeometry, expectedSegments, WELD_NAME } from "@/scene/campusGeometry";
 
 /**
- * buildCampusGeometry() itself needs a WebGL-free three, which works in Node, but
- * mergeGeometries pulls in enough of the renderer to be brittle under vitest. The
- * merge is covered by the e2e draw-call count instead; what is worth pinning here
- * is the edge geometry, because a wireframe with missing verticals or a dropped
- * closing edge looks almost right and is very easy to ship.
+ * buildCampusGeometry() itself is exercised by the e2e draw-call count -- P10 retired the merged
+ * mass it used to build, so what is left of it (Weld's own box, kept only for the `!weld` guard,
+ * and weldEdges) is thin enough not to need a unit test of its own. What is worth pinning here is
+ * the edge geometry, because a wireframe with missing verticals or a dropped closing edge looks
+ * almost right and is very easy to ship.
  */
 describe("edge geometry", () => {
   const others = campus.buildings.filter((b) => b.name !== WELD_NAME);

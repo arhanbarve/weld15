@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
-import { useFrame, useThree } from "@react-three/fiber";
+import { useEffect, useMemo } from "react";
+import { useThree } from "@react-three/fiber";
 import { Line, Html } from "@react-three/drei";
 import * as THREE from "three";
 import { buildCampusGeometry } from "./campusGeometry";
@@ -83,18 +83,6 @@ const CONTRAST_MASS = 0.22;
 const MASS_CEILING = 0.34;
 const HIGH_CONTRAST_GAIN = CONTRAST_MASS / MASS_OPACITY;
 
-/**
- * How much denser Weld's pulse is than the rest of the campus.
- *
- * A MULTIPLIER ON THE RAMP rather than an absolute range, which is the change the ramp forces. The
- * pulse used to run 0.20 to 0.34 against a flat 0.12, with `Math.max(mass, ...)` flooring it under
- * high contrast. Once the rest of the campus also reaches 0.34, an absolute pulse at 0.34 makes the
- * highlighted building identical to its neighbours at exactly the stage it most needs to stand out.
- * As a multiple it stays ahead at every altitude, and the high-contrast floor comes for free because
- * the gain is already inside the base it multiplies.
- */
-const WELD_PULSE = { lo: 1.0, hi: 1.55, reduced: 1.4 } as const;
-
 /** The mass fill at an altitude. Pure, so the ramp is asserted without a renderer. */
 function massAt(alt: number, highContrast: boolean): number {
   const floor = highContrast ? CONTRAST_MASS : MASS_OPACITY;
@@ -119,14 +107,10 @@ function massAt(alt: number, highContrast: boolean): number {
  */
 export function Campus({ visible, highlightWeld }: { visible: boolean; highlightWeld: boolean }) {
   const dpr = useThree((s) => s.viewport.dpr);
-  const reduced = useStore((s) => s.reducedMotion);
   const high = useStore((s) => s.highContrast);
-  const weldMass = useRef<THREE.MeshStandardMaterial>(null);
-  const otherMass = useRef<THREE.MeshStandardMaterial>(null);
 
   const geo = useMemo(() => buildCampusGeometry(), []);
 
-  const edgePoints = useMemo(() => toPointPairs(geo.otherEdges), [geo.otherEdges]);
   const weldEdgePoints = useMemo(() => toPointPairs(geo.weldEdges), [geo.weldEdges]);
 
   // Scale line width with device pixel ratio so the 1.5px floor is 1.5 CSS px
@@ -141,26 +125,6 @@ export function Campus({ visible, highlightWeld }: { visible: boolean; highlight
   const baseWidth = BASE_WIDTH * boost * scale;
   const weldWidth = WELD_WIDTH * boost * scale;
   const mass = high ? CONTRAST_MASS : MASS_OPACITY;
-
-useFrame(({ clock, camera }) => {
-    // ONE PLACE READS THE ALTITUDE, and both materials come off it, so the campus can never be
-    // half-ramped. camera.position.y IS the altitude by definition -- altitude.ts's header sets
-    // that out -- and CameraRig has already placed the camera for this frame.
-    const base = massAt(camera.position.y, high);
-    if (otherMass.current) otherMass.current.opacity = base;
-    if (!weldMass.current) return;
-    if (!highlightWeld) {
-      weldMass.current.opacity = base;
-      return;
-    }
-    // Reduced motion holds the pulse at a fixed multiple instead of animating. No Math.max floor is
-    // needed any more: the high-contrast gain is already inside `base`, so the trough rises with it,
-    // which is what the old `Math.max(mass, ...)` was there to guarantee.
-    const k = reduced
-      ? WELD_PULSE.reduced
-      : WELD_PULSE.lo + (WELD_PULSE.hi - WELD_PULSE.lo) * (0.5 + 0.5 * Math.sin(clock.elapsedTime * 1.6));
-    weldMass.current.opacity = Math.min(1, base * k);
-  });
 
   /**
    * window.__campus, for the gates.
@@ -211,32 +175,21 @@ useFrame(({ clock, camera }) => {
   return (
     <group visible={visible}>
       <CampusMesh visible={visible} />
-      {/* masses: 35 buildings in one draw call, Weld separate so it stays styleable */}
-      <mesh geometry={geo.others}>
-        <meshStandardMaterial
-          ref={otherMass}
-          color={SCAN.mass}
-          roughness={1}
-          metalness={0}
-          transparent
-          // The initial value only; the frame loop writes it from the altitude every frame.
-          opacity={mass}
-          depthWrite={false}
-        />
-      </mesh>
-      <mesh geometry={geo.weld}>
-        <meshStandardMaterial
-          ref={weldMass}
-          color={SCAN.mass}
-          roughness={1}
-          metalness={0}
-          transparent
-          opacity={mass}
-          depthWrite={false}
-        />
-      </mesh>
 
-      <Line points={edgePoints} segments color={SCAN.edge} lineWidth={baseWidth} transparent opacity={0.7} />
+      {/* THE TWO MASS FILLS AND THE NON-WELD EDGE LINE ARE RETIRED IN P10. They read
+              <mesh geometry={geo.others}><meshStandardMaterial ref={otherMass} color={SCAN.mass} .../></mesh>
+              <mesh geometry={geo.weld}><meshStandardMaterial ref={weldMass} color={SCAN.mass} .../></mesh>
+              <Line points={edgePoints} segments color={SCAN.edge} lineWidth={baseWidth} transparent opacity={0.7} />
+          and their whole job was to stand in for buildings this project had no real geometry for --
+          translucent blue boxes and a white wireframe over an aerial photograph. CampusMesh.tsx now
+          carries Harvard's own building meshes and crosses out of that same cyanotype into brick,
+          slate, granite and sandstone on the identical layerOpacity().massing band the mass fill used
+          to climb, so the stand-in has nothing left to stand in for. Weld's own outline and label
+          stay below: they are the highlight, not the massing, and MASTER.md requires three non-hue
+          signals for it. Removed rather than commented out in place; this note is the record.
+          massAt() and the window.__campus probe below are unchanged -- they still describe the ramp
+          CampusMesh reads. */}
+
       <Line
         points={weldEdgePoints}
         segments
