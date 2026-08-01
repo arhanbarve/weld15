@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { decodeGeometry, decodeStrings, leafNodes, toSiteFeet, BUFFER_STRIDE } from "@/scene/i3s";
+import { writeGlb } from "@/scene/glb";
 
 /**
  * A synthetic node buffer in geometryDefinitions[1]'s layout: 8-byte header, then
@@ -85,5 +86,40 @@ describe("decodeStrings", () => {
     for (const e of encoded) { b.writeUInt32LE(e.length, o); o += 4; }
     for (const e of encoded) { e.copy(b, o); o += e.length; }
     expect(decodeStrings(b)).toEqual(names);
+  });
+});
+
+describe("writeGlb", () => {
+  const mesh = {
+    position: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+    normal: Float32Array.from([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+    materialClass: Uint8Array.from([0, 1, 2]),
+    index: Uint32Array.from([0, 1, 2]),
+  };
+
+  it("emits a valid glTF 2.0 binary header", () => {
+    const glb = writeGlb(mesh);
+    const dv = new DataView(glb.buffer, glb.byteOffset, glb.byteLength);
+    expect(dv.getUint32(0, true)).toBe(0x46546c67); // "glTF"
+    expect(dv.getUint32(4, true)).toBe(2);
+    expect(dv.getUint32(8, true)).toBe(glb.byteLength);
+  });
+
+  it("pads both chunks to four bytes, as the spec requires", () => {
+    const glb = writeGlb(mesh);
+    const dv = new DataView(glb.buffer, glb.byteOffset, glb.byteLength);
+    const jsonLen = dv.getUint32(12, true);
+    expect(jsonLen % 4).toBe(0);
+    const binLen = dv.getUint32(12 + 8 + jsonLen, true);
+    expect(binLen % 4).toBe(0);
+  });
+
+  it("declares accessor counts that match the arrays it was given", () => {
+    const glb = writeGlb(mesh);
+    const dv = new DataView(glb.buffer, glb.byteOffset, glb.byteLength);
+    const jsonLen = dv.getUint32(12, true);
+    const json = JSON.parse(new TextDecoder().decode(glb.subarray(20, 20 + jsonLen)));
+    expect(json.accessors[0].count).toBe(3);
+    expect(json.accessors[json.meshes[0].primitives[0].indices].count).toBe(3);
   });
 });
