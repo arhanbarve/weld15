@@ -186,9 +186,14 @@ test("the ground arrives with altitude and is a photograph, not a fill", async (
    * came up. Measured: 4.4 at stage 1 and 18.9 at stage 2 -- it RISES, and the reason is that the
    * metric is confounded by content rather than that the tint is broken. At 16,332 ft the frame is
    * the 50 km plate at 80 ft per texel, which is uniformly grey greater-Boston seen at a grazing
-   * angle; at 815 ft it is the 0.52 ft plate plus the blue massing at 0.34, white edges, a crimson
-   * chip and Weld's highlight. The tint is a 19% effect at the first and 85% at the second, and it
-   * is swamped both times.
+   * angle; at 815 ft it is the 0.52 ft plate plus white edges, a crimson chip and Weld's highlight.
+   *
+   * P10 SCALED THE TINT RAMP DOWN, AND THE FIGURES BELOW ARE THE REPLACEMENT, NOT THE ORIGINAL.
+   * The tint used to be a 19% effect at the first altitude and 85% at the second; Ground.tsx's
+   * TINT_SCALE header now measures it at 5.6% and 24% respectively, because 0.35 of the ramp is
+   * what P10 spends so the photograph survives the descent instead of resolving into a flat
+   * cyanotype rectangle. It is swamped by content at both stages regardless of which figure is
+   * current, which is the reason this metric is recorded and not gated -- see below.
    *
    * The ramp is a pure function of altitude and IS asserted, in tests/altitude.test.ts, which checks
    * it is zero at orbit, monotonic, and 1.0 by stage 3. That is the right level for it. A pixel
@@ -243,4 +248,75 @@ test("a place label appears, and it is not in the tab order", async ({ page }) =
   expect(overlaps, `place chip ${JSON.stringify(a)} overlaps Weld chip ${JSON.stringify(b)}`).toBe(
     false,
   );
+});
+
+/**
+ * Mean saturation over the frame, the same offscreen-canvas technique campus.spec.ts's
+ * whitePixels() and journey.spec.ts's frameStats() already use: draw the WebGL canvas into a
+ * 2D one and read its pixels back. The HUD is not sampled because it is never IN this data --
+ * it is a separate DOM overlay, not part of the canvas bitmap, so no separate exclusion logic
+ * is needed to keep it out.
+ */
+async function meanSaturation(page: Page): Promise<number> {
+  return page.locator("canvas").evaluate((el) => {
+    const src = el as HTMLCanvasElement;
+    const off = document.createElement("canvas");
+    off.width = src.width;
+    off.height = src.height;
+    const ctx = off.getContext("2d")!;
+    ctx.drawImage(src, 0, 0);
+    const { data } = ctx.getImageData(0, 0, off.width, off.height);
+    let sum = 0;
+    let n = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i]! / 255, g = data[i + 1]! / 255, b = data[i + 2]! / 255;
+      const max = Math.max(r, g, b), min = Math.min(r, g, b);
+      const l = (max + min) / 2;
+      let s = 0;
+      if (max !== min) {
+        const d = max - min;
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      }
+      sum += s;
+      n++;
+    }
+    return sum / n;
+  });
+}
+
+/**
+ * Per-stage floors, half of what this build actually measures at each: stage 1 (16,332 ft) at
+ * 0.056 and stage 2 (815 ft) at 0.144. ONE shared floor cannot do this -- half of stage 2's
+ * value (0.072) is already ABOVE stage 1's own measurement, so a single constant is either too
+ * loose to mean anything at stage 2 or fails outright at stage 1. The two altitudes show
+ * different amounts of sky, haze and photograph, so they have never been the same population;
+ * this file's own frameStats()-style tests already treat every stage as its own baseline for
+ * the same reason.
+ */
+const SATURATION_FLOOR: Record<number, number> = { 1: 0.03, 2: 0.07 };
+
+test("the ground is in colour at the stages the viewer looks at it", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("canvas")).toBeVisible({ timeout: 30_000 });
+
+  for (const stg of [1, 2]) {
+    await page.getByTestId(`stage-${stg}`).click();
+    await page.waitForTimeout(2400);
+
+    /**
+     * Mean saturation over the frame, excluding the HUD.
+     *
+     * P10 EXISTS BECAUSE THIS WAS 0.077. The plates were MassGIS 2025, flown leaf-off in March, and
+     * between the bare canopy and Ground.tsx's tint ramp the Yard arrived on screen grey. The floor
+     * below is deliberately well under what the leaf-on build measures, because this is a guard
+     * against the photograph going grey again -- not a pin on a particular plate.
+     *
+     * MEASURED ON THIS BUILD: 0.056 at stage 1, 0.144 at stage 2 (that 0.077 was the raw source
+     * tile's own saturation before any tint or geometry, not this on-screen metric -- the two are
+     * not directly comparable, which is why the floor here is derived from THIS build's own
+     * numbers rather than from 0.077 itself).
+     */
+    const sat = await meanSaturation(page);
+    expect(sat, `stage ${stg} mean saturation`).toBeGreaterThan(SATURATION_FLOOR[stg]!);
+  }
 });

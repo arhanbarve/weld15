@@ -52,23 +52,54 @@ const TINT = "#06203f";
 /**
  * How far the tint goes at full strength.
  *
- * 0.22 SINCE P10, down from 0.82, and the 0.82 is worth keeping in the record because its
- * reasoning was sound and its result was not. It argued that a fully tinted photograph is a
- * flat blue rectangle and that 18% of the image left is enough for paths across the Yard to
- * read under the cyanotype. Measured on the shipped build, a 360 x 200 ground patch at
- * stage 3 came back mean rgb (64, 74, 92) -- a blue monochrome, which is the thing the
- * paragraph was trying to avoid, one step further on. The tint band clamps to 1.0 below
- * 400 ft, so stage 3 got the whole of it.
+ * 0.82 and not 1.0. A fully tinted photograph is a flat blue rectangle -- every bit of tonal
+ * information gone -- and what stage 3 wants is a photograph that has become the GROUND THE
+ * DRAWING SITS ON rather than one that has been deleted. Leaving 18% of the image means the paths
+ * across the Yard and the difference between grass and paving still read under the cyanotype,
+ * which is what makes the massing look like it is standing on something.
  *
- * 0.22 is a GRADE rather than a substitution: enough to tie the photograph to the palette,
- * not enough to take its colour. The band in altitude.ts is unchanged, so WHEN the grade
- * arrives is unchanged; only how far it goes.
+ * MERGE NOTE (P10 integration), because TWO BRANCHES CUT THIS AND THE CUTS MUST NOT STACK.
+ * `p10-ux` step 10 took TINT_MAX to 0.22 and SAT_MIN to 0.90 against the FULL ramp; `p10-imagery`
+ * left both alone and introduced TINT_SCALE below, spending 0.35 of the ramp instead. Each on its
+ * own lands the deepest grade at 22-29%, which is what both branches measured and both wanted.
+ * Together they would have landed it at 0.82 x 0.35 x ... no: at 0.22 x 0.35 = 7.7%, which is not
+ * a grade at all -- the ground would have come out untied from the palette entirely, and neither
+ * branch asked for that.
+ *
+ * p10-imagery's pair is the one kept, and the reason is which PLATES the measurement was taken
+ * against. p10-ux measured on the MassGIS leaf-off imagery that shipped before this phase and
+ * said so in its own spec: "most of stage 1's greyness IS the photograph". Its bigger cut was
+ * compensation for a grey source. That source is gone -- fetch-imagery.mjs now builds the whole
+ * pyramid leaf-on, NAIP for L2/L3 and the L4 hybrid for the Yard -- so the compensation is not
+ * needed and TINT_SCALE's own table below is the one measured against what actually ships.
  */
-const TINT_MAX = 0.22;
+const TINT_MAX = 0.82;
 
-/** Saturation left at full tint. 0.90 since P10: the desaturation was the other half of
- *  the monochrome, and a 10% pull is enough to stop the grade reading as a colour cast. */
-const SAT_MIN = 0.9;
+/** Saturation left at full tint. Desaturating alongside the tint is what stops it going purple. */
+const SAT_MIN = 0.25;
+
+/**
+ * How much of altitude.ts's tint ramp actually reaches the photograph.
+ *
+ * P10. The ramp itself still runs a clean 0 to 1 from 40,000 ft to 400 ft -- altitude.ts is
+ * untouched and tests/altitude.test.ts still asserts yard.tint === 1 -- and this is the design
+ * layer deciding how much of it to spend. Measured at the three stage altitudes the camera actually
+ * sits at (window.__cam), before and after:
+ *
+ *   stage 1, 16,332 ft   tint 0.195   was 15% desaturated / 16% blue   now  5% / 5.6%
+ *   stage 2,    815 ft   tint 0.846   was 63% / 69%                    now 22% / 24%
+ *   stage 3,    110 ft   tint 1.000   was 75% / 82%                    now 26% / 29%
+ *
+ * SCALED, NOT CLAMPED, and the difference matters. A clamp at 0.35 would plateau around 8,000 ft
+ * and the photograph would then stop changing for the last two stages of a descent whose whole
+ * subject is continuous change. Scaling shortens the ramp's reach and keeps its shape.
+ *
+ * WHAT SURVIVES AT 0.35 IS NOT A WEAKENED CYANOTYPE, IT IS AERIAL HAZE. The campus is no longer
+ * drawn as translucent blue massing over the photograph -- CampusMesh.tsx stands real brick and
+ * slate on it -- so a residual quarter-strength blue is the distance cue that stops the ground
+ * reading as a decal under the buildings. MASTER.md's photographic-layer table is amended to match.
+ */
+const TINT_SCALE = 0.35;
 
 const GROUND_VERT = /* glsl */ `
   varying vec2 vUv;
@@ -173,7 +204,7 @@ function Quad({
      */
     if (tex && mat.uniforms.uMap!.value !== tex) mat.uniforms.uMap!.value = tex;
     mat.uniforms.uOpacity!.value = a;
-    mat.uniforms.uTint!.value = o.tint;
+    mat.uniforms.uTint!.value = o.tint * TINT_SCALE;
   });
 
   if (!tex || !quad) return null;

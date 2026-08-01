@@ -28,7 +28,7 @@ palette; the crossing between them is the payoff, so they must not be blended.
 > **Amended in P9.** The scan and daylight palettes still must not blend *with each other*. A third
 > input arrives at stages 0–3 — georeferenced aerial photography — and it is neither palette. It is
 > resolved **into** the scan palette by an altitude ramp rather than sitting beside it: full colour
-> at orbit, and by the time the camera reaches Weld it has been desaturated to 25% and pushed 82% of
+> at orbit, and by the time the camera reaches Weld it has been desaturated to 74% and pushed 29% of
 > the way to `--void`. The rule the original line protects is that the *crossing* is the payoff, and
 > that rule is kept — the crossing is now photograph → scan → daylight, three states and two
 > crossings, each committed to.
@@ -44,7 +44,8 @@ palette; the crossing between them is the payoff, so they must not be blended.
 | token | value | meaning |
 |---|---|---|
 | tint target | `--void` `#06203F` | what the photograph resolves toward as altitude falls |
-| tint ceiling | 0.82 | how far it goes at stage 3. Not 1.0; see above |
+| tint ceiling | 0.82 × 0.35 = 0.287 | how far it goes at stage 3. Not 1.0; see above |
+| tint scale | 0.35 | P10: the campus is real geometry now, not a drawing, so the ground only needs to read as aerial haze under it rather than a cyanotype wash — this shortens the ramp's reach without touching its shape (`src/scene/Ground.tsx`) |
 | saturation floor | 0.25 | saturation left at full tint, so the tint does not read as a colour cast |
 | ramp bounds | 40,000 ft → 400 ft | the altitude band over which it happens (`src/scene/altitude.ts`) |
 

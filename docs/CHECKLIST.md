@@ -750,3 +750,187 @@ characters for four SVGs on ship night is aesthetic churn with no accessibility 
 dependency or four hand-authored paths to maintain. The honest resolution is the one the
 checklist offers as its alternative: §Icons should say text arrows are the set. Declining the
 swap, not the conformance question.
+
+---
+
+# P10 — colour on the ground, and the buildings are the buildings
+
+Task 15 of `docs/phases/P10-EXTERIOR-PLAN.md`, the final task of the phase. Implemented on branch
+`p10-imagery` in the worktree `/Users/arhanbarve/Code/weld15-imagery`. Everything below is a
+measurement taken against that build, not the plan's prediction — where the two differ, both are
+given, per `docs/phases/P9.md`'s own precedent of recording every divergence from the spec rather
+than quietly reconciling to it.
+
+**Gates run 1 August 2026:** `npm run typecheck` clean · `npm run test` 716/716 passed (30 files) ·
+`npm run test:e2e` 58/58 passed · `npm run build` clean (Turbopack, static). The e2e run is the
+one number here that needed a workaround to be trustworthy — see *A verification hazard found and
+worked around* below.
+
+## Mean saturation, before and after (the original complaint)
+
+`tests/e2e/imagery.spec.ts`'s regression test, added in Task 14 specifically so a future source
+swap cannot silently go grey again:
+
+| level / stage | before (leaf-off MassGIS) | after (this build) |
+|---|---|---|
+| L3 raster, mean saturation | 0.077 | **0.126** |
+| L4 raster, mean saturation | 0.095 | **0.128** |
+| on-screen, stage 1 (16,332 ft) | — | **0.056** |
+| on-screen, stage 2 (815 ft) | — | **0.144** |
+
+The plan (P10-EXTERIOR-PLAN.md Task 3) predicted L3 would clear **0.20**; it measured **0.126**.
+`greenExcess` (G − (R+B)/2) was the reliable secondary check both times it mattered: L3 +10.8,
+L4 +9.9, both clearly positive against the leaf-off baseline's +3.0. Re-verified independently in
+this task: `sharp` over the committed `l3.webp`/`l4.webp` reads meanSat 0.126 / 0.128, greenExcess
+10.8 / 9.9 — exact match to the figures Tasks 3 and 5 recorded. (L2 for reference: meanSat 0.224,
+greenExcess 17.5.)
+
+The on-screen floors are per-stage (`SATURATION_FLOOR = { 1: 0.03, 2: 0.07 }`) rather than one
+shared constant, because half of stage 2's measured value (0.072) already sits above stage 1's own
+measurement (0.056) — a single floor would either be meaningless at stage 2 or fail outright at
+stage 1.
+
+## Tint, before and after
+
+`src/scene/Ground.tsx`'s `TINT_SCALE = 0.35` header, measured at the camera's real stage
+altitudes (`window.__cam`):
+
+| stage | altitude | was (desaturated / blue-pushed) | now |
+|---|---|---|---|
+| 1 | 16,332 ft | 15% / 16% | **5% / 5.6%** |
+| 2 | 815 ft | 63% / 69% | **22% / 24%** |
+| 3 | 110 ft | 75% / 82% | 26% / 29% (unchanged by Task 15; Part B landed in Task 7) |
+
+Scaled, not clamped, so the ramp keeps its shape and does not plateau for the last two stages of a
+descent whose whole point is continuous change.
+
+## Draw-call ledger — corrected against the plan's own arithmetic
+
+Measured live this task, `npm run test:e2e -- tests/e2e/campus.spec.ts` (`merging holds` test,
+composer included, normal motion):
+
+| | stage 1 | stage 2 | stage 3 |
+|---|---|---|---|
+| pre-P10 baseline | 24 | 28 | 28 |
+| **this build (measured)** | **22** | **26** | **26** |
+| plan's prediction (Task 12 step 6) | 21 | 25 | 25 |
+
+**The plan's own arithmetic was off by one.** P10-EXTERIOR-PLAN.md Task 12 Step 6 computed
+"24/28/28 minus 4 (two masses, one line) plus 1 (the GLB) = 21 / 25 / 25", and Task 14 Step 4
+separately says draw calls "fell from 28 to 25". Neither matches what the build actually does:
+retiring the two mass meshes and the one non-Weld edge line removes exactly one fewer call than
+the ledger assumed, landing at **22/26/26**, not 21/25/25. Recorded here so anyone who reads the
+plan after the fact is not confused by the mismatch — the plan's prose is left as written (Ground
+rule 1 says a claim carries its source; the source here is now this correction, not a rewrite).
+
+A second, composer-subtracted reading exists in `tests/e2e/perf.spec.ts`'s own budget table (under
+`reducedMotion`, which drops bloom): the Campus row there reads **9 calls / 17,546 tris** at stage
+2, against **11 calls** before P10 — a different frame (no bloom passes) from the 22/26/26 above,
+which includes the composer. Both are real; they are not the same count and should not be
+conflated.
+
+## Triangle count
+
+**Rose by ~658, not "roughly doubled."** `17,563` triangles at stages 2/3 in this build (measured
+live, `campus.spec.ts`) against a pre-P10 figure of `16,899` (this document's own P8 section,
+§"stage 2 and 3 both 26 calls / 16899 triangles / 122 lines") — a delta of 664, consistent with the
+~658 `tests/e2e/perf.spec.ts` records in its own header. "Roughly doubled" describes a different,
+earlier comparison point (the raw 48,348-vertex GLB against what a much smaller pre-P10 scene
+carried) and does not describe the actual on-screen triangle delta, which is small because the
+120,000-triangle budget was never close to the constraint either side of the swap. Stage 1 (campus
+without Weld's highlight edges yet costed in): 17,147 triangles.
+
+## The GLB
+
+`public/models/campus.glb`: **1,403,020 bytes (1.3 MB)**, 48,348 raw vertices across the decoded
+I3S leaf nodes, 61 buildings in the emitted manifest (Weld itself excluded — see below). Total
+`public/imagery/` after the pyramid regeneration: **6.1 MB**, against a pre-P10 baseline of 5.7 MB
+(+7%, within the plan's ~10% budget).
+
+## Weld's coordinate-pipeline cross-check (`assertWeld()`)
+
+Passed cleanly on the first real run against the live I3S service, per Task 10: decoded height
+**87.01 ft** against `campus.json`'s independently stated **87.01 ft**; centroid **2.3 ft** from
+the site origin, against a 5 ft tolerance. Weld itself is drawn by `src/scene/weldGeometry.ts`
+(parametric — the dimension sliders, cutaways, threshold sweep and window bays all run through
+it) and is excluded from the extracted campus mesh by name; the I3S decode of Weld is still run on
+every `fetch-buildings.mjs` invocation purely as this cross-check, then discarded.
+
+## Q1 — leaf-off luma bleeding through leaf-on canopy
+
+**Yes, it happened, on the first attempt.** Task 4's initial tuning (`VEG_T0=6`, `VEG_T1=24`, 4 ft
+blur) showed visible bare-branch bleed-through inside tree crowns — ghosted diagonal paths and
+branch structure showing through canopy. Fixed by retuning to `VEG_T0=0`, `VEG_T1=15` with an 8 ft
+blur, chosen by direct visual comparison of four rendered variants (`a-naip-only`,
+`b-massgis-only`, `c-hybrid-masked`, `d-hybrid-naive`) plus three further retuning sweeps. The
+final threshold (excess ≥ 0) was preferred over an equally-good negative-threshold alternative for
+being physically meaningful rather than merely fitted.
+
+## Q2 — does the derived window grid read as windows or wallpaper
+
+**Windows, at normal viewing distance.** Confirmed by direct visual inspection at stages 2 and 3 —
+the altitudes a viewer actually experiences — where it reads convincingly as a Harvard Yard
+dormitory's fenestration. A separate, artificially-close 2×-DPR crop revealed the underlying
+mechanical, uniform-pitch repetition (the same rhythm regardless of wall width or corner), but that
+view does not occur in normal use. `WINDOWS = true` kept in `CampusMesh.tsx`.
+
+## Everything else that turned out differently from the plan
+
+- **L2's NAIP fetch had a real bug the plan did not anticipate.** A single `exportImage` request
+  over L2's 50 km footprint returned ~37.6% no-data, because NAIP's ArcGIS service silently caps
+  composited source scenes at 50 per request and L2's footprint intersects ~79. Visible as a dark
+  diagonal quilt at stage 1 in the live app. Fixed by splitting the fetch into a 3×3 grid of
+  smaller `exportImage` sub-requests, mosaicked before resampling — no-data dropped to ~1.4% (the
+  remainder is genuine open ocean, correctly left to the Blue Marble fallback).
+- **Two test files needed unplanned fixes to stay honest.** `tests/imagery.test.ts`'s
+  native-resolution assertion became per-level (`EXPECTED_NATIVE_FT = { L2: 0.984, L3: 0.984,
+  L4: 0.492 }`) once L2/L3 moved to NAIP's coarser resolution while L4 kept MassGIS's finer figure
+  for its luminance channel. `tests/hybrid.test.ts`'s blur-conservation test had a fixture too
+  small to hold its own blur without edge clamping eating real mass (correct behaviour at that
+  tiny scale, not a bug) — fixed by enlarging the fixture, not by loosening the tolerance.
+- **A pre-existing, unrelated bug surfaced and got fixed as a side effect.** `scripts/georef-
+  overlay.mjs` had been silently broken since P9b — it read a manifest path that no longer
+  existed. Fixed as part of Task 3's mandated georeferencing check, since that check could not run
+  at all otherwise.
+- **A real shader bug was caught before shipping.** Task 12's classified-material shader declared
+  its custom vertex attribute as `_MATCLASS` (uppercase, matching the glTF-side convention), but
+  three-stdlib's `GLTFLoader` lowercases non-standard attribute names on load, so the attribute
+  would never have bound — every vertex would silently have read material class 0 ("wall")
+  regardless of its real class, with no error. Caught by tracing the loader source; fixed by using
+  `_matclass` (lowercase) in the shader.
+- **The near-neutral pixel threshold (`campus.spec.ts`, 236) did not need to change**, but the
+  populations under it moved a lot in both directions: stage 1 fell (1,939 → 454 at threshold 205)
+  because leaf-on canopy now covers bare roofs and pavement that used to read bright and neutral;
+  stage 2 rose (2,588 → 2,712 at 205, and higher at every threshold above it) because CampusMesh's
+  granite and sandstone are themselves near-neutral and bright under the highlight tint. Both
+  moves are real, and 236 still separates the two populations completely (stage 1 is zero from 235
+  up; stage 2 is 1,783 at 245).
+
+## A verification hazard found and worked around, this task
+
+`playwright.config.ts` hardcodes `http://localhost:3000` for both `use.baseURL` and
+`webServer.url`, with `reuseExistingServer: true` — and its own header comment already names the
+exact trap this ran into: "a full P9 run" was lost to it before. At the start of this task, port
+3000 was occupied by the **main checkout's** own `next-server` (confirmed via `lsof -p <pid>` →
+cwd `/Users/arhanbarve/Code/weld15`, not this worktree), which does not carry any of this branch's
+changes. Running `npm run test:e2e` unmodified would have silently adopted that server and tested
+the wrong code while reporting green. Worked around by running the suite against a temporary,
+untracked config (`playwright.p10-verify.config.ts`, deleted after the run) pointed at this
+worktree's own port 3200, rather than editing the shared, committed `playwright.config.ts`. All 58
+tests passed against the worktree's own server. Nobody should trust a green `test:e2e` run from
+any of these sibling worktrees without first checking which server answered on 3000.
+
+## Accessibility and contrast, re-verified for P10
+
+`npm run test:e2e -- tests/e2e/a11y.spec.ts tests/e2e/contrast.spec.ts` — **PASS, all of it**
+(part of the 58/58 above). In particular:
+
+- The high-contrast toggle still drives `massOpacity` to MASTER's **0.22** through
+  `window.__campus`: measured live, `mass 0.12 -> 0.22` at both DPR 1 and DPR 2, alongside line
+  width `1.5 -> 2.5` and Weld's own edge `2.2 -> 3.666...` (still the same `2.2×`/`1.5×` ratio to
+  the rest of the campus, now against the thickened 2.5 base).
+- Weld's highlight is still three signals — hue **and** width (its edge is `2.2×`/`3.67×dpr`
+  against `1.5×`/`2.5×dpr` for neighbours), the `.weld-chip` label, and the reduced-motion-aware
+  pulse — verified visually under the toggle rather than only by the number, since Weld's white
+  outline is now the brightest thing on a **brick** building rather than a **blue** one. It still
+  reads clearly as the highlighted building at stages 2 and 3 with the toggle on.

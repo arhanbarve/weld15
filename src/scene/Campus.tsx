@@ -1,14 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
-import { useFrame, useThree } from "@react-three/fiber";
+import { useEffect, useMemo } from "react";
+import { useThree } from "@react-three/fiber";
 import { Line, Html } from "@react-three/drei";
 import * as THREE from "three";
 import { buildCampusGeometry } from "./campusGeometry";
-import { attachAerialSkin, aerialUniforms } from "./aerial";
-import { quadOf, sharedTexture } from "./imagery";
 import { useStore } from "@/state/store";
 import weld from "@/data/weld.json";
+import { CampusMesh } from "./CampusMesh";
 
 const SCAN = {
   mass: "#96c8f5",
@@ -35,7 +34,7 @@ const WELD_WIDTH = 2.2;
 const CONTRAST_WIDTH = 2.5;
 
 /**
- * The buildings are solid now, not a translucent ramp.
+ * The buildings are solid now, and they are the buildings.
  *
  * THROUGH P9, this file carried an 80-line opacity ramp -- MASS_OPACITY, CONTRAST_MASS,
  * MASS_CEILING, HIGH_CONTRAST_GAIN and the massAt() function deriving a fill capped at 0.34,
@@ -45,52 +44,27 @@ const CONTRAST_WIDTH = 2.5;
  * (tests/labels.test.ts) that asserted the ceiling stayed under 0.5, guarding against someone
  * "finishing" the occlusion by raising a number.
  *
- * P10 finishes it a different way. The masses are opaque MeshStandardMaterials with their own
- * default depthWrite, so a roof is genuinely hidden by the building standing over it rather than
- * partially seen through it -- which is what section 6.9 asked for and an opacity ramp capped
- * short of "solid" could not deliver. aerial.ts's `attachAerialSkin` puts the photograph back on
- * top, so what an opaque building loses (the ground drawing showing through) it gets back as its
- * own roof.
+ * P10 FINISHES IT, AND TWO BRANCHES FINISHED IT DIFFERENTLY. `p10-ux` step 10 made these same
+ * extruded footprints opaque and skinned their roofs with the L4 photograph (src/scene/aerial.ts,
+ * `attachAerialSkin`), which is full occlusion over the massing this project already had.
+ * `p10-imagery` replaced the massing instead: CampusMesh.tsx carries Harvard's own building
+ * meshes, decoded from their published I3S scene layer, with walls, roofs, bases and trim
+ * classified per vertex and coloured from MASONRY. The second supersedes the first -- an
+ * aerial photograph stretched over a box is a stand-in for a building, and there is no longer
+ * anything to stand in for -- so the boxes, their roof skin and the ramp they replaced are all
+ * gone together. `src/scene/imagery.ts`'s sharedTexture() stays: Ground.tsx uses it.
  *
- * THE RANGE, MEASURED RATHER THAN CARRIED OVER FROM THE OLD OPACITY PULSE. A first pass kept the
- * dissolve-era numbers verbatim -- lo 1.0, hi 1.55 -- on the assumption that an emissive intensity
- * and an opacity fraction are interchangeable units. They are not: opacity blends toward the
- * background, capped at 1, while emissive ADDS to the lit, textured colour underneath with no
- * such cap, and `edgeHi` is pure white. At lo 1.0 every one of Weld's photographed-roof pixels
- * blew straight to (1,1,1) -- a solid white block, screenshotted and caught rather than inferred --
- * which erased the one thing this step exists to put on Weld's mass: its own photographed roof.
- *
- * 0.1-0.35 IS THE SECOND MEASUREMENT, NOT THE FIRST. 0.15-0.45 fixed the blowout -- the roof's
- * texture stayed legible at both ends, confirmed by screenshot -- but it moved the amplitude
- * that had been swept away with the opacity ramp: `emissiveIntensity` at that range still lifts
- * enough of the photographed roof's own near-white pixels to make the pulse's PHASE, not just
- * its presence, show up in pixel-counting gates. Two of them do: contrast.spec.ts's white-pixel
- * ratio at stage 2 read as low as 1.023 across repeated full-suite runs against a bound written
- * for a tighter signal, and campus.spec.ts's stage 1 vs stage 2 comparison failed outright once
- * at 959 against a required 1,097. Both gates already take a median of several samples for
- * exactly this class of noise (Weld's mass pulses continuously); 0.1-0.35 is the amplitude
- * measured to keep both stable across repeated runs while the highlight stays visible -- three
- * runs of contrast.spec.ts's own ratio at 1.130, 1.104, 1.106, and campus.spec.ts's stage 2 count
- * at 1,305 and 1,328 against stage 1's steady 299.
+ * WHAT WELD'S HIGHLIGHT LOST, AND WHY THAT IS STILL THREE SIGNALS. `p10-ux` moved Weld's pulse
+ * from `material.opacity` to `emissiveIntensity` on its own mass mesh. There is no Weld mass
+ * mesh any more -- Weld is excluded from campus.glb on purpose (fetch-buildings.mjs's WELD
+ * note) because weldGeometry.ts draws it parametrically -- so the pulse has nothing to write
+ * to and is gone. MASTER.md asks for three signals that are not hue, and three remain, all on
+ * the outline and the chip: a wider stroke (WELD_WIDTH against BASE_WIDTH), full opacity
+ * against the neighbours' 0.7, and the "Weld Hall" label. Recorded rather than quietly dropped.
  */
-const WELD_PULSE = { lo: 0.1, hi: 0.35, reduced: 0.22 } as const;
 
 /**
- * The plate the roof skin samples, and its extent: L4, the same 1,600 x 1,600 ft plate
- * Ground.tsx's own innermost quad draws, so the two can share one THREE.Texture through
- * imagery.ts's sharedTexture(). See aerial.ts's header for the margin measurement and the UV
- * sign convention.
- */
-const L4 = quadOf("L4")!;
-const AERIAL_EXTENT = {
-  minX: L4.cx - L4.width / 2,
-  minY: L4.cy - L4.height / 2,
-  width: L4.width,
-  height: L4.height,
-};
-
-/**
- * The campus: white line work over solid, photographed massing.
+ * The campus: white line work over Harvard's own building meshes.
  *
  * Two things here are not cosmetic.
  *
@@ -100,20 +74,15 @@ const AERIAL_EXTENT = {
  * style DB rates thin-line-on-dark as poor for accessibility, and this entire look
  * is thin lines on dark.
  *
- * Weld's highlight: three signals, never hue alone. Brighter and wider edges, a
- * slow emissive pulse (opacity through P9, moved since the buildings became opaque),
- * and a DOM label chip on a solid ground.
+ * Weld's highlight: three signals, never hue alone. A wider stroke, a fully opaque one
+ * where the neighbours draw at 0.7, and a DOM label chip on a solid ground.
  */
 export function Campus({ visible, highlightWeld }: { visible: boolean; highlightWeld: boolean }) {
   const dpr = useThree((s) => s.viewport.dpr);
-  const reduced = useStore((s) => s.reducedMotion);
   const high = useStore((s) => s.highContrast);
-  const weldMass = useRef<THREE.MeshStandardMaterial>(null);
-  const otherMass = useRef<THREE.MeshStandardMaterial>(null);
 
   const geo = useMemo(() => buildCampusGeometry(), []);
 
-  const edgePoints = useMemo(() => toPointPairs(geo.otherEdges), [geo.otherEdges]);
   const weldEdgePoints = useMemo(() => toPointPairs(geo.weldEdges), [geo.weldEdges]);
 
   // Scale line width with device pixel ratio so the 1.5px floor is 1.5 CSS px
@@ -128,51 +97,6 @@ export function Campus({ visible, highlightWeld }: { visible: boolean; highlight
   const baseWidth = BASE_WIDTH * boost * scale;
   const weldWidth = WELD_WIDTH * boost * scale;
 
-  // One AerialUniforms object per material: both want the same L4 plate and the same wall tone,
-  // but each is its own uniform set because attachAerialSkin binds them by reference into the
-  // material's own compiled shader. `useMemo` rather than a ref so the extent -- fixed at import
-  // time from the manifest -- is only ever computed once per material's lifetime.
-  const otherAerial = useMemo(() => aerialUniforms(SCAN.mass, AERIAL_EXTENT), []);
-  const weldAerial = useMemo(() => aerialUniforms(SCAN.mass, AERIAL_EXTENT), []);
-
-  // The one THREE.Texture for L4, shared with Ground.tsx's own Q4 quad rather than uploaded a
-  // second time -- imagery.ts's sharedTexture() and aerial.ts's header both carry the reason.
-  useEffect(
-    () =>
-      sharedTexture("L4", (t) => {
-        otherAerial.uAerial.value = t;
-        weldAerial.uAerial.value = t;
-      }),
-    [otherAerial, weldAerial],
-  );
-
-  // Attached once, on mount: onBeforeCompile is set on the material object itself and the
-  // uniforms it captures are updated by mutating their `.value` fields (the texture arriving,
-  // above), never by re-attaching.
-  useEffect(() => {
-    if (otherMass.current) attachAerialSkin(otherMass.current, otherAerial);
-  }, [otherAerial]);
-  useEffect(() => {
-    if (weldMass.current) attachAerialSkin(weldMass.current, weldAerial);
-  }, [weldAerial]);
-
-  useFrame(({ clock }) => {
-    // Weld's highlight, since P10 an emissive glow rather than a denser fill -- the building is
-    // opaque now, so there is no alpha left for a pulse to ramp. Same WELD_PULSE range and the
-    // same 1.6 rad/s; `emissive` is SCAN.edgeHi, the same white Weld's line work already
-    // highlights in, so the third non-hue signal reads as "this building" rather than as a new
-    // colour of its own.
-    if (!weldMass.current) return;
-    if (!highlightWeld) {
-      weldMass.current.emissiveIntensity = 0;
-      return;
-    }
-    const k = reduced
-      ? WELD_PULSE.reduced
-      : WELD_PULSE.lo + (WELD_PULSE.hi - WELD_PULSE.lo) * (0.5 + 0.5 * Math.sin(clock.elapsedTime * 1.6));
-    weldMass.current.emissiveIntensity = k;
-  });
-
   /**
    * window.__campus, for the gates.
    *
@@ -184,10 +108,9 @@ export function Campus({ visible, highlightWeld }: { visible: boolean; highlight
    * the checklist records that limit. This publishes the number that was actually handed to
    * <Line>, so the gate can assert MASTER's figure exactly, and at DPR 2 as well.
    *
-   * `massOpacity`/`massCeiling` are gone with the ramp they described. `weldEmissive` replaces
-   * them as the third non-hue signal's own figures -- the WELD_PULSE range and rate the frame
-   * loop above actually writes to the material, so a gate can assert the pulse without sampling
-   * a bloom-spread pixel for it.
+   * `massOpacity`/`massCeiling` are gone with the ramp they described, and so is the
+   * `weldEmissive` that briefly replaced them: nothing pulses any more (see this file's header).
+   * What is left is exactly what MASTER states and a pixel cannot prove -- the two widths.
    *
    * An effect rather than an assignment in the body, so it does not run during render and
    * so it cleans up: a stale probe left behind by an unmounted campus is a gate reading a
@@ -199,7 +122,6 @@ export function Campus({ visible, highlightWeld }: { visible: boolean; highlight
       dpr,
       lineWidth: baseWidth,
       weldLineWidth: weldWidth,
-      weldEmissive: WELD_PULSE,
     };
     const w = window as unknown as { __campus?: typeof probe };
     w.__campus = probe;
@@ -220,26 +142,23 @@ export function Campus({ visible, highlightWeld }: { visible: boolean; highlight
 
   return (
     <group visible={visible}>
-      {/* masses: 35 buildings in one draw call, Weld separate so it stays styleable. Opaque,
-          default depthWrite, and roughness/metalness for a matte photographed roof rather than
-          the flat-lit translucent block P9 drew -- attachAerialSkin puts the photograph on top,
-          in the effect above. */}
-      <mesh geometry={geo.others}>
-        <meshStandardMaterial ref={otherMass} color={SCAN.mass} roughness={0.85} metalness={0} />
-      </mesh>
-      <mesh geometry={geo.weld}>
-        <meshStandardMaterial
-          ref={weldMass}
-          color={SCAN.mass}
-          roughness={0.85}
-          metalness={0}
-          emissive={SCAN.edgeHi}
-          // The initial value only; the frame loop writes it from the pulse every frame.
-          emissiveIntensity={0}
-        />
-      </mesh>
+      <CampusMesh visible={visible} />
 
-      <Line points={edgePoints} segments color={SCAN.edge} lineWidth={baseWidth} transparent opacity={0.7} />
+      {/* THE TWO MASS FILLS AND THE NON-WELD EDGE LINE ARE RETIRED IN P10. They read
+              <mesh geometry={geo.others}><meshStandardMaterial ref={otherMass} color={SCAN.mass} .../></mesh>
+              <mesh geometry={geo.weld}><meshStandardMaterial ref={weldMass} color={SCAN.mass} .../></mesh>
+              <Line points={edgePoints} segments color={SCAN.edge} lineWidth={baseWidth} transparent opacity={0.7} />
+          and their whole job was to stand in for buildings this project had no real geometry for --
+          translucent blue boxes and a white wireframe over an aerial photograph. CampusMesh.tsx now
+          carries Harvard's own building meshes and crosses out of that same cyanotype into brick,
+          slate, granite and sandstone on the identical layerOpacity().massing band the mass fill used
+          to climb, so the stand-in has nothing left to stand in for. Weld's own outline and label
+          stay below: they are the highlight, not the massing, and MASTER.md requires three non-hue
+          signals for it. Removed rather than commented out in place; this note is the record.
+          massAt() and its ramp constants went at the merge as well: CampusMesh reads
+          layerOpacity().massing directly, so there was nothing left for a pure ramp function to
+          be the testable half of. */}
+
       <Line
         points={weldEdgePoints}
         segments

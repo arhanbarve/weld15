@@ -43,13 +43,21 @@ describe("the manifest describes what actually shipped", () => {
 
   it("stays inside the budget the plan set", () => {
     // P9.md section 6.2 budgeted about 2.6 MB of AVIF and 4.1 MB shipping WebP alongside. Measured
-    // here: 2.20 MB and 5.66 MB. The AVIF total came in UNDER and the combined total over, because
-    // WebP is 2.6x AVIF on photographic content rather than the 1.5x the plan assumed. Both are
-    // asserted so a level added without thought shows up as a failure rather than as a fat repo.
+    // at the time: 2.20 MB and 5.66 MB. The AVIF total came in UNDER and the combined total over,
+    // because WebP is 2.6x AVIF on photographic content rather than the 1.5x the plan assumed.
+    //
+    // REBUDGETED IN P10 TASK 5's FOLLOW-UP FIX, from a fresh measurement rather than by loosening
+    // the check to make a bug pass (see docs/phases/P9.md section 6.10's precedent for that
+    // distinction). L2's single exportImage request was silently dropping ~37.6% of its NAIP
+    // pixels to no-data (ArcGIS's maxMosaicImageCount caps a request at 50 source scenes and L2's
+    // 50 km footprint intersects ~79); those holes were filled with flat, highly-compressible
+    // Blue Marble colour. Fetching L2 as a tiled grid of sub-requests instead (naipRasterTiled() in
+    // scripts/fetch-imagery.mjs) fixes the holes with real, less-compressible aerial photography,
+    // which legitimately grew L2's plates. Measured here: 2.67 MB and 6.06 MB.
     const total = (fmt: string) =>
       Object.values(manifest.levels).reduce((n, l) => n + (l.files[fmt]?.bytes ?? 0), 0);
-    expect(total("avif")).toBeLessThan(2.6 * 1024 * 1024);
-    expect(total("avif") + total("webp")).toBeLessThan(6 * 1024 * 1024);
+    expect(total("avif")).toBeLessThan(2.9 * 1024 * 1024);
+    expect(total("avif") + total("webp")).toBeLessThan(6.3 * 1024 * 1024);
   });
 
   it("records a licence and an attribution for every level", () => {
@@ -68,9 +76,17 @@ describe("the manifest describes what actually shipped", () => {
     // actually captured at, so the extra grid density is interpolation. The manifest must keep the
     // two figures separate rather than presenting the grid as the resolution -- docs/SOURCES.md
     // says so and this is the assertion behind it.
+    //
+    // EXPECTED VALUE IS PER-LEVEL, NOT A SHARED CONSTANT. P10 moved L2 and L3 both to USDA NAIP
+    // (0.9842519685 ft, NAIP's 0.3 m, leaf-on), so both read NAIP's native resolution now. L4 is
+    // the MassGIS/NAIP hybrid: its nativeResolutionFt deliberately stays at MassGIS's 0.492 ft
+    // because that field describes the LUMINANCE channel only -- the colour is NAIP's and is
+    // coarser, which hybridProvenance()'s `composite.resolutionCaveat` in fetch-imagery.mjs says
+    // in words rather than leaving it to be inferred from two numbers in different blocks.
+    const EXPECTED_NATIVE_FT: Record<string, number> = { L2: 0.9842519685, L3: 0.9842519685, L4: 0.492 };
     for (const id of ["L2", "L3", "L4"]) {
       const p = manifest.levels[id]!.provenance;
-      expect(p.nativeResolutionFt, `${id} native resolution`).toBeCloseTo(0.492, 3);
+      expect(p.nativeResolutionFt, `${id} native resolution`).toBeCloseTo(EXPECTED_NATIVE_FT[id]!, 3);
     }
   });
 });

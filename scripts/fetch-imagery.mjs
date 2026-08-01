@@ -11,6 +11,50 @@
  * costs no bandwidth.
  *
  * ------------------------------------------------------------------------------------------
+ * WHY P10 STOPPED USING MASSGIS ALONE, AND WHY IT DID NOT SWITCH TO ESRI INSTEAD
+ * ------------------------------------------------------------------------------------------
+ *
+ * Every MassGIS aerial layer -- not just the 2025 flight P9 used, every one of them -- is flown
+ * LEAF-OFF. That is not an accident of scheduling: state orthophotography is flown in early
+ * spring on purpose, because bare canopy is what planimetric mapping wants. It is the wrong
+ * thing for a model whose default instant is a September afternoon and whose trees, before
+ * P10, were bare under a summer sun for no reason a viewer could see without opening this file.
+ *
+ * Measured directly rather than assumed: mean "green excess" (G - (R+B)/2) over Weld at zoom
+ * 19, per source --
+ *
+ *   MassGIS 2025            +3.0
+ *   MassGIS orthos2023      +7.4
+ *   MassGIS orthos2021      +3.9
+ *   USGS 2019               -1.5
+ *   DigitalGlobe 2011/12    +7.7
+ *   USDA NAIP               +9.7
+ *   Esri World Imagery      +11.1
+ *
+ * Every MassGIS vintage clusters low; NAIP and Esri are the only two leaf-on options this
+ * project could use at all, and they are well clear of the rest. Esri measures higher still,
+ * and was rejected anyway: its basemap terms do not permit caching derived plates into a
+ * repository, which is exactly what this script does to every level. NAIP has no such
+ * restriction -- it is a work of the USDA Farm Service Agency, public domain, no permission or
+ * attribution legally required -- so NAIP is what L2 and L3 now source from directly.
+ *
+ * L4 is not that simple, because NAIP's ~1 ft native resolution (see NAIP_NATIVE_FT) is not
+ * enough to hold Weld's roofline at the 1,600 ft frame's density, and MassGIS's 2025 flight,
+ * despite being leaf-off, is still the sharpest thing this project can legally cache at 0.492 ft
+ * native. So L4 is a hybrid, not a straight swap: MassGIS supplies luminance/detail, NAIP
+ * supplies chrominance/colour, recombined per pixel in YCbCr space (see hybridise() and
+ * naipProvenance()/massgisProvenance()/hybridProvenance() below). A flat recombination would
+ * still show MassGIS's bare canopy wherever there is a tree, because the leaf-off plate is
+ * looking at different ground than the leaf-on one is -- not just different-coloured ground, a
+ * different scene, since a leaf-off flight sees soil and roots where a leaf-on flight sees
+ * leaves. So the blend is masked: under a blurred, green-excess-based vegetation mask, NAIP
+ * supplies both luminance and colour instead of just colour, and MassGIS's detail is used only
+ * where the two photographs are actually looking at the same thing. `src/imagery/hybrid.ts`
+ * carries the mask math and the tuning story that arrived at it. The result is two real
+ * photographs, flown two years apart in different seasons, blended into one plate -- which is
+ * why `src/ui/ImageryChip.tsx` names both of them rather than one.
+ *
+ * ------------------------------------------------------------------------------------------
  * WHY THE TILE SERVICE AND NOT THE JP2 ORTHOS -- A DELIBERATE DEPARTURE FROM P9.md SECTION 6.3
  * ------------------------------------------------------------------------------------------
  *
@@ -48,9 +92,14 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import sharp from "sharp";
+import { blur, recombine, vegetationMask } from "../src/imagery/hybrid.ts";
 
 const CACHE = ".cache/imagery";
 const OUT = "public/imagery";
+
+/** Vegetation-mask blur radius in site feet. See src/imagery/hybrid.ts's VEG_T0/VEG_T1 doc comment
+ * for the full retuning story — this pairs with those thresholds and must not be changed alone. */
+const VEG_BLUR_FT = 8;
 
 const DEG = Math.PI / 180;
 
@@ -69,10 +118,20 @@ const MASSGIS_TILES =
 const BMNG =
   "https://assets.science.nasa.gov/content/dam/science/esd/eo/images/bmng/bmng-topography-bathymetry/august/world.topo.bathy.200408.3x21600x10800.jpg";
 
+const NAIP =
+  "https://gis.apfo.usda.gov/arcgis/rest/services/NAIP/USDA_CONUS_PRIME/ImageServer/exportImage";
+
+// Pinned by scripts/probe-naip.mjs against the mosaic catalog. See P10-EXTERIOR-PLAN Task 1.
+const NAIP_FLOWN = "2023-07-07";
+// Same probe, same pin: 0.3 metres native GSD, expressed in feet -- this file's other resolution
+// figures (e.g. sampledGridFt below) are all in feet, hence the non-integer literal.
+const NAIP_NATIVE_FT = 0.3 * 3.280839895;
+
 const ATTRIBUTION = {
   bmng: "NASA Earth Observatory / Blue Marble Next Generation",
   massgis:
     "MassGIS (Bureau of Geographic Information), Commonwealth of Massachusetts EOTSS",
+  naip: "USDA Farm Service Agency, National Agriculture Imagery Program",
 };
 
 /**
@@ -107,9 +166,14 @@ const LEVELS = [
     extentFt: 3_280_000, // 1,000 km
     px: [2048, 1524],
   },
-  { id: "L2", source: "massgis", extentFt: 164_000, px: [2048, 2048], zoom: 13, ocean: true },
-  { id: "L3", source: "massgis", extentFt: 16_400, px: [2048, 2048], zoom: 16 },
-  { id: "L4", source: "massgis", extentFt: 1_600, px: [3072, 3072], zoom: 20 },
+  // tileGrid: 3 -- see naipRasterTiled()'s header comment. L2's 50 km footprint intersects
+  // ~79 NAIP source scenes, and the ImageServer refuses to mosaic more than
+  // maxMosaicImageCount (50, queried live) into one exportImage response; the ~29 scenes past
+  // the cap simply come back as no-data. A single request is fine at L3/L4's tighter windows,
+  // which intersect far fewer source scenes, so this flag is L2-only.
+  { id: "L2", source: "naip", extentFt: 164_000, px: [2048, 2048], zoom: 13, ocean: true, tileGrid: 3 },
+  { id: "L3", source: "naip", extentFt: 16_400, px: [2048, 2048], zoom: 16 },
+  { id: "L4", source: "hybrid", extentFt: 1_600, px: [3072, 3072], zoom: 20, naipZoom: 18 },
 ];
 
 /** Web Mercator pixel coordinates at a zoom, 256 px tiles. */
@@ -202,6 +266,306 @@ async function pool(items, limit, fn) {
 }
 
 /**
+ * The inverse per-output-pixel mapping, with the source abstracted behind a sampler.
+ *
+ * SPLIT OUT IN P10 BECAUSE THERE ARE NOW TWO SOURCES. This is the half of the old
+ * resampleMassGIS() that is not about tiles: for each pixel of the quad, work out where on Earth
+ * it is, convert to Web Mercator pixels at the working zoom, and ask the sampler for the colour
+ * there. The other direction -- walk the source and scatter -- leaves holes wherever the scale is
+ * not exactly 1 and is the classic way to get a moire.
+ *
+ * `sample(fx, fy)` takes FRACTIONAL Web Mercator pixel coordinates at zoom `z` and returns
+ * [r, g, b, a]. Bilinear is the sampler's business, not this function's, because the tile mosaic
+ * and the single NAIP raster have different edge behaviour: the mosaic must let alpha go to zero
+ * outside coverage so the ocean composite shows through, and a single raster must clamp.
+ *
+ * j = 0 is the TOP of the quad, which is NORTH, which is +y in the site frame. Getting this upside
+ * down flips the photograph north-for-south, and a mirrored Yard is exactly the class of error
+ * frames.ts's header warns is invisible.
+ */
+function resampleInverse(level, z, sample) {
+  const [W, H] = level.px;
+  const half = level.extentFt / 2;
+  const out = Buffer.alloc(W * H * 4);
+  for (let j = 0; j < H; j++) {
+    const sy = half - ((j + 0.5) / H) * level.extentFt;
+    for (let i = 0; i < W; i++) {
+      const sx = -half + ((i + 0.5) / W) * level.extentFt;
+      const { lat, lon } = siteToLatLon(sx, sy);
+      const m = merc(lat, lon, z);
+      const [r, g, b, a] = sample(m.x, m.y);
+      const o = (j * W + i) * 4;
+      out[o] = r;
+      out[o + 1] = g;
+      out[o + 2] = b;
+      out[o + 3] = a;
+    }
+  }
+  return { data: out, width: W, height: H };
+}
+
+/** Bilinear sampler over a raw RGBA buffer laid out in Web Mercator pixels at zoom z. */
+function mosaicSampler(mosaic, mosaicW, mosaicH, originX, originY) {
+  return (fx, fy) => {
+    const px = fx - originX;
+    const py = fy - originY;
+    const x0 = Math.floor(px - 0.5);
+    const y0 = Math.floor(py - 0.5);
+    const ax = px - 0.5 - x0;
+    const ay = py - 0.5 - y0;
+    let r = 0, g = 0, b = 0, a = 0;
+    for (let dy = 0; dy < 2; dy++) {
+      for (let dx = 0; dx < 2; dx++) {
+        const cx = Math.min(mosaicW - 1, Math.max(0, x0 + dx));
+        const cy = Math.min(mosaicH - 1, Math.max(0, y0 + dy));
+        const w = (dx ? ax : 1 - ax) * (dy ? ay : 1 - ay);
+        const k = (cy * mosaicW + cx) * 4;
+        r += mosaic[k] * w;
+        g += mosaic[k + 1] * w;
+        b += mosaic[k + 2] * w;
+        a += mosaic[k + 3] * w;
+      }
+    }
+    return [r, g, b, a];
+  };
+}
+
+/**
+ * NAIP over a level's footprint, as a raw RGBA raster in Web Mercator pixels at zoom `z`.
+ *
+ * WHY NAIP AND NOT MASSGIS, WHICH IS THE WHOLE OF P10 PART A. Every MassGIS layer is flown
+ * LEAF-OFF -- state orthos are, on purpose, because bare canopy is what planimetric mapping wants.
+ * Measured over Weld at z19, mean green excess (G - (R+B)/2) per source: MassGIS 2025 +3.0,
+ * orthos2023 +7.4, orthos2021 +3.9, USGS 2019 -1.5, DigitalGlobe 2011/12 +7.7. NAIP is +9.7 and
+ * Esri World Imagery is +11.1. Those last two are the only leaf-on options, and Esri's basemap
+ * terms do not allow caching derived plates into a repository. So: NAIP.
+ *
+ * NAIP is a work of the US Department of Agriculture, Farm Service Agency, and is in the public
+ * domain. No permission is needed and no attribution is required; both are recorded anyway,
+ * because this project records where things came from.
+ *
+ * REQUESTED IN EPSG:3857 ON THE LEVEL'S OWN MERCATOR WINDOW, so the raster that comes back is in
+ * the same coordinate system the tile mosaic would have been and resampleInverse() cannot tell the
+ * difference. That is the entire reason Task 2 split the resampler.
+ */
+async function naipRaster(level, z) {
+  const half = level.extentFt / 2;
+  const corners = [
+    siteToLatLon(-half, half),
+    siteToLatLon(half, half),
+    siteToLatLon(-half, -half),
+    siteToLatLon(half, -half),
+  ];
+  const mercs = corners.map((c) => merc(c.lat, c.lon, z));
+  const minX = Math.floor(Math.min(...mercs.map((m) => m.x)));
+  const maxX = Math.ceil(Math.max(...mercs.map((m) => m.x)));
+  const minY = Math.floor(Math.min(...mercs.map((m) => m.y)));
+  const maxY = Math.ceil(Math.max(...mercs.map((m) => m.y)));
+  const W = maxX - minX;
+  const H = maxY - minY;
+  if (W > 4096 || H > 4096) throw new Error(`${level.id}: NAIP window ${W}x${H} exceeds 4096`);
+
+  // Web Mercator pixel -> EPSG:3857 metres. The world is 256 * 2^z pixels across and
+  // 2 * PI * R metres across, so one is a scale and an offset from the other.
+  const SPAN = 2 * Math.PI * 6378137;
+  const n = 256 * Math.pow(2, z);
+  const toM = (px, py) => [(px / n) * SPAN - SPAN / 2, SPAN / 2 - (py / n) * SPAN];
+  const [x0, y1] = toM(minX, minY);
+  const [x1, y0] = toM(maxX, maxY);
+
+  const bbox = [x0, y0, x1, y1].join(",");
+  const url =
+    `${NAIP}?bbox=${bbox}&bboxSR=3857&imageSR=3857&size=${W},${H}` +
+    `&format=png&interpolation=RSP_BilinearInterpolation&f=image`;
+  const buf = await cached(`naip-${level.id}-z${z}-${W}x${H}.png`, url);
+  const { data } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  console.log(`  ${level.id}: NAIP ${W}x${H} at z${z}`);
+  return { data, width: W, height: H, originX: minX, originY: minY };
+}
+
+/**
+ * NAIP over a level's footprint, fetched as a `grid` x `grid` block of exportImage sub-requests
+ * and mosaicked into one raw RGBA raster -- same output shape as naipRaster() (a Web Mercator
+ * pixel raster with an origin), so it drops into the same resampleInverse()/mosaicSampler() call
+ * in main() unchanged.
+ *
+ * WHY THIS EXISTS, MEASURED NOT GUESSED. A single exportImage request over L2's 50 km footprint
+ * came back ~37.6% no-data, in large hard-edged rectangular blocks -- not the soft, low-percentage
+ * gaps a genuine coverage hole would leave. Querying the ImageServer's own service info
+ * (`?f=json`) shows `maxMosaicImageCount: 50`: it will only composite 50 source scenes into one
+ * response. Querying `/query?returnCountOnly=true` over L2's exact bbox returns 79 intersecting
+ * scenes. (79-50)/79 = 36.7%, against a measured 37.64% -- close enough that the cap, not a
+ * pyramid gap, is the cause. A probe fetch at 8192x8192 over the same bbox (same source scenes,
+ * just more raw pixels) didn't move the number at all, which rules out "not enough sampling
+ * density" as the explanation; splitting the same bbox into a 3x3 grid of sub-requests instead
+ * (each intersecting far fewer than 50 scenes) dropped no-data to 1.42%, with the entire remainder
+ * being real open ocean over Boston Harbor that NAIP (CONUS land only) never had data for anyway.
+ *
+ * Each sub-tile is cached individually under its own grid coordinates, so a re-run after a code
+ * change to an unrelated level costs no extra bandwidth here.
+ */
+async function naipRasterTiled(level, z, grid) {
+  const half = level.extentFt / 2;
+  const corners = [
+    siteToLatLon(-half, half),
+    siteToLatLon(half, half),
+    siteToLatLon(-half, -half),
+    siteToLatLon(half, -half),
+  ];
+  const mercs = corners.map((c) => merc(c.lat, c.lon, z));
+  const minX = Math.floor(Math.min(...mercs.map((m) => m.x)));
+  const maxX = Math.ceil(Math.max(...mercs.map((m) => m.x)));
+  const minY = Math.floor(Math.min(...mercs.map((m) => m.y)));
+  const maxY = Math.ceil(Math.max(...mercs.map((m) => m.y)));
+  const W = maxX - minX;
+  const H = maxY - minY;
+
+  const SPAN = 2 * Math.PI * 6378137;
+  const n = 256 * Math.pow(2, z);
+  const toM = (px, py) => [(px / n) * SPAN - SPAN / 2, SPAN / 2 - (py / n) * SPAN];
+
+  const tileW = Math.ceil(W / grid);
+  const tileH = Math.ceil(H / grid);
+  const jobs = [];
+  for (let gy = 0; gy < grid; gy++) {
+    for (let gx = 0; gx < grid; gx++) {
+      const px0 = minX + gx * tileW;
+      const px1 = Math.min(maxX, px0 + tileW);
+      const py0 = minY + gy * tileH;
+      const py1 = Math.min(maxY, py0 + tileH);
+      if (px1 > px0 && py1 > py0) jobs.push({ gx, gy, px0, px1, py0, py1 });
+    }
+  }
+  console.log(`  ${level.id}: NAIP ${W}x${H} at z${z}, tiled ${grid}x${grid} (${jobs.length} sub-requests)`);
+
+  const mosaic = Buffer.alloc(W * H * 4);
+  await pool(jobs, 4, async ({ gx, gy, px0, px1, py0, py1 }) => {
+    const w = px1 - px0;
+    const h = py1 - py0;
+    const [x0, y1] = toM(px0, py0);
+    const [x1, y0] = toM(px1, py1);
+    const bbox = [x0, y0, x1, y1].join(",");
+    const url =
+      `${NAIP}?bbox=${bbox}&bboxSR=3857&imageSR=3857&size=${w},${h}` +
+      `&format=png&interpolation=RSP_BilinearInterpolation&f=image`;
+    const buf = await cached(`naip-${level.id}-z${z}-g${grid}-${gx}-${gy}-${w}x${h}.png`, url);
+    const { data } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const ox = px0 - minX;
+    const oy = py0 - minY;
+    for (let r = 0; r < h; r++) {
+      data.copy(mosaic, ((oy + r) * W + ox) * 4, r * w * 4, (r + 1) * w * 4);
+    }
+  });
+
+  return { data: mosaic, width: W, height: H, originX: minX, originY: minY };
+}
+
+/**
+ * NAIP's provenance block.
+ *
+ * NAIP_FLOWN and NAIP_NATIVE_FT come from the mosaic catalog and are pinned by
+ * scripts/probe-naip.mjs (P10-EXTERIOR-PLAN Task 1). They are NOT the ImageServer's advertised
+ * `pixelSizeX`, which is a mosaic default of 1 and says nothing about what was flown.
+ */
+function naipProvenance(level) {
+  return {
+    dataset: "USDA NAIP (National Agriculture Imagery Program), USDA_CONUS_PRIME mosaic",
+    flown: NAIP_FLOWN,
+    leafState: "leaf-on",
+    nativeResolutionFt: NAIP_NATIVE_FT,
+    sampledGridFt: +(level.extentFt / level.px[0]).toFixed(4),
+    zoom: level.zoom,
+    url: `${NAIP}?bbox={bbox}&bboxSR=3857&imageSR=3857&size={w},{h}&format=png&f=image`,
+    licence:
+      "Work of the US Department of Agriculture, Farm Service Agency. Public domain in the United States; no permission required and no attribution required.",
+    attribution: ATTRIBUTION.naip,
+    processing: [
+      "EPSG:3857 (Web Mercator) request; grid north IS true north, so no convergence rotation is applied or needed",
+      "per-output-pixel inverse mapping into the site frame, bilinear",
+    ],
+  };
+}
+
+/**
+ * L4: MassGIS's detail wearing NAIP's colour. src/imagery/hybrid.ts carries the argument.
+ *
+ * The two rasters are co-registered BY CONSTRUCTION rather than by alignment: both have been
+ * through resampleInverse() into the same output grid, so pixel i of each is the same point on
+ * Earth. Nothing here searches for a match, and nothing here could.
+ */
+function hybridise(detail, colour, level) {
+  const [W, H] = level.px;
+  const ftPerTexel = level.extentFt / W;
+  const veg = blur(vegetationMask(colour.data, W, H), W, H, VEG_BLUR_FT / ftPerTexel);
+  const out = Buffer.alloc(W * H * 4);
+  for (let i = 0; i < W * H; i++) {
+    const k = i * 4;
+    const [r, g, b] = recombine(detail.data, colour.data, veg[i], k, k);
+    out[k] = r;
+    out[k + 1] = g;
+    out[k + 2] = b;
+    // Detail's alpha, because it is the one with coverage gaps at the edges of the MassGIS pyramid.
+    out[k + 3] = detail.data[k + 3];
+  }
+  return { data: out, width: W, height: H };
+}
+
+/**
+ * MassGIS's provenance block, extracted so hybridProvenance() can extend it rather than restate it.
+ */
+function massgisProvenance(level) {
+  const processing = [
+    "EPSG:3857 (Web Mercator) source; grid north IS true north, so no convergence rotation is applied or needed",
+    "per-output-pixel inverse mapping into the site frame, bilinear",
+  ];
+  if (level.ocean) {
+    processing.push(
+      "composited over an upsampled Blue Marble crop, so no-data outside the state boundary receives ocean rather than black",
+    );
+  }
+  const provenance = {
+    dataset: "MassGIS 2025 Aerial Imagery (Massachusetts_Aerial_Imagery_2025)",
+    flown: "2025-03-18/2025-04-23, leaf-off",
+    nativeResolutionFt: 0.492,
+    sampledGridFt: +((156_543.034 * Math.cos(WELD.lat * DEG)) / 2 ** level.zoom * 3.280839895).toFixed(4),
+    zoom: level.zoom,
+    url: `${MASSGIS_TILES}/{z}/{y}/{x}`,
+    licence:
+      "No restrictions apply to these data. Acknowledgement of MassGIS would be appreciated for products derived from these data.",
+    attribution: ATTRIBUTION.massgis,
+    processing,
+  };
+  if (level.ocean) provenance.oceanBase = ATTRIBUTION.bmng;
+  return provenance;
+}
+
+/**
+ * L4's provenance, which has to name BOTH parents.
+ *
+ * `nativeResolutionFt` describes the LUMINANCE only. Reading 0.492 here and concluding the colour
+ * is also 15 cm would be wrong, so `composite` says so in words rather than leaving it to be
+ * inferred from two numbers in different blocks.
+ */
+function hybridProvenance(level) {
+  const m = massgisProvenance(level);
+  return {
+    ...m,
+    composite: {
+      luminance: "MassGIS 2025 Aerial Imagery, leaf-off, 0.492 ft native",
+      chrominance: `USDA NAIP, leaf-on, ${NAIP_NATIVE_FT} ft native`,
+      method:
+        "Per-pixel YCbCr recombination. Chrominance is always NAIP's. Luminance is MassGIS's except " +
+        "under vegetation, where a blurred green-excess mask takes luminance from NAIP too -- the " +
+        "leaf-off plate shows the ground through bare canopy, so its detail there is detail of the " +
+        "wrong subject. src/imagery/hybrid.ts carries the reasoning and the tuned thresholds.",
+      resolutionCaveat:
+        "nativeResolutionFt describes the luminance channel. The colour is NAIP's and is coarser.",
+    },
+    attribution: `${ATTRIBUTION.massgis} (detail); ${ATTRIBUTION.naip} (colour)`,
+  };
+}
+
+/**
  * Resample a MassGIS level into the site frame.
  *
  * PER OUTPUT PIXEL, INVERSELY -- for each pixel of the quad, work out where on Earth it is and
@@ -251,45 +615,7 @@ async function resampleMassGIS(level) {
   });
   console.log(`  ${level.id}: ${got}/${jobs.length} tiles had coverage`);
 
-  const out = Buffer.alloc(W * H * 4);
-  const originX = minX * 256;
-  const originY = minY * 256;
-  for (let j = 0; j < H; j++) {
-    // j = 0 is the TOP of the quad, which is NORTH, which is +y in the site frame. Getting this
-    // upside down flips the photograph north-for-south, and a mirrored Yard is exactly the class
-    // of error frames.ts's header warns is invisible.
-    const sy = half - ((j + 0.5) / H) * level.extentFt;
-    for (let i = 0; i < W; i++) {
-      const sx = -half + ((i + 0.5) / W) * level.extentFt;
-      const { lat, lon } = siteToLatLon(sx, sy);
-      const m = merc(lat, lon, z);
-      const fx = m.x - originX;
-      const fy = m.y - originY;
-      const x0 = Math.floor(fx - 0.5);
-      const y0 = Math.floor(fy - 0.5);
-      const ax = fx - 0.5 - x0;
-      const ay = fy - 0.5 - y0;
-      let r = 0, g = 0, b = 0, a = 0;
-      for (let dy = 0; dy < 2; dy++) {
-        for (let dx = 0; dx < 2; dx++) {
-          const px = Math.min(mosaicW - 1, Math.max(0, x0 + dx));
-          const py = Math.min(mosaicH - 1, Math.max(0, y0 + dy));
-          const w = (dx ? ax : 1 - ax) * (dy ? ay : 1 - ay);
-          const k = (py * mosaicW + px) * 4;
-          r += mosaic[k] * w;
-          g += mosaic[k + 1] * w;
-          b += mosaic[k + 2] * w;
-          a += mosaic[k + 3] * w;
-        }
-      }
-      const o = (j * W + i) * 4;
-      out[o] = r;
-      out[o + 1] = g;
-      out[o + 2] = b;
-      out[o + 3] = a;
-    }
-  }
-  return { data: out, width: W, height: H };
+  return resampleInverse(level, z, mosaicSampler(mosaic, mosaicW, mosaicH, minX * 256, minY * 256));
 }
 
 /**
@@ -413,32 +739,50 @@ async function main() {
           "lanczos3 downsample to the output grid",
         ],
       };
-    } else {
-      raw = await resampleMassGIS(level);
-      const processing = [
-        "EPSG:3857 (Web Mercator) source; grid north IS true north, so no convergence rotation is applied or needed",
-        "per-output-pixel inverse mapping into the site frame, bilinear",
-      ];
+    } else if (level.source === "naip") {
+      const r = level.tileGrid
+        ? await naipRasterTiled(level, level.zoom, level.tileGrid)
+        : await naipRaster(level, level.zoom);
+      raw = resampleInverse(
+        level,
+        level.zoom,
+        mosaicSampler(r.data, r.width, r.height, r.originX, r.originY),
+      );
+      provenance = naipProvenance(level);
+      if (level.tileGrid) {
+        provenance.processing.push(
+          `fetched as a ${level.tileGrid}x${level.tileGrid} grid of exportImage sub-requests, not one request -- ` +
+            "see naipRasterTiled()'s header comment: the ImageServer's maxMosaicImageCount (50) is smaller " +
+            "than the ~79 source scenes this footprint intersects, so a single request came back ~37.6% no-data",
+        );
+      }
+      // L2 keeps ocean:true -- NAIP is CONUS land only, so a 50 km frame centred on Cambridge still
+      // has no data over Massachusetts Bay, and the Blue Marble composite is still what fills it.
       if (level.ocean) {
         const under = await bmngCrop(level.extentFt, level.extentFt, ...level.px);
         raw = composite(under, raw);
-        processing.push(
-          "composited over an upsampled Blue Marble crop, so no-data outside the state boundary receives ocean rather than black",
+        provenance.processing.push(
+          "composited over an upsampled Blue Marble crop, so no-data outside NAIP's CONUS land coverage receives ocean rather than black",
         );
+        provenance.oceanBase = ATTRIBUTION.bmng;
       }
-      provenance = {
-        dataset: "MassGIS 2025 Aerial Imagery (Massachusetts_Aerial_Imagery_2025)",
-        flown: "2025-03-18/2025-04-23, leaf-off",
-        nativeResolutionFt: 0.492,
-        sampledGridFt: +((156_543.034 * Math.cos(WELD.lat * DEG)) / 2 ** level.zoom * 3.280839895).toFixed(4),
-        zoom: level.zoom,
-        url: `${MASSGIS_TILES}/{z}/{y}/{x}`,
-        licence:
-          "No restrictions apply to these data. Acknowledgement of MassGIS would be appreciated for products derived from these data.",
-        attribution: ATTRIBUTION.massgis,
-        processing,
-      };
-      if (level.ocean) provenance.oceanBase = ATTRIBUTION.bmng;
+    } else if (level.source === "hybrid") {
+      const mass = await resampleMassGIS(level);
+      const nr = await naipRaster(level, level.naipZoom);
+      const col = resampleInverse(
+        level,
+        level.naipZoom,
+        mosaicSampler(nr.data, nr.width, nr.height, nr.originX, nr.originY),
+      );
+      raw = hybridise(mass, col, level);
+      provenance = hybridProvenance(level);
+    } else {
+      raw = await resampleMassGIS(level);
+      if (level.ocean) {
+        const under = await bmngCrop(level.extentFt, level.extentFt, ...level.px);
+        raw = composite(under, raw);
+      }
+      provenance = massgisProvenance(level);
     }
 
     const files = await encode(level.id, raw);
@@ -481,4 +825,9 @@ async function main() {
   console.log(`\nwrote ${dest}`);
 }
 
-await main();
+// GUARDED, NOT A BARE CALL, so that importing this module (rather than running it as a script)
+// never triggers the entire pyramid rebuild -- every network fetch, every encode -- as a side
+// effect of the import.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  await main();
+}

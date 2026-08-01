@@ -150,7 +150,15 @@ const BUDGET = [
   // is 11 scene calls against the 9 recorded here before P9. 13 leaves two, which is the same
   // headroom the row had before. The triangle budget is untouched -- four quads are eight
   // triangles, and 16,888 against 120,000 is not the constraint.
-  { row: "Campus", stage: 2, calls: 13, triangles: 120_000, measured: "11 calls / 16,888 tris" },
+  //
+  // RE-MEASURED IN P10: 9 calls / 17,546 tris, with the composer subtracted. Draw calls FELL,
+  // from 11 to 9, because Harvard's own campus model (CampusMesh.tsx, one merged mesh) replaced
+  // 36 separately-outlined extruded massing boxes. Triangles rose by about 658, not by anything
+  // close to a double -- the model is 48,348 vertices, but that is its raw vertex count, not the
+  // delta against the geometry it replaced, and the 120,000 triangle budget was never close to
+  // the constraint before or after. The bound stays at 13; 9 leaves four calls of headroom
+  // rather than two.
+  { row: "Campus", stage: 2, calls: 13, triangles: 120_000, measured: "9 calls / 17,546 tris" },
   { row: "Weld exterior", stage: 4, calls: 8, triangles: 40_000, measured: "4 calls / 416 tris" },
   // RAISED FROM 25 TO 35 IN P10. Real furniture (geo/pieces.ts, batched by kind AND
   // material -- 11 batches, up from 8), interior sash joinery and glazing (geo/sash.ts)

@@ -66,7 +66,7 @@ async function whitePixelsOnce(page: Page): Promise<number> {
       // stage 1 and the old assertion (stage 2 > stage 1 * 3 + 200) became unsatisfiable: it
       // wanted 6,017 and the real figure was 2,421.
       //
-      // Measured, near-neutral pixel counts by threshold on this build:
+      // Measured, near-neutral pixel counts by threshold, on the P9 build:
       //
       //   threshold   stage 1 (no highlight)   stage 2 (highlight on)
       //         205                    1,939                   2,588
@@ -74,10 +74,32 @@ async function whitePixelsOnce(page: Page): Promise<number> {
       //         235                        0                   1,648
       //         245                        0                   1,172
       //
-      // So 236 separates the two populations completely: the brightest thing the tinted
-      // photograph produces is below it, and line work drawn at #ffffff is far above it. The
-      // test is therefore measuring the same thing it always was -- white line work that only
-      // Weld carries -- rather than measuring the ground.
+      // So 236 separated the two populations completely: the brightest thing the tinted
+      // photograph produced was below it, and line work drawn at #ffffff was far above it.
+      //
+      // RE-MEASURED IN P10, AND 236 STILL HOLDS -- BUT NOT FOR THE REASON YOU'D GUESS. P10
+      // swapped the leaf-off MassGIS plates for leaf-on colour NAIP (greener, less bare-surface
+      // exposure) and put real brick, slate, granite and sandstone under Weld's neighbours from
+      // stage 2 on. Both change this population, and re-measuring rather than assuming was the
+      // point:
+      //
+      //   threshold   stage 1 (no highlight)   stage 2 (highlight on)
+      //         205                      454                    2,712
+      //         225                       24                    2,486
+      //         235                        0                    2,060
+      //         245                        0                    1,783
+      //         250                        0                    1,781
+      //
+      // Stage 1 fell (1,939 -> 454 at 205) rather than rose: leaf-on canopy covers the bare
+      // roofs and pavement that made leaf-off imagery read bright and neutral, so there is LESS
+      // of that population now, not more. Stage 2 rose instead (2,588 -> 2,712 at 205, and every
+      // threshold above it): CampusMesh's granite and sandstone are themselves near-neutral and
+      // bright under the campus's highlight tint, adding to the count alongside Weld's own line
+      // work. Both moves are real and both still land on the correct side of 236: stage 1 is
+      // zero from 235 up, stage 2 is 1,783 at 245 and 1,781 at 250, so 236 still separates the
+      // two populations completely and needs no change. The test still measures what it always
+      // measured -- white line work that only Weld carries -- rather than the ground or the
+      // neighbouring buildings.
       if (r > 236 && g > 236 && b > 236 && b - r < 40) n++;
     }
     return n;
@@ -147,26 +169,35 @@ test("merging holds: many triangles in few draw calls", async ({ page }) => {
     // roof on them -- no new mesh, so no new draw call, which is the whole point of an
     // onBeforeCompile injection over a second material. Re-measured on this machine, headless:
     //
-    //   stage 1   24 calls   16,489 tris     (unchanged)
-    //   stage 2   30 calls   17,569 tris     (+2 calls / +664 tris against stage 3 -- see below)
-    //   stage 3   28 calls   16,905 tris     (unchanged from the P9 figure)
+    // 34 rather than 30 because 28 against a bound of 30 is two calls of headroom, and this test
+    // FLAKED at 30 exactly once in a full parallel run -- the ground quads' textures land at a
+    // slightly different moment under load, and a bound two away from the measurement is a bound
+    // that fails for timing rather than for regressions. 34 keeps six.
     //
-    // STAGE 2'S OWN SURPLUS IS NOT A CAMPUS NUMBER AT ALL. Stage 2's default pose sits at
-    // 814.6 ft (stages.ts), inside altitude.ts's tint band [40,000, 400] -- so
-    // WeldExterior's `progress` (P10 step 10c) is fractional there, and Threshold's sweep
-    // mesh mounts (`0 < progress < 1`) for the first time this test's path ever puts a
-    // camera in that band. Before P10, `progress` was the dissolve's own `1 - opacity`,
-    // which thresholdOpacity() holds at 0 for every stage under 4 -- so the sweep never
-    // mounted at stage 2 and this test's stage-2 figure was Campus alone. It still is
-    // Campus alone at stage 3 (110 ft, under the band's 400 ft floor, progress back to 1,
-    // sweep gone) -- which is why only stage 2 moved. See tests/e2e/threshold.spec.ts's own
-    // P10 addition for the sweep's triangle accounting in detail.
+    // MERGE NOTE (P10 integration). Every P10 figure in this file was measured on ONE branch's
+    // build. The merged build is neither: it has p10-imagery's CampusMesh and p10-ux's dock and
+    // scrubber and p10-fidelity's interior in it at once. The BOUNDS below were chosen with
+    // headroom and are asserted as bounds, not as equalities, so they carry over; the numbers in
+    // the prose are the branch measurements they came from and are labelled as such. The
+    // post-merge re-measurement is verify-run/p10-merge.json.
     //
-    // 34 rather than 30 because 30 against a bound of 30 is no headroom at all, and this test
-    // FLAKED at 30 exactly once in a full parallel run before P9 -- the ground quads' textures
-    // land at a slightly different moment under load, and a bound at the measurement is a bound
-    // that fails for timing rather than for regressions. 34 keeps four over the new measured
-    // ceiling of 30.
+    // RE-MEASURED IN P10, AND THE BOUND STILL HOLDS WITHOUT MOVING. P10 retires the 36 extruded
+    // massing boxes campus.json used to draw and stands Harvard's own I3S-derived model on the
+    // photograph instead (CampusMesh.tsx, one merged mesh, 48,348 vertices). Measured on this
+    // build, same method:
+    //
+    //   stage 1   22 calls   17,147 tris
+    //   stage 2   26 calls   17,563 tris
+    //   stage 3   26 calls   17,563 tris
+    //
+    // Draw calls FELL by two at every stage -- the real campus model is one mesh where the old
+    // massing was merged boxes plus its own outline geometry -- and triangles rose by only about
+    // 658, not by anything close to a doubling: the 48,348-vertex figure is the model's raw
+    // vertex count, not its rendered-triangle delta against what it replaced, and most of this
+    // scene's triangle budget was never the massing to begin with (the P9 table above already
+    // carried 16,489-16,905 before the real campus model existed at all). 34 keeps twelve calls
+    // of headroom now rather than six; left as is because six was already enough and this is a
+    // gate, not a target to keep tight.
     expect(p.calls, `stage ${stage} draw calls: ${report.join(" | ")}`).toBeLessThanOrEqual(34);
     expect(p.triangles, `stage ${stage} lost its geometry`).toBeGreaterThan(10_000);
     /*
@@ -186,11 +217,14 @@ test("merging holds: many triangles in few draw calls", async ({ page }) => {
      * should not read a rise as a regression.
      */
     // MOVED FROM 20 TO 24 IN P9, for the same reason and with the same caveat the comment above
-    // already gives about this counter being cumulative and path-dependent.
+    // already gives about this counter being cumulative and path-dependent. Re-measured on this
+    // test's path: 11 at stage 1, 16 at stages 2 and 3, against the 13 recorded before P9. The
+    // rise is Ground.tsx's four plane geometries, and it is expected rather than a broken merge.
     //
-    // RE-MEASURED FOR P10 STEP 10, THE BOUND UNCHANGED: 12 at stage 1, 18 at stage 2 (the
-    // sweep's own merged geometry, mounting for the reason recorded above), 17 at stage 3,
-    // against 11 / 16 / 16 recorded before P10. Still comfortably under 24.
+    // RE-MEASURED IN P10 ON THE SAME PATH: 9 at stage 1, 14 at stages 2 and 3 -- lower than P9's
+    // 11/16, because retiring the 36 extruded massing boxes removes more geometries than
+    // CampusMesh's one merged model adds back. Bound left at 24; still not the assertion that
+    // carries the merge claim (the draw-call bound above is), for the same reason recorded below.
     expect(p.geometries, `stage ${stage} geometry count suggests the merge broke`).toBeLessThan(24);
   }
   console.log(report.join("\n"));
@@ -209,21 +243,16 @@ test("Weld is marked by more than hue", async ({ page }) => {
   const lit = await whitePixels(page);
 
   // The highlight only engages from stage 2, so stage 1 is the control. Measured at the
-  // rebuilt threshold: 0 at stage 1, 1,648 at stage 2.
-  //
-  // RE-MEASURED FOR P10 STEP 10: 299 at stage 1, 1,305-1,328 across three runs at stage 2.
-  // Stage 1 is no longer 0 because the campus buildings are opaque and photographed now
-  // (aerial.ts's roof skin) rather than a flat translucent fill, and leaf-off aerial imagery
-  // has its own near-white pixels -- concrete, bare pavement, a bright roof -- with no Weld
-  // highlight involved at all. `whitePixels` takes the median of three samples for the same
-  // reason contrast.spec.ts's `pixels()` does: Weld's mass now carries an emissive pulse
-  // (Campus.tsx's WELD_PULSE), and a single sample would carry its phase as noise.
+  // rebuilt threshold: 0 at stage 1, 1,648 at stage 2 in P9; RE-MEASURED IN P10 at 0 and 2,026
+  // -- CampusMesh's granite and sandstone add near-neutral bright pixels of their own alongside
+  // Weld's line work, which is why the P10 figure is higher rather than the same.
   expect(lit, `stage 2 white pixels ${lit} vs stage 1 ${unlit}`).toBeGreaterThan(unlit * 3 + 200);
 
-  // AND AN ABSOLUTE FLOOR, which the ratio alone does not give. 400 is comfortably under the
-  // measured 1,305-1,328, so it fails if the highlight is substantially lost while tolerating
-  // a change of line width -- and comfortably over the 299-pixel photographed-roof baseline, so
-  // it cannot pass on the ground alone the way it could when that baseline read 0.
+  // AND AN ABSOLUTE FLOOR, which the ratio alone does not give. With the control now reading 0
+  // the comparison above passes on 201 pixels, and 201 pixels of white is not a highlighted
+  // building -- it is a few stray anti-aliased edges. 400 is a quarter of the P9 measurement of
+  // 1,648 (P10 measures 2,026, an even wider margin), so it fails if the highlight is
+  // substantially lost while tolerating a change of line width.
   expect(lit, `stage 2 has too little white line work: ${lit}`).toBeGreaterThan(400);
 
   // And the label chip is real DOM, so screen readers and zoom get it too.

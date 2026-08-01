@@ -24,7 +24,7 @@ import sharp from "sharp";
 
 const campus = JSON.parse(await import("node:fs").then((m) => m.readFileSync("src/data/campus.json", "utf8")));
 const weld = JSON.parse(await import("node:fs").then((m) => m.readFileSync("src/data/weld.json", "utf8")));
-const manifest = JSON.parse(await import("node:fs").then((m) => m.readFileSync("public/imagery/manifest.json", "utf8")));
+const manifest = JSON.parse(await import("node:fs").then((m) => m.readFileSync("src/data/imagery-manifest.json", "utf8")));
 
 const L = manifest.levels.L4;
 const [W, H] = L.px;

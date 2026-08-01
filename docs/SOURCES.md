@@ -70,11 +70,34 @@ URL, the bounding box, the projection, the resampling, and a SHA-256 of what it 
   21600 × 10800, and eight 21600 × 21600 tiles. Every other figure in circulation is a third-party
   rescale, so our levels are downsamples we produced and are documented as such.
 
+- **USDA NAIP** (National Agriculture Imagery Program, USDA Farm Service Agency), `USDA_CONUS_PRIME`
+  mosaic — the source for `l2` and `l3` outright, and for the colour half of the `l4` hybrid below.
+  Flown 7 July 2023, **leaf-on**, at ~1 ft native (0.3 m). Chosen over every MassGIS layer because
+  MassGIS is flown leaf-off statewide on purpose (bare canopy is what planimetric mapping wants):
+  measured mean green excess over Weld at z19 is MassGIS 2025 +3.0, orthos2023 +7.4, orthos2021
+  +3.9, USGS 2019 −1.5, DigitalGlobe 2011/12 +7.7, against NAIP +9.7. Esri World Imagery measured
+  higher still (+11.1) and is also leaf-on, but its basemap terms do not permit caching derived
+  plates into a repository, so NAIP was chosen — it is also public domain: *"Work of the US
+  Department of Agriculture, Farm Service Agency. Public domain in the United States; no permission
+  required and no attribution required."* Both facts are recorded anyway per this project's
+  practice. `scripts/probe-naip.mjs` pins the flight date and native resolution against the mosaic
+  catalog; `naipProvenance()` in `scripts/fetch-imagery.mjs` carries the licence string verbatim.
+
 - **MassGIS 2025 Aerial Imagery** (Commonwealth of Massachusetts, EOTSS Bureau of Geographic
-  Information) — the 50 km, 5 km and 1,600 ft plates (`l2`, `l3`, `l4`). Flown 18 March to
-  23 April 2025, **leaf-off**, statewide at 15 cm. The licence is unambiguous: *"No restrictions
-  apply to these data. Acknowledgement of MassGIS would be appreciated for products derived from
-  these data."*
+  Information) — the detail half of the `l4` hybrid (below). No longer the source for `l2` or `l3`;
+  P10 moved those to NAIP. Flown 18 March to 23 April 2025, **leaf-off**, statewide at 15 cm. The
+  licence is unambiguous: *"No restrictions apply to these data. Acknowledgement of MassGIS would be
+  appreciated for products derived from these data."*
+
+  **`l4` is a hybrid of the two sources above, not a single photograph.** MassGIS's 2025 flight
+  supplies luminance/detail (0.492 ft native — finer than NAIP's ~1 ft), NAIP supplies
+  chrominance/colour, recombined per pixel in YCbCr space. Under a blurred, green-excess-based
+  vegetation mask, NAIP supplies both luminance and colour instead: MassGIS's leaf-off plate shows
+  the ground through bare canopy there, so its detail is detail of the wrong subject, and blending
+  it in unmasked produces "green footpaths" where the ground truth is actually leaves. `l4`'s two
+  photographs were flown two years apart, in different seasons; that is disclosed rather than
+  hidden, in `src/ui/ImageryChip.tsx`'s viewport chip and in `src/imagery/hybrid.ts`, which carries
+  the exact math and the tuning story.
 
   **The OpenStreetMap wiki says MassGIS imagery cannot be redistributed. That warning is about the
   2015 WorldView layer, which carries a DigitalGlobe licence, and not about these state-funded
@@ -100,13 +123,21 @@ non-commercial and share-alike terms both fail here); Google Maps and Google Ear
 Terms §3.2.3(a) bars exporting, scraping, pre-fetching, storing, resharing, rehosting and bulk tile
 download).
 
-**The seasons do not match, and that is disclosed rather than hidden.** The imagery is leaf-off
-March–April 2025; the model's default instant is 15 September 2026, and the sun is computed for that
-date. So the trees in the photograph are bare while the simulated light is September's. It is
-arguably a feature — bare trees mean Weld's fabric is visible from above instead of buried under
-canopy — and `src/ui/ImageryChip.tsx` names the dataset and the capture year in the viewport so a
-viewer can see the discrepancy for themselves. A second leaf-on plate was considered and not taken:
-it doubles the deepest level's budget and adds a second capture date to keep honest.
+**P10 update: the pyramid is leaf-on now, and the discrepancy moved rather than disappeared.** The
+leaf-off/leaf-on mismatch against the model's September default instant, described above in earlier
+revisions of this section, no longer exists — `l2` and `l3` are NAIP, leaf-on, and `l4`'s colour is
+too. What replaced it is disclosed the same way: `l4`'s colour and its detail are two different
+photographs, flown two years apart, and `src/ui/ImageryChip.tsx` names both the colour dataset and
+its capture year in the viewport so a viewer can see the hybrid for themselves rather than assume a
+single photograph.
+
+## 3D massing (P10)
+
+- **Harvard PPM public ArcGIS**, `Facilities3D_Facilities/SceneServer` — the 3D massing the campus is
+  drawn from. Item `d371f09c273e417f907577d92004127b`, public. Untextured: every node's texture is a
+  blank white plate (measured: channel means 251.3/251.3/251.3, stdev 7.8 across six nodes), so the
+  masonry, slate and window openings this project draws on it are DERIVED FROM THE GEOMETRY and are
+  not photographed. src/scene/CampusMesh.tsx carries the derivation.
 
 ## What no source supplied
 

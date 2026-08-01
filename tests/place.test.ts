@@ -448,28 +448,39 @@ describe("the geometry and state layers stay three-free", () => {
   };
 
   /**
-   * The two P9 modules under src/scene that are held to the same rule.
+   * The individually-named modules outside src/geo and src/state that are held to the same rule.
    *
-   * src/scene is where the renderer lives, so it cannot be swept wholesale. But altitude.ts
-   * and globeRig.ts are declared three-free in their own headers for the same reason walk.ts
-   * and route.ts are -- they are the pure maths of the descent, they are unit-tested in plain
-   * node, and altitude.ts is what a script would import to ask what is visible at a given
-   * height. A `import * as THREE` added to either for one Vector3 would be invisible to tsc
-   * and would break those callers at runtime, which is exactly the failure this whole
-   * describe block exists to catch. Named individually rather than by directory because the
-   * rest of src/scene is legitimately full of three.
+   * src/scene is where the renderer lives, so it cannot be swept wholesale. But altitude.ts,
+   * globeRig.ts and i3s.ts are declared three-free in their own headers for the same reason
+   * walk.ts and route.ts are -- they are pure maths (of the descent, and of the I3S byte
+   * layout respectively), they are unit-tested in plain node, and altitude.ts is what a script
+   * would import to ask what is visible at a given height, the same way scripts/fetch-buildings.mjs
+   * imports i3s.ts directly. src/imagery/hybrid.ts carries the identical claim for the same
+   * reason -- scripts/fetch-imagery.mjs imports it directly -- so it is named here too even
+   * though it sits outside src/scene entirely. A `import * as THREE` added to any of these for
+   * one Vector3 would be invisible to tsc and would break those callers at runtime, which is
+   * exactly the failure this whole describe block exists to catch. Named individually rather
+   * than by directory because the rest of src/scene is legitimately full of three.
    */
-  const PURE_SCENE = ["altitude.ts", "globeRig.ts", "journey.ts"].map((f) => join(SRC, "scene", f));
+  const PURE_MODULES = [
+    join(SRC, "scene", "altitude.ts"),
+    join(SRC, "scene", "globeRig.ts"),
+    // journey.ts is p10-ux/p10-fidelity's: the descent projected onto one parameter, pure maths,
+    // imported by scripts/p10-measure.mjs the same way i3s.ts is imported by fetch-buildings.mjs.
+    join(SRC, "scene", "journey.ts"),
+    join(SRC, "scene", "i3s.ts"),
+    join(SRC, "imagery", "hybrid.ts"),
+  ];
 
-  const layers = [...sources(join(SRC, "geo")), ...sources(join(SRC, "state")), ...PURE_SCENE];
+  const layers = [...sources(join(SRC, "geo")), ...sources(join(SRC, "state")), ...PURE_MODULES];
 
   it("has found the modules it is meant to be walking", () => {
     expect(layers.length).toBeGreaterThan(8);
     expect(layers).toContain(join(SRC, "geo", "place.ts"));
     expect(layers).toContain(join(SRC, "state", "url.ts"));
-    // The P9 pair really is on the list and really is on disk, so a rename cannot quietly
+    // Each named module really is on the list and really is on disk, so a rename cannot quietly
     // drop it from the sweep.
-    for (const f of PURE_SCENE) {
+    for (const f of PURE_MODULES) {
       expect(layers).toContain(f);
       expect(existsSync(f), `${f} is missing`).toBe(true);
     }

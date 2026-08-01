@@ -72,6 +72,27 @@ const SLATE = scale(mix(DAY.edge, DAY.sky, 0.5), 0.14);
 const HARDWARE = scale(DAY.edge, 0.65);
 
 /**
+ * Weld's sandstone belts, per weld.json `wall_material` -- "brick with light sandstone belts".
+ * One documented operation on two DAY tokens, the same way BRICK and SLATE are derived: plaster
+ * warmed a third of the way toward oak, which is the pale buff a dressed sandstone course reads as
+ * in daylight.
+ */
+const SANDSTONE = mix(DAY.plaster, DAY.oak, 0.3);
+
+/**
+ * The granite water table at the base of a Yard building. `edge` is the palette's only mineral
+ * grey and 0.55 of its linear value is the cold dark a granite plinth reads as in shade.
+ */
+const GRANITE = scale(DAY.edge, 0.55);
+
+/**
+ * The exterior masonry palette, exported so CampusMesh.tsx and WeldExterior.tsx cannot disagree
+ * about what brick is. P10: before this existed the campus had no materials at all, so the question
+ * could not come up; it can now.
+ */
+export const MASONRY = { brick: BRICK, slate: SLATE, sandstone: SANDSTONE, granite: GRANITE } as const;
+
+/**
  * Nominal oak board width, ft.
  *
  * No source in the project gives one: not weld.json, not the 1875 specification,

@@ -1,6 +1,4 @@
 import * as THREE from "three";
-// three-stdlib exports the older name; three's own copy calls it mergeGeometries.
-import { mergeBufferGeometries } from "three-stdlib";
 import campus from "@/data/campus.json";
 import { normalizeRing } from "@/geo/extrude";
 import { extrudedGeometry } from "./geometry";
@@ -16,11 +14,17 @@ export const WELD_NAME = "Weld Hall";
  * Weld is deliberately EXCLUDED from the merge. Merging costs the ability to
  * address a single building, and Weld has to be highlighted, so it is worth one
  * extra draw call to keep it separately styleable.
+ *
+ * P10 RETIRED THE MERGED MASS. `others` -- the box-extruded fill for every building but Weld --
+ * and `otherEdges`, its wireframe, stood in for buildings this project had no real geometry for.
+ * CampusMesh.tsx now draws Harvard's own building meshes, classified and coloured, so the box
+ * stand-in has nothing left to stand in for. Both are trimmed below. `weld` and `weldEdges` stay:
+ * Weld's own box is unused by Campus.tsx today (its mass fill is retired too, in favour of the
+ * white outline), but it is what this function's `!weld` guard cross-checks campus.json against,
+ * and `weldEdges` is still Campus.tsx's highlight.
  */
 export function buildCampusGeometry(): {
-  others: THREE.BufferGeometry;
   weld: THREE.BufferGeometry;
-  otherEdges: THREE.BufferGeometry;
   weldEdges: THREE.BufferGeometry;
   counts: { buildings: number; merged: number };
 } {
@@ -34,13 +38,8 @@ export function buildCampusGeometry(): {
   }
   if (!weld) throw new Error("campus.json has no Weld Hall");
 
-  const merged = mergeBufferGeometries(others, false);
-  if (!merged) throw new Error("mergeBufferGeometries returned null");
-
   return {
-    others: merged,
     weld,
-    otherEdges: buildEdgeGeometry(campus.buildings.filter((b) => b.name !== WELD_NAME)),
     weldEdges: buildEdgeGeometry(campus.buildings.filter((b) => b.name === WELD_NAME)),
     counts: { buildings: campus.buildings.length, merged: others.length },
   };

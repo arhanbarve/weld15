@@ -374,12 +374,26 @@ export function WeldExterior({
   params,
   towers = TOWER_DEFAULTS,
   cutaway,
+  palette,
 }: {
   visible: boolean;
   opacity: number;
   params?: SuiteParams;
   towers?: TowerParams;
   cutaway?: CutawayMode;
+  /**
+   * How far across the scan-to-masonry seam the shell is, 0..1, INDEPENDENT OF THE DISSOLVE.
+   *
+   * P10 split this from `opacity`. It used to be `1 - opacity` outright, which tied "is Weld brick
+   * yet" to "is Weld fading yet" and meant the building could not be brick while it was still
+   * solid -- so it stayed cyanotype through the whole of stages 2 and 3 and only crossed during
+   * stage 4's slider. Once CampusMesh.tsx stood real brick neighbours around it at stage 2, Weld
+   * was the one blue building on a street of red ones.
+   *
+   * Defaulted to `1 - opacity` so the old behaviour is what a call site that does not pass it
+   * still gets, which keeps every existing test of this component honest.
+   */
+  palette?: number;
 }) {
   const reduced = useStore((s) => s.reducedMotion);
   const storeParams = useStore((s) => s.params);
@@ -459,7 +473,23 @@ export function WeldExterior({
    */
   const shell = reduced ? (1 - opacity < REDUCED_CUT ? 1 : 0) : opacity;
 
-  const pal = useShellPalette(shell, progress, reduced);
+  /**
+   * MERGE NOTE (P10 integration). `shell` keeps p10-ux's `1 - opacity` and not p10-imagery's
+   * `progress`: the paragraph above IS the argument for it, and that argument only became true
+   * once `progress` stopped meaning the threshold and started meaning an altitude. p10-imagery
+   * branched before that, so its line was the same line under the older assumption. This is the
+   * one that holds under both.
+   *
+   * `seam` is p10-imagery's, and where a palette is supplied it wins over the altitude ramp.
+   * Experience.tsx passes 1 from stage 2, which is where this shell is first mounted, so Weld is
+   * masonry at every stage it is actually visible at rather than being the one blue building in a
+   * Yard whose neighbours have already crossed -- CampusMesh crosses on layerOpacity().massing,
+   * which is over well above stage 2's 815 ft. The ramp stays as the fallback, and it still
+   * drives <Threshold> below, which is the stage-4 dissolve and a different quantity.
+   */
+  const seam = palette ?? progress;
+
+  const pal = useShellPalette(shell, seam, reduced);
 
   if (shell <= 0.001) return null;
 
