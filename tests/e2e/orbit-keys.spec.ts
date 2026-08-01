@@ -257,10 +257,33 @@ test("orbit-live announces once, throttled, after a burst of key presses", async
   const midHits = await page.evaluate(() => (window as unknown as { __liveHits: string[] }).__liveHits.length);
   expect(midHits, "announced before the burst settled").toBe(0);
 
-  // Now past ANNOUNCE_MS since the last press.
-  await page.waitForTimeout(400);
+  /*
+   * Now past ANNOUNCE_MS since the last press -- POLLED for the arrival rather than waited out on
+   * a flat 400 ms, and then held still to prove it stayed at exactly one.
+   *
+   * MERGE NOTE (P10 integration). The flat wait gave 200 ms of margin over ANNOUNCE_MS and it
+   * failed on the merged build while passing on `p10-ux` alone. Measured against a dev server, the
+   * announcement is correct and singular -- one hit, "Azimuth 167 degrees, polar 74 degrees, 251
+   * feet out." against an opening reading of 142 -- it simply lands after 600 ms rather than
+   * inside it. The merged scene is heavier than any one branch's (CampusMesh's real Harvard
+   * geometry, the rebuilt interior and the dock, all at once), so the re-render that follows the
+   * timeout costs more wall clock under SwiftShader than it did on the branch this was written on.
+   *
+   * BOTH HALVES OF THE CLAIM SURVIVE, and that is the reason this is a widened window rather than
+   * a weakened gate. Silent during the burst is still asserted on its own tight 200 ms window
+   * above. Exactly one afterwards is asserted below -- polling for the arrival and then settling
+   * for longer than the throttle before counting, so a handler that spoke twice still fails.
+   */
+  await expect
+    .poll(
+      async () =>
+        (await page.evaluate(() => (window as unknown as { __liveHits: string[] }).__liveHits)).length,
+      { timeout: 10_000, message: "the throttled announcement never arrived" },
+    )
+    .toBeGreaterThan(0);
+  await page.waitForTimeout(800);
   const hits = await page.evaluate(() => (window as unknown as { __liveHits: string[] }).__liveHits);
-  expect(hits.length, `announced ${hits.length} times, want exactly one`).toBe(1);
+  expect(hits.length, `announced ${hits.length} times, want exactly one: ${JSON.stringify(hits)}`).toBe(1);
 });
 
 test("the six retired orbit-* buttons are absent from the DOM at every stage", async ({ page }) => {

@@ -55,15 +55,43 @@ test("dragging at stage 4 changes the camera position", async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
-/** Scrubs the master slider to t = 1 and waits for the eased position to settle. */
+/**
+ * Scrubs stage 4 past its funnel and waits for the eased position to settle.
+ *
+ * MERGE NOTE (P10 integration), and it changes the target as well as the control.
+ *
+ * THE CONTROL. This drove `threshold-t`, the per-stage slider stage 4 used to carry. `p10-ux`
+ * folded every per-stage scrubber into one master bar -- `journey`, which carries `u` across the
+ * whole descent rather than a per-stage `t` -- so that testid no longer exists and this helper
+ * timed out waiting for it. The conversion goes through `window.__journey` (JourneyBar.tsx's own
+ * probe), exactly as threshold.spec.ts's `statsAt()` does, rather than through a second copy of
+ * journey.ts's mapping, and is floored onto the slider's own 0.0005 step for the reason that
+ * spec records (fill() rejects a value off the step).
+ *
+ * THE TARGET, AND WHY IT IS NO LONGER t = 1. Stage 4 at t = 1 and stage 5 at t = 0 are the same
+ * point of the journey, and fromJourney() resolves that point to STAGE 5 (journey.ts's `x >= 1`
+ * branch). Asking the master bar for stage 4's t = 1 therefore lands on stage 5, where the walker
+ * -- seeded on every arrival since p10-walk-in -- owns the camera, and the funnel identity this
+ * test exists to prove is not what would be under test any more.
+ *
+ * SO IT ASKS FOR t = 0.9, AND THE PROPERTY IS UNCHANGED, because funnel() is not a ramp to 1 at
+ * t = 1: stages.ts clamps it to exactly 1 for every t >= SHELL_GONE = 0.7. Above that threshold
+ * stage4Pose() ignores the held orbit entirely and returns the path pose, so the dragged and
+ * undragged runs must agree at 0.9 for precisely the same reason they had to agree at 1.0, and
+ * 0.9 has the margin over 0.7 that 1.0 has over the stage boundary.
+ */
+const CROSSING_T = 0.9;
+
 async function scrubToCrossingAndSettle(page: Page): Promise<Cam> {
-  const slider = page.getByTestId("threshold-t").first();
-  await slider.evaluate((el: HTMLInputElement) => {
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
-    setter.call(el, "1");
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-    el.dispatchEvent(new Event("change", { bubbles: true }));
-  });
+  const slider = page.getByTestId("journey");
+  const u = await page.evaluate((tt) => {
+    const j = (window as unknown as { __journey: { boundaries: number[]; spans: number[]; total: number } })
+      .__journey;
+    const raw = j.boundaries[4]! + (tt * j.spans[4]!) / j.total;
+    return Math.floor(raw / 0.0005) * 0.0005;
+  }, CROSSING_T);
+  await slider.fill(String(u));
+  await slider.dispatchEvent("input");
   // The exponential ease needs real settle time, not one frame -- 1 - exp(-delta * 3.2)
   // converges gradually rather than snapping, so this waits several seconds under
   // SwiftShader rather than the ~1.4 s other specs use for a plain stage change.
@@ -71,17 +99,19 @@ async function scrubToCrossingAndSettle(page: Page): Promise<Cam> {
   return cam(page);
 }
 
-test("scrubbing to t = 1 after a drag still lands at the undragged crossing", async ({ page }) => {
+test("scrubbing past the funnel after a drag still lands at the undragged crossing", async ({ page }) => {
   // The regression fence's real-browser counterpart: stage4Pose's funnel(t) = 1
-  // identity at SHELL_GONE means the dragged pose and the undragged one must
-  // converge to the SAME position at t = 1, however far apart they started at
-  // t = 0. BOTH sides of the comparison must be taken AT t = 1 -- comparing a
-  // dragged t = 1 pose against an undragged t = 0 one is a different bug this
-  // spec's first draft made, and it fails for a reason that has nothing to do
-  // with the funnel: kf[4] (t = 0) and kf[5] (t = 1) are simply different poses.
+  // identity above SHELL_GONE means the dragged pose and the undragged one must
+  // converge to the SAME position there, however far apart they started at t = 0.
+  // BOTH sides of the comparison must be taken at the SAME t -- comparing a dragged
+  // late pose against an undragged t = 0 one is a different bug this spec's first
+  // draft made, and it fails for a reason that has nothing to do with the funnel:
+  // kf[4] (t = 0) and the crossing are simply different poses. See
+  // scrubToCrossingAndSettle's header for why that shared t is 0.9 and not 1.
   await atStage4(page);
   const undragged = await scrubToCrossingAndSettle(page);
-  expect(undragged.t).toBe(1);
+  expect(undragged.stage, "the scrub must stay on stage 4, not tip into 5").toBe(4);
+  expect(undragged.t).toBeGreaterThanOrEqual(0.7);
 
   await page.getByTestId("stage-4").click(); // back to t = 0, fresh
   await page.waitForTimeout(1000);
@@ -98,7 +128,8 @@ test("scrubbing to t = 1 after a drag still lands at the undragged crossing", as
   expect(preMove).toBeGreaterThan(20);
 
   const settled = await scrubToCrossingAndSettle(page);
-  expect(settled.t).toBe(1);
+  expect(settled.stage).toBe(4);
+  expect(settled.t).toBeCloseTo(undragged.t, 6);
   const residual = Math.hypot(
     settled.position[0] - undragged.position[0],
     settled.position[1] - undragged.position[1],
