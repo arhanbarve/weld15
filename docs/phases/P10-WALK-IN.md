@@ -508,7 +508,9 @@ inside a Playwright test, gets the real geometry for free. Both files stay untra
    nothing else.
 6. **Console errors across the whole run: zero.**
 
-Screenshots are `verify-run/01-arrival.png` through `06-final.png`. `02-look-down.png` shows
+Screenshots are `verify-run/walk-in/01-arrival.png` through `06-final.png` (moved from the
+branch worktree's own `verify-run/` at the P10 merge, and into a subdirectory because three
+other branches wrote a `verify-run/` too). `02-look-down.png` shows
 floorboards filling the frame; `03-look-up.png` shows the ceiling; `04-in-bedroom-a.png` shows two
 beds and the room label, reached without a button.
 
