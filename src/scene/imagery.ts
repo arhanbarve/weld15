@@ -181,3 +181,57 @@ export function loadTexture(
     texture?.dispose();
   };
 }
+
+type SharedEntry = {
+  texture: THREE.Texture | null;
+  refs: number;
+  waiters: Set<(t: THREE.Texture) => void>;
+  disposer: () => void;
+};
+
+const sharedCache = new Map<string, SharedEntry>();
+
+/**
+ * One THREE.Texture per level per process, reference counted.
+ *
+ * Ground's Q4 quad and Campus's roof skin both want L4, and two loadTexture() calls means two
+ * GPU uploads of the same 640 KB plate -- the browser caches the FETCH, not the upload.
+ * `loadTexture` itself stays untouched; this is a thin cache over it, keyed on the level id, so
+ * the AVIF -> WebP fallback and the colorSpace/anisotropy/ClampToEdge handling are not
+ * duplicated. Counted rather than leaked: a level whose last consumer unmounts is disposed via
+ * the same `loadTexture` disposer, not held onto.
+ *
+ * A caller whose texture has already arrived is called back synchronously, matching
+ * `loadTexture`'s own semantics for a cache hit; a caller that is first pays for the load and
+ * every later caller for the same id waits on the same promise-free callback queue.
+ */
+export function sharedTexture(id: string, onReady: (t: THREE.Texture) => void): () => void {
+  let entry = sharedCache.get(id);
+  if (!entry) {
+    entry = { texture: null, refs: 0, waiters: new Set(), disposer: () => {} };
+    sharedCache.set(id, entry);
+    const fresh = entry;
+    fresh.disposer = loadTexture(levelUrls(id), (t) => {
+      fresh.texture = t;
+      for (const w of fresh.waiters) w(t);
+      fresh.waiters.clear();
+    });
+  }
+
+  entry.refs++;
+  if (entry.texture) onReady(entry.texture);
+  else entry.waiters.add(onReady);
+
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const e = entry!;
+    e.waiters.delete(onReady);
+    e.refs--;
+    if (e.refs <= 0) {
+      e.disposer();
+      if (sharedCache.get(id) === e) sharedCache.delete(id);
+    }
+  };
+}

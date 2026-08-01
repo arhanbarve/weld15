@@ -5,7 +5,8 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { Line, Html } from "@react-three/drei";
 import * as THREE from "three";
 import { buildCampusGeometry } from "./campusGeometry";
-import { layerOpacity } from "./altitude";
+import { attachAerialSkin, aerialUniforms } from "./aerial";
+import { quadOf, sharedTexture } from "./imagery";
 import { useStore } from "@/state/store";
 import weld from "@/data/weld.json";
 
@@ -34,76 +35,62 @@ const WELD_WIDTH = 2.2;
 const CONTRAST_WIDTH = 2.5;
 
 /**
- * The mass fill, and MASTER.md's other high-contrast value: `--mass` opacity to 0.22.
+ * The buildings are solid now, not a translucent ramp.
  *
- * 0.12 rather than the --mass token's own 0.10 because these are meshes lit by
- * Lighting.tsx rather than a flat CSS fill, and 0.12 is what P3 settled on for the
- * translucent Prussian blocks. 0.22 is MASTER's figure, and it is applied to the fill and
- * as a FLOOR under Weld's pulse -- the pulse runs 0.20 to 0.34, so its trough would
- * otherwise be the one part of the frame high contrast made no denser.
+ * THROUGH P9, this file carried an 80-line opacity ramp -- MASS_OPACITY, CONTRAST_MASS,
+ * MASS_CEILING, HIGH_CONTRAST_GAIN and the massAt() function deriving a fill capped at 0.34,
+ * because P9.md section 6.9 asked for full occlusion of the photographed roof underneath and
+ * blending math meant getting there needed alpha above 0.81 -- past the point a translucent
+ * cyanotype block still reads as one. So it shipped a documented partial and a test
+ * (tests/labels.test.ts) that asserted the ceiling stayed under 0.5, guarding against someone
+ * "finishing" the occlusion by raising a number.
+ *
+ * P10 finishes it a different way. The masses are opaque MeshStandardMaterials with their own
+ * default depthWrite, so a roof is genuinely hidden by the building standing over it rather than
+ * partially seen through it -- which is what section 6.9 asked for and an opacity ramp capped
+ * short of "solid" could not deliver. aerial.ts's `attachAerialSkin` puts the photograph back on
+ * top, so what an opaque building loses (the ground drawing showing through) it gets back as its
+ * own roof.
+ *
+ * THE RANGE, MEASURED RATHER THAN CARRIED OVER FROM THE OLD OPACITY PULSE. A first pass kept the
+ * dissolve-era numbers verbatim -- lo 1.0, hi 1.55 -- on the assumption that an emissive intensity
+ * and an opacity fraction are interchangeable units. They are not: opacity blends toward the
+ * background, capped at 1, while emissive ADDS to the lit, textured colour underneath with no
+ * such cap, and `edgeHi` is pure white. At lo 1.0 every one of Weld's photographed-roof pixels
+ * blew straight to (1,1,1) -- a solid white block, screenshotted and caught rather than inferred --
+ * which erased the one thing this step exists to put on Weld's mass: its own photographed roof.
+ *
+ * 0.1-0.35 IS THE SECOND MEASUREMENT, NOT THE FIRST. 0.15-0.45 fixed the blowout -- the roof's
+ * texture stayed legible at both ends, confirmed by screenshot -- but it moved the amplitude
+ * that had been swept away with the opacity ramp: `emissiveIntensity` at that range still lifts
+ * enough of the photographed roof's own near-white pixels to make the pulse's PHASE, not just
+ * its presence, show up in pixel-counting gates. Two of them do: contrast.spec.ts's white-pixel
+ * ratio at stage 2 read as low as 1.023 across repeated full-suite runs against a bound written
+ * for a tighter signal, and campus.spec.ts's stage 1 vs stage 2 comparison failed outright once
+ * at 959 against a required 1,097. Both gates already take a median of several samples for
+ * exactly this class of noise (Weld's mass pulses continuously); 0.1-0.35 is the amplitude
+ * measured to keep both stable across repeated runs while the highlight stays visible -- three
+ * runs of contrast.spec.ts's own ratio at 1.130, 1.104, 1.106, and campus.spec.ts's stage 2 count
+ * at 1,305 and 1,328 against stage 1's steady 299.
  */
-const MASS_OPACITY = 0.12;
-const CONTRAST_MASS = 0.22;
+const WELD_PULSE = { lo: 0.1, hi: 0.35, reduced: 0.22 } as const;
 
 /**
- * The ramp the mass fill climbs as the camera descends, and where its two ends come from.
- *
- * MERGE NOTE, because this reconciles two changes that landed independently. The high-contrast work
- * above set a FLAT fill: MASS_OPACITY normally, CONTRAST_MASS under the toggle. P9 put a photograph
- * under these buildings and needed the fill to climb with altitude. Both survive: the flat pair is
- * the FLOOR of the ramp, and the ramp is what happens below 40,000 ft.
- *
- * WHY THERE IS A RAMP AT ALL. At the flat 0.12 the mass barely touches the image beneath it.
- * Measured at stage 2, luminance standard deviation inside an 80 x 60 patch:
- *
- *   open ground, no building over it        sd 29.51   mean  91.6
- *   a library's roof, under 0.12 of mass    sd 28.88   mean 100.1
- *
- * Two per cent of the photograph's texture removed. So each footprint was marked only by its edges
- * and the roof inside it was still the photograph, which is the doubled image decision 9 asked to
- * get rid of.
- *
- * WHY THE CEILING IS 0.34 AND NOT THE 0.81 THAT WOULD ACTUALLY HIDE IT. Blending is linear, so the
- * residual texture is (1 - alpha) times the photograph's, and getting sd under 6 -- flat enough to
- * call hidden -- needs alpha above 0.81. A campus at 0.81 is not a cyanotype; it is solid blue
- * blocks, and translucent massing over line work is the whole of the SCAN palette. So this is a
- * deliberate partial: 0.34 cuts the residual by a quarter, enough that a footprint reads as
- * occupied rather than as a rectangle drawn on a photograph. P9.md section 6.9 asked for full
- * occlusion and it is not achievable without losing the look; that is recorded rather than quietly
- * not done, and tests/labels.test.ts asserts MASS_CEILING < 0.5 so nobody "finishes" it by accident.
- *
- * THE HIGH-CONTRAST GAIN IS DERIVED, NOT WRITTEN DOWN. CONTRAST_MASS / MASS_OPACITY is 1.833, and
- * using that ratio rather than a third literal is what keeps the floor at MASTER's 0.22 exactly --
- * which is the figure tests/e2e/contrast.spec.ts asserts through the window.__campus probe below.
- * An earlier version of this ramp carried its own gain of 2.2, derived from the --mass TOKEN's 0.10
- * rather than from the 0.12 this file actually draws, and it would have put the high-contrast floor
- * at 0.264 and failed that gate.
+ * The plate the roof skin samples, and its extent: L4, the same 1,600 x 1,600 ft plate
+ * Ground.tsx's own innermost quad draws, so the two can share one THREE.Texture through
+ * imagery.ts's sharedTexture(). See aerial.ts's header for the margin measurement and the UV
+ * sign convention.
  */
-const MASS_CEILING = 0.34;
-const HIGH_CONTRAST_GAIN = CONTRAST_MASS / MASS_OPACITY;
+const L4 = quadOf("L4")!;
+const AERIAL_EXTENT = {
+  minX: L4.cx - L4.width / 2,
+  minY: L4.cy - L4.height / 2,
+  width: L4.width,
+  height: L4.height,
+};
 
 /**
- * How much denser Weld's pulse is than the rest of the campus.
- *
- * A MULTIPLIER ON THE RAMP rather than an absolute range, which is the change the ramp forces. The
- * pulse used to run 0.20 to 0.34 against a flat 0.12, with `Math.max(mass, ...)` flooring it under
- * high contrast. Once the rest of the campus also reaches 0.34, an absolute pulse at 0.34 makes the
- * highlighted building identical to its neighbours at exactly the stage it most needs to stand out.
- * As a multiple it stays ahead at every altitude, and the high-contrast floor comes for free because
- * the gain is already inside the base it multiplies.
- */
-const WELD_PULSE = { lo: 1.0, hi: 1.55, reduced: 1.4 } as const;
-
-/** The mass fill at an altitude. Pure, so the ramp is asserted without a renderer. */
-function massAt(alt: number, highContrast: boolean): number {
-  const floor = highContrast ? CONTRAST_MASS : MASS_OPACITY;
-  const ceiling = MASS_CEILING * (highContrast ? HIGH_CONTRAST_GAIN : 1);
-  return floor + (ceiling - floor) * layerOpacity(alt).massing;
-}
-
-
-/**
- * The campus as a cyanotype: white line work over translucent Prussian masses.
+ * The campus: white line work over solid, photographed massing.
  *
  * Two things here are not cosmetic.
  *
@@ -114,7 +101,8 @@ function massAt(alt: number, highContrast: boolean): number {
  * is thin lines on dark.
  *
  * Weld's highlight: three signals, never hue alone. Brighter and wider edges, a
- * slow opacity pulse, and a DOM label chip on a solid ground.
+ * slow emissive pulse (opacity through P9, moved since the buildings became opaque),
+ * and a DOM label chip on a solid ground.
  */
 export function Campus({ visible, highlightWeld }: { visible: boolean; highlightWeld: boolean }) {
   const dpr = useThree((s) => s.viewport.dpr);
@@ -139,26 +127,50 @@ export function Campus({ visible, highlightWeld }: { visible: boolean; highlight
   const boost = high ? CONTRAST_WIDTH / BASE_WIDTH : 1;
   const baseWidth = BASE_WIDTH * boost * scale;
   const weldWidth = WELD_WIDTH * boost * scale;
-  const mass = high ? CONTRAST_MASS : MASS_OPACITY;
 
-useFrame(({ clock, camera }) => {
-    // ONE PLACE READS THE ALTITUDE, and both materials come off it, so the campus can never be
-    // half-ramped. camera.position.y IS the altitude by definition -- altitude.ts's header sets
-    // that out -- and CameraRig has already placed the camera for this frame.
-    const base = massAt(camera.position.y, high);
-    if (otherMass.current) otherMass.current.opacity = base;
+  // One AerialUniforms object per material: both want the same L4 plate and the same wall tone,
+  // but each is its own uniform set because attachAerialSkin binds them by reference into the
+  // material's own compiled shader. `useMemo` rather than a ref so the extent -- fixed at import
+  // time from the manifest -- is only ever computed once per material's lifetime.
+  const otherAerial = useMemo(() => aerialUniforms(SCAN.mass, AERIAL_EXTENT), []);
+  const weldAerial = useMemo(() => aerialUniforms(SCAN.mass, AERIAL_EXTENT), []);
+
+  // The one THREE.Texture for L4, shared with Ground.tsx's own Q4 quad rather than uploaded a
+  // second time -- imagery.ts's sharedTexture() and aerial.ts's header both carry the reason.
+  useEffect(
+    () =>
+      sharedTexture("L4", (t) => {
+        otherAerial.uAerial.value = t;
+        weldAerial.uAerial.value = t;
+      }),
+    [otherAerial, weldAerial],
+  );
+
+  // Attached once, on mount: onBeforeCompile is set on the material object itself and the
+  // uniforms it captures are updated by mutating their `.value` fields (the texture arriving,
+  // above), never by re-attaching.
+  useEffect(() => {
+    if (otherMass.current) attachAerialSkin(otherMass.current, otherAerial);
+  }, [otherAerial]);
+  useEffect(() => {
+    if (weldMass.current) attachAerialSkin(weldMass.current, weldAerial);
+  }, [weldAerial]);
+
+  useFrame(({ clock }) => {
+    // Weld's highlight, since P10 an emissive glow rather than a denser fill -- the building is
+    // opaque now, so there is no alpha left for a pulse to ramp. Same WELD_PULSE range and the
+    // same 1.6 rad/s; `emissive` is SCAN.edgeHi, the same white Weld's line work already
+    // highlights in, so the third non-hue signal reads as "this building" rather than as a new
+    // colour of its own.
     if (!weldMass.current) return;
     if (!highlightWeld) {
-      weldMass.current.opacity = base;
+      weldMass.current.emissiveIntensity = 0;
       return;
     }
-    // Reduced motion holds the pulse at a fixed multiple instead of animating. No Math.max floor is
-    // needed any more: the high-contrast gain is already inside `base`, so the trough rises with it,
-    // which is what the old `Math.max(mass, ...)` was there to guarantee.
     const k = reduced
       ? WELD_PULSE.reduced
       : WELD_PULSE.lo + (WELD_PULSE.hi - WELD_PULSE.lo) * (0.5 + 0.5 * Math.sin(clock.elapsedTime * 1.6));
-    weldMass.current.opacity = Math.min(1, base * k);
+    weldMass.current.emissiveIntensity = k;
   });
 
   /**
@@ -166,36 +178,35 @@ useFrame(({ clock, camera }) => {
    *
    * Same device as CameraRig's window.__cam, Perf's window.__perf and DragLayer's
    * window.__drag, and for the same reason those exist: what MASTER.md specifies here is a
-   * line width and a fill opacity inside a WebGL frame, and there is no DOM to read them
-   * off. A pixel measurement can show the strokes got thicker -- tests/e2e/contrast.spec.ts
-   * does that too -- but it cannot show they are 2.5 CSS px rather than 2.3, because a
-   * bloom pass spreads every bright pixel and the checklist records that limit. This
-   * publishes the number that was actually handed to <Line>, so the gate can assert
-   * MASTER's figure exactly, and at DPR 2 as well.
+   * line width inside a WebGL frame, and there is no DOM to read it off. A pixel measurement can
+   * show the strokes got thicker -- tests/e2e/contrast.spec.ts does that too -- but it cannot
+   * show they are 2.5 CSS px rather than 2.3, because a bloom pass spreads every bright pixel and
+   * the checklist records that limit. This publishes the number that was actually handed to
+   * <Line>, so the gate can assert MASTER's figure exactly, and at DPR 2 as well.
+   *
+   * `massOpacity`/`massCeiling` are gone with the ramp they described. `weldEmissive` replaces
+   * them as the third non-hue signal's own figures -- the WELD_PULSE range and rate the frame
+   * loop above actually writes to the material, so a gate can assert the pulse without sampling
+   * a bloom-spread pixel for it.
    *
    * An effect rather than an assignment in the body, so it does not run during render and
    * so it cleans up: a stale probe left behind by an unmounted campus is a gate reading a
    * number nothing is drawing.
    */
   useEffect(() => {
-    // `massOpacity` stays the DESIGN-SYSTEM figure -- MASTER's 0.12 / 0.22 -- because that is what
-    // contrast.spec.ts asserts, and it is still literally what is drawn at the top of the ramp where
-    // the massing band is zero. `massCeiling` is added so the probe is not misleading now that the
-    // fill climbs: below 40,000 ft what reaches the GPU is between the two.
     const probe = {
       highContrast: high,
       dpr,
       lineWidth: baseWidth,
       weldLineWidth: weldWidth,
-      massOpacity: mass,
-      massCeiling: MASS_CEILING * (high ? HIGH_CONTRAST_GAIN : 1),
+      weldEmissive: WELD_PULSE,
     };
     const w = window as unknown as { __campus?: typeof probe };
     w.__campus = probe;
     return () => {
       if (w.__campus === probe) delete w.__campus;
     };
-  }, [high, dpr, baseWidth, weldWidth, mass]);
+  }, [high, dpr, baseWidth, weldWidth]);
 
   const label = useMemo(() => {
     const half = weld.meta.length_ft / 2;
@@ -209,28 +220,22 @@ useFrame(({ clock, camera }) => {
 
   return (
     <group visible={visible}>
-      {/* masses: 35 buildings in one draw call, Weld separate so it stays styleable */}
+      {/* masses: 35 buildings in one draw call, Weld separate so it stays styleable. Opaque,
+          default depthWrite, and roughness/metalness for a matte photographed roof rather than
+          the flat-lit translucent block P9 drew -- attachAerialSkin puts the photograph on top,
+          in the effect above. */}
       <mesh geometry={geo.others}>
-        <meshStandardMaterial
-          ref={otherMass}
-          color={SCAN.mass}
-          roughness={1}
-          metalness={0}
-          transparent
-          // The initial value only; the frame loop writes it from the altitude every frame.
-          opacity={mass}
-          depthWrite={false}
-        />
+        <meshStandardMaterial ref={otherMass} color={SCAN.mass} roughness={0.85} metalness={0} />
       </mesh>
       <mesh geometry={geo.weld}>
         <meshStandardMaterial
           ref={weldMass}
           color={SCAN.mass}
-          roughness={1}
+          roughness={0.85}
           metalness={0}
-          transparent
-          opacity={mass}
-          depthWrite={false}
+          emissive={SCAN.edgeHi}
+          // The initial value only; the frame loop writes it from the pulse every frame.
+          emissiveIntensity={0}
         />
       </mesh>
 
@@ -260,9 +265,6 @@ useFrame(({ clock, camera }) => {
     </group>
   );
 }
-
-/** Exported for tests: the ramp is a pure function and is asserted without a renderer. */
-export { massAt, MASS_OPACITY, CONTRAST_MASS, MASS_CEILING, HIGH_CONTRAST_GAIN };
 
 /** LineSegmentsGeometry wants point pairs; our buffer is a flat position list. */
 function toPointPairs(g: THREE.BufferGeometry): [number, number, number][] {

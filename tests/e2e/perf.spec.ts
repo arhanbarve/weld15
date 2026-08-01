@@ -203,8 +203,21 @@ test("the composer is the whole difference between the frame and the budget", as
    * with it, the difference is named and pinned, so a change that quietly adds a scene
    * submission cannot hide inside the composer's share.
    *
-   * Two stages, not one: stage 2 is the campus at its heaviest and stage 5 is the suite
+   * Two stages, not one: stage 3 is the campus at its heaviest and stage 5 is the suite
    * with the shadow pass running, which are the two rows with the least headroom.
+   *
+   * STAGE 3 RATHER THAN STAGE 2, SINCE P10 STEP 10c. Full motion at stage 2's own default
+   * pose (814.6 ft, stages.ts) sits inside altitude.ts's tint band, so WeldExterior's
+   * `progress` is fractional there and Threshold's sweep mesh mounts -- but only under full
+   * motion: `drawn = !reduced && progress > 0 && progress < 1` drops it under `reduce`
+   * regardless of altitude. That puts a SECOND difference between the full and reduced
+   * contexts at stage 2 (measured: 30 -> 11 calls, a diff of 19, not 17), which is exactly
+   * what this test exists to rule out -- a second submission hiding inside what should be
+   * only the composer's share. Stage 3 sits at 110 ft, under the band's 400 ft floor, so
+   * `progress` is 1 and the sweep is gone in both contexts alike; campus.spec.ts's own note
+   * that "stage 3 reads identically to stage 2" for the campus's own geometry still holds
+   * (both read 11 calls / 16,888 tris under reduced motion, measured), so this substitution
+   * changes nothing about which row it stands in for.
    */
   const viewport = { width: 1280, height: 720 };
 
@@ -215,7 +228,7 @@ test("the composer is the whole difference between the frame and the budget", as
 
   const report: string[] = [];
   try {
-    for (const stage of [2, 5]) {
+    for (const stage of [3, 5]) {
       await openAt(fullPage, stage);
       await openAt(cutPage, stage);
       const a = await settled(fullPage, `stage ${stage} full motion`);

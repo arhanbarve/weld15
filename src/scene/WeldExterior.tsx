@@ -200,6 +200,7 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { type SuiteParams } from "@/geo/rooms";
 import { useStore } from "@/state/store";
+import { layerOpacity } from "./altitude";
 import { type CutawayMode } from "./cutaway";
 import { materials, SCAN } from "./materials";
 import {
@@ -395,7 +396,34 @@ export function WeldExterior({
     };
   }, [geo]);
 
-  const progress = 1 - opacity;
+  /**
+   * How far the palette has resolved from cyanotype into brick: an ALTITUDE ramp since P10,
+   * not the dissolve.
+   *
+   * It read `1 - opacity`, and thresholdOpacity() returns shell: 1 for every stage below 4 --
+   * so progress was 0 for the whole descent and the building was a blue ghost box at stage 3,
+   * which is the complaint P10 exists to answer. The brick, the sandstone belts and the slate
+   * were all in the file and none of them was ever seen before the wall started dissolving.
+   *
+   * layerOpacity(alt).tint is the SAME 40,000 -> 400 ft band the ground resolves on, so the
+   * building and the photograph under it stop being a drawing at the same rate, which is what
+   * makes the descent read as one continuous resolve rather than two effects.
+   *
+   * WHAT THIS COSTS, STATED RATHER THAN HIDDEN. The header above argues for driving the
+   * palette from the dissolve so the payoff is not spent early: "an exterior that lerps from
+   * cyan to brick over the threshold spends the payoff on a dissolve". P10 spends it earlier
+   * on purpose. The threshold now does one thing -- it dissolves the shell -- and the palette
+   * change is the descent's.
+   */
+  const [progress, setProgress] = useState(0);
+  useFrame(({ camera }) => {
+    const want = layerOpacity(camera.position.y).tint;
+    // Quantised to 1/64, because `progress` feeds a useMemo that writes three materials'
+    // uniforms, and a per-frame React state write here is the stall useWeldCut's docblock
+    // records buying a throttle for. 64 steps across the ramp is under a pixel of seam
+    // movement per step at stage 3.
+    if (Math.abs(want - progress) >= 1 / 64) setProgress(want);
+  });
 
   /**
    * Reduced motion is a different regime, not the same one with the animation
@@ -415,8 +443,21 @@ export function WeldExterior({
    * the same crossing. It is kept because the guarantee belongs to the component
    * that owns the mesh: a call site that forgets thresholdOpacity's third argument
    * gets a jump cut anyway instead of a dissolve nobody asked for.
+   *
+   * CORRECTED IN P10: the paragraph above about brick never showing under reduced motion is no
+   * longer true, and that is a fix rather than a regression. `progress`, just above, is now an
+   * altitude ramp rather than this dissolve's own complement, so a reduced-motion viewer who
+   * scrubs the master slider down to stage 3 -- well under 400 ft -- sees brick before the
+   * shell has cut at all. What is suppressed under reduced motion is still exactly what this
+   * paragraph says: the ANIMATED seam travelling down the building. Nothing about that
+   * animation has been reintroduced; the seam's own position (`sweepY`, fed by `progress`) is
+   * just no longer the only thing that can put colour on the wall. The local variable used
+   * for the binarisation below is `1 - opacity` rather than `progress` for exactly this
+   * reason: the two used to be the same number and are not any more, and this line's contract
+   * -- a jump cut at REDUCED_CUT, decided from `opacity` -- must not silently start reading
+   * altitude instead.
    */
-  const shell = reduced ? (progress < REDUCED_CUT ? 1 : 0) : opacity;
+  const shell = reduced ? (1 - opacity < REDUCED_CUT ? 1 : 0) : opacity;
 
   const pal = useShellPalette(shell, progress, reduced);
 

@@ -39,8 +39,8 @@ async function perf(page: Page): Promise<Perf> {
   return page.evaluate(() => (window as unknown as { __perf: Perf }).__perf);
 }
 
-/** Count pixels that are near-white, which is what Weld's highlighted edges are. */
-async function whitePixels(page: Page): Promise<number> {
+/** One frame's near-white pixel count. */
+async function whitePixelsOnce(page: Page): Promise<number> {
   return page.locator("canvas").evaluate((el) => {
     const src = el as HTMLCanvasElement;
     const off = document.createElement("canvas");
@@ -84,6 +84,26 @@ async function whitePixels(page: Page): Promise<number> {
   });
 }
 
+/**
+ * Near-white pixel count, the median of three samples a fifth of a second apart.
+ *
+ * P10 STEP 10 gave Weld's mass an emissive pulse (Campus.tsx's WELD_PULSE) in place of the old
+ * opacity ramp, and the pulse is now part of what pushes the campus's own photographed roof
+ * pixels across the 236 threshold above -- so a single sample carries the pulse's phase as
+ * noise, the exact problem contrast.spec.ts's own `pixels()` documents and solves the same way
+ * for the identical reason. `unlit` (stage 1, highlight off, `emissiveIntensity` pinned at 0)
+ * does not have this problem, but is sampled the same way for symmetry.
+ */
+async function whitePixels(page: Page): Promise<number> {
+  const samples: number[] = [];
+  for (let i = 0; i < 3; i++) {
+    samples.push(await whitePixelsOnce(page));
+    await page.waitForTimeout(200);
+  }
+  samples.sort((a, b) => a - b);
+  return samples[1]!;
+}
+
 async function gotoStage(page: Page, stage: number) {
   await page.getByTestId(`stage-${stage}`).click();
   await page.waitForTimeout(2400);
@@ -120,16 +140,33 @@ test("merging holds: many triangles in few draw calls", async ({ page }) => {
     // as a frame budget before that was pinned down.
     // MOVED FROM 30 TO 34 IN P9, WITH THE MEASUREMENT. Ground.tsx adds four nested photographic
     // quads and Globe.tsx an atmosphere rim, so the scene grew by up to five submissions at these
-    // stages. Re-measured on this machine, headless, after letting the textures settle:
+    // stages.
     //
-    //   stage 1   24 calls   16,489 tris     (Q1 and Q2 up, Q3 fading in)
-    //   stage 2   28 calls   16,905 tris     (Q2, Q3 and Q4 up)
-    //   stage 3   28 calls   16,905 tris
+    // RE-MEASURED FOR P10 STEP 10, THE BOUND UNCHANGED. The campus buildings are opaque
+    // MeshStandardMaterials now, with aerial.ts's onBeforeCompile skin putting a photographed
+    // roof on them -- no new mesh, so no new draw call, which is the whole point of an
+    // onBeforeCompile injection over a second material. Re-measured on this machine, headless:
     //
-    // 34 rather than 30 because 28 against a bound of 30 is two calls of headroom, and this test
-    // FLAKED at 30 exactly once in a full parallel run -- the ground quads' textures land at a
-    // slightly different moment under load, and a bound two away from the measurement is a bound
-    // that fails for timing rather than for regressions. 34 keeps six.
+    //   stage 1   24 calls   16,489 tris     (unchanged)
+    //   stage 2   30 calls   17,569 tris     (+2 calls / +664 tris against stage 3 -- see below)
+    //   stage 3   28 calls   16,905 tris     (unchanged from the P9 figure)
+    //
+    // STAGE 2'S OWN SURPLUS IS NOT A CAMPUS NUMBER AT ALL. Stage 2's default pose sits at
+    // 814.6 ft (stages.ts), inside altitude.ts's tint band [40,000, 400] -- so
+    // WeldExterior's `progress` (P10 step 10c) is fractional there, and Threshold's sweep
+    // mesh mounts (`0 < progress < 1`) for the first time this test's path ever puts a
+    // camera in that band. Before P10, `progress` was the dissolve's own `1 - opacity`,
+    // which thresholdOpacity() holds at 0 for every stage under 4 -- so the sweep never
+    // mounted at stage 2 and this test's stage-2 figure was Campus alone. It still is
+    // Campus alone at stage 3 (110 ft, under the band's 400 ft floor, progress back to 1,
+    // sweep gone) -- which is why only stage 2 moved. See tests/e2e/threshold.spec.ts's own
+    // P10 addition for the sweep's triangle accounting in detail.
+    //
+    // 34 rather than 30 because 30 against a bound of 30 is no headroom at all, and this test
+    // FLAKED at 30 exactly once in a full parallel run before P9 -- the ground quads' textures
+    // land at a slightly different moment under load, and a bound at the measurement is a bound
+    // that fails for timing rather than for regressions. 34 keeps four over the new measured
+    // ceiling of 30.
     expect(p.calls, `stage ${stage} draw calls: ${report.join(" | ")}`).toBeLessThanOrEqual(34);
     expect(p.triangles, `stage ${stage} lost its geometry`).toBeGreaterThan(10_000);
     /*
@@ -149,9 +186,11 @@ test("merging holds: many triangles in few draw calls", async ({ page }) => {
      * should not read a rise as a regression.
      */
     // MOVED FROM 20 TO 24 IN P9, for the same reason and with the same caveat the comment above
-    // already gives about this counter being cumulative and path-dependent. Re-measured on this
-    // test's path: 11 at stage 1, 16 at stages 2 and 3, against the 13 recorded before P9. The
-    // rise is Ground.tsx's four plane geometries, and it is expected rather than a broken merge.
+    // already gives about this counter being cumulative and path-dependent.
+    //
+    // RE-MEASURED FOR P10 STEP 10, THE BOUND UNCHANGED: 12 at stage 1, 18 at stage 2 (the
+    // sweep's own merged geometry, mounting for the reason recorded above), 17 at stage 3,
+    // against 11 / 16 / 16 recorded before P10. Still comfortably under 24.
     expect(p.geometries, `stage ${stage} geometry count suggests the merge broke`).toBeLessThan(24);
   }
   console.log(report.join("\n"));
@@ -171,12 +210,20 @@ test("Weld is marked by more than hue", async ({ page }) => {
 
   // The highlight only engages from stage 2, so stage 1 is the control. Measured at the
   // rebuilt threshold: 0 at stage 1, 1,648 at stage 2.
+  //
+  // RE-MEASURED FOR P10 STEP 10: 299 at stage 1, 1,305-1,328 across three runs at stage 2.
+  // Stage 1 is no longer 0 because the campus buildings are opaque and photographed now
+  // (aerial.ts's roof skin) rather than a flat translucent fill, and leaf-off aerial imagery
+  // has its own near-white pixels -- concrete, bare pavement, a bright roof -- with no Weld
+  // highlight involved at all. `whitePixels` takes the median of three samples for the same
+  // reason contrast.spec.ts's `pixels()` does: Weld's mass now carries an emissive pulse
+  // (Campus.tsx's WELD_PULSE), and a single sample would carry its phase as noise.
   expect(lit, `stage 2 white pixels ${lit} vs stage 1 ${unlit}`).toBeGreaterThan(unlit * 3 + 200);
 
-  // AND AN ABSOLUTE FLOOR, which the ratio alone does not give. With the control now reading 0
-  // the comparison above passes on 201 pixels, and 201 pixels of white is not a highlighted
-  // building -- it is a few stray anti-aliased edges. 400 is a quarter of the measured 1,648, so
-  // it fails if the highlight is substantially lost while tolerating a change of line width.
+  // AND AN ABSOLUTE FLOOR, which the ratio alone does not give. 400 is comfortably under the
+  // measured 1,305-1,328, so it fails if the highlight is substantially lost while tolerating
+  // a change of line width -- and comfortably over the 299-pixel photographed-roof baseline, so
+  // it cannot pass on the ground alone the way it could when that baseline read 0.
   expect(lit, `stage 2 has too little white line work: ${lit}`).toBeGreaterThan(400);
 
   // And the label chip is real DOM, so screen readers and zoom get it too.

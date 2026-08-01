@@ -63,9 +63,6 @@ type Campus = {
   dpr: number;
   lineWidth: number;
   weldLineWidth: number;
-  massOpacity: number;
-  /** Added in P9: the fill now ramps with altitude, and this is the other end of the ramp. */
-  massCeiling: number;
 };
 
 type Perf = { calls: number; triangles: number; lines: number };
@@ -77,9 +74,28 @@ const perf = (page: Page): Promise<Perf> =>
 const stageOf = (page: Page): Promise<number> =>
   page.evaluate(() => (window as unknown as { __weld: { stage: number } }).__weld.stage);
 
-/** MASTER.md's two figures, and the shipped values they replace. */
-const NORMAL = { line: 1.5, weld: 2.2, mass: 0.12 };
-const HIGH = { line: 2.5, mass: 0.22 };
+/**
+ * MASTER.md's stroke-width figure, and the shipped value it replaces.
+ *
+ * The `--mass` opacity figure that used to live beside this is gone, P10 STEP 10: the campus
+ * buildings are opaque MeshStandardMaterials now (Campus.tsx's header), so there is no fill
+ * opacity left for a high-contrast toggle to raise. `window.__campus` lost `massOpacity` and
+ * `massCeiling` with it, and every assertion in this file that read them is gone too.
+ */
+const NORMAL = { line: 1.5, weld: 2.2 };
+const HIGH = { line: 2.5 };
+
+/**
+ * The floor for high contrast's white-pixel ratio at stage 2, re-measured for P10 step 10.
+ * See the note beside its use for why the P9 bound of 1.25 no longer applies.
+ *
+ * MEASURED, three runs: 12,153 -> 14,699 (1.210), 12,153 -> 14,800 (1.218), 12,214 -> 13,441
+ * (1.100). Looser and noisier than the P9 figure -- the campus is opaque and photographed now,
+ * so far more of the frame is textured roof rather than flat fill, and how many of those
+ * texture-edge pixels cross into the near-white bucket varies a little run to run. 1.05 keeps a
+ * real margin under the lowest of the three while staying well above 1.0.
+ */
+const WHITE_RATIO_BOUND = 1.05;
 
 /**
  * Booted and hydrated.
@@ -208,7 +224,6 @@ test("MASTER's two figures reach the scene, and they are CSS pixels", async ({ b
       5,
     );
     expect(before.weldLineWidth).toBeCloseTo(NORMAL.weld * dpr, 5);
-    expect(before.massOpacity).toBeCloseTo(NORMAL.mass, 5);
 
     // Drives CameraRig's `prefers-contrast` mirror directly, in place of the retired
     // button's click: Playwright's media emulation fires the same `change` event a real OS
@@ -219,12 +234,11 @@ test("MASTER's two figures reach the scene, and they are CSS pixels", async ({ b
       .toBe(true);
     const after = await campus(page);
 
-    // MASTER.md, quoted: strokes to 2.5px, --mass opacity to 0.22.
+    // MASTER.md, quoted: strokes to 2.5px.
     expect(after.lineWidth, `dpr ${dpr}: ${JSON.stringify(after)}`).toBeCloseTo(
       HIGH.line * dpr,
       5,
     );
-    expect(after.massOpacity, `dpr ${dpr}: ${JSON.stringify(after)}`).toBeCloseTo(HIGH.mass, 5);
 
     /*
      * AND WELD IS STILL THE WIDER STROKE. That is not decoration: the checklist measures
@@ -239,8 +253,7 @@ test("MASTER's two figures reach the scene, and they are CSS pixels", async ({ b
     );
     console.log(
       `dpr ${dpr}: line ${before.lineWidth} -> ${after.lineWidth}, ` +
-        `weld ${before.weldLineWidth} -> ${after.weldLineWidth}, ` +
-        `mass ${before.massOpacity} -> ${after.massOpacity}`,
+        `weld ${before.weldLineWidth} -> ${after.weldLineWidth}`,
     );
     await ctx.close();
   }
@@ -276,58 +289,26 @@ test("it changes the picture and costs no draw calls", async ({ page }) => {
    * Thicker strokes cover more of the frame, and this is the assertion that the flag reaches the
    * GPU rather than only the probe.
    *
-   * RE-MEASURED AND THE BOUND MOVED FROM 1.4 TO 1.25 WHEN P9 LANDED. Originally 3,045 -> 5,620
-   * near-white pixels, a factor of 1.85. P9 put a photograph under the campus and made the mass
-   * fill ramp with altitude, and both compress this ratio without touching the strokes:
-   *
-   *   run 1   2,399 -> 3,238   1.350
-   *   run 2   2,401 -> 3,284   1.368
-   *   run 3   2,392 -> 3,256   1.361
-   *
-   * Tight across runs, so this is a moved baseline and not noise. The MECHANISM is worth naming
-   * because it is not obvious: `white` requires b - r < 40 to isolate neutral line work, and the
-   * mass is #96c8f5 where b - r is 95. A denser mass therefore bleeds into the anti-aliased edge of
-   * every stroke and pushes those pixels OUT of the neutral bucket -- so the count falls in both
-   * states, and falls further in high contrast where the mass is densest. Nothing about the strokes
-   * changed: window.__campus still reports 2.5 CSS px, asserted separately above.
-   *
-   * 1.25 keeps a real margin under the measured 1.35 while staying far above 1.0.
+   * RE-MEASURED FOR P10 STEP 10. The bound moved again because the thing `white` used to be
+   * confounded by moved: through P9 the campus masses were a translucent #96c8f5 fill (b - r of
+   * 95) that bled into the anti-aliased edge of every stroke and pulled those pixels out of the
+   * neutral `white` bucket, densest in high contrast -- which is why the old ratio (1.35 measured,
+   * gated at 1.25) was well under the underlying stroke-width ratio of 1.67. The masses are opaque
+   * MeshStandardMaterials now, lit and textured by aerial.ts's roof photograph rather than filled
+   * with a flat translucent blue, so that bleed is gone. Measured on this build, three runs:
+   * 1.210, 1.218, 1.100 -- WHITE_RATIO_BOUND's own comment carries the raw counts.
    */
   expect(after.white, `white ${before.white} -> ${after.white}`).toBeGreaterThan(
-    before.white * 1.25,
+    before.white * WHITE_RATIO_BOUND,
   );
   /*
-   * AND THE MASSES ARE DENSER -- but p75 CANNOT SEE THAT ANY MORE, so the assertion moved to the
-   * probe and the pixel check was demoted rather than quietly loosened.
-   *
-   * The original was p75 luminance 55.13 -> 69.92, a factor of 1.268, gated at 1.12 against 1.021
-   * on a build where the strokes thickened and the mass did not. That worked because the frame was
-   * mostly dark void, so the 75th percentile sat inside the massing. P9's photograph covers 100% of
-   * the frame at this stage, which moves p75 from 55 to 101 and makes it a statistic about the
-   * PHOTOGRAPH: measured now, 101.08 -> 103.30, a factor of 1.022.
-   *
-   * 1.022 is indistinguishable from the 1.021 this gate was built to catch, and the mass is in fact
-   * far denser than before -- the ramp runs 0.12 to 0.34 normally and 0.22 to 0.62 in high contrast,
-   * against the flat 0.12/0.22 this test was written for. So lowering the bound to 1.01 would make
-   * the gate vacuous: it would pass on exactly the broken build it exists to reject.
-   *
-   * A blue-channel population count (b - r > 70) does move properly, 33,323 -> 52,137 or 1.565 --
-   * but the campus edge colour #8fc4f2 has b - r of 99, so it counts strokes as well as mass and
-   * cannot make the discrimination p75's three-build table established. Rather than swap in a metric
-   * whose selectivity is unverified, the exact claim now comes from the probe, which reports the
-   * alpha actually handed to the material at both ends of the ramp.
+   * THE MASS-DENSITY HALF OF THIS TEST IS GONE, P10 STEP 10. `p75`, `massOpacity` and
+   * `massCeiling` all existed to show that high contrast raised the campus's fill alpha; the
+   * campus has no fill alpha left to raise -- Campus.tsx's buildings are opaque, and
+   * `window.__campus` dropped both fields. What MASTER.md's high-contrast figure still means for
+   * the campus is the stroke width asserted above and in the DPR test; there is no second
+   * figure left for this test to carry.
    */
-  const c = await campus(page);
-  expect(c.massOpacity, "high contrast must put the fill on MASTER's 0.22").toBeCloseTo(0.22, 6);
-  expect(c.massCeiling, "and raise the ramp's ceiling in the same proportion").toBeCloseTo(
-    0.34 * (0.22 / 0.12),
-    6,
-  );
-  // The pixel check survives as a direction rather than a magnitude: the frame must not get
-  // DARKER when the masses densify, which is the one thing p75 can still tell us.
-  expect(after.p75, `p75 luminance ${before.p75.toFixed(2)} -> ${after.p75.toFixed(2)}`).toBeGreaterThan(
-    before.p75,
-  );
 });
 
 test("prefers-contrast: more seeds it", async ({ browser }) => {
@@ -349,7 +330,6 @@ test("prefers-contrast: more seeds it", async ({ browser }) => {
   const seeded = await campus(page);
   expect(seeded.highContrast, JSON.stringify(seeded)).toBe(true);
   expect(seeded.lineWidth, JSON.stringify(seeded)).toBeCloseTo(HIGH.line, 5);
-  expect(seeded.massOpacity, JSON.stringify(seeded)).toBeCloseTo(HIGH.mass, 5);
 
   /*
    * And the seed is the query's VALUE, not merely the query's existence: the same build
