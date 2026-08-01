@@ -1,0 +1,638 @@
+{
+  "generatedBy": "scripts/fetch-buildings.mjs",
+  "origin": {
+    "lat": 42.3739244,
+    "lon": -71.1171195
+  },
+  "frame": "three.js world feet, x east, y up, z south, origin at Weld Hall's centroid (src/geo/frames.ts)",
+  "file": "/models/campus.glb",
+  "bytes": 1403020,
+  "buildings": [
+    {
+      "name": "Randolph Hall, Adams House",
+      "resource": 2,
+      "feature": 0,
+      "heightFt": 67.64,
+      "eavesFt": 67.64,
+      "vertices": 2601
+    },
+    {
+      "name": "Russell Hall, Adams House",
+      "resource": 10,
+      "feature": 0,
+      "heightFt": 106.25,
+      "eavesFt": 106.25,
+      "vertices": 1185
+    },
+    {
+      "name": "Stoughton Hall",
+      "resource": 16,
+      "feature": 0,
+      "heightFt": 60.7,
+      "eavesFt": 60.7,
+      "vertices": 348
+    },
+    {
+      "name": "Lehman Hall",
+      "resource": 19,
+      "feature": 0,
+      "heightFt": 59.49,
+      "eavesFt": 59.49,
+      "vertices": 252
+    },
+    {
+      "name": "Barker Center, Warren House",
+      "resource": 33,
+      "feature": 0,
+      "heightFt": 46.3,
+      "eavesFt": 46.3,
+      "vertices": 546
+    },
+    {
+      "name": "90 Mount Auburn Street",
+      "resource": 38,
+      "feature": 0,
+      "heightFt": 53.05,
+      "eavesFt": 53.05,
+      "vertices": 783
+    },
+    {
+      "name": "Memorial Hall",
+      "resource": 55,
+      "feature": 0,
+      "heightFt": 192.8,
+      "eavesFt": 192.8,
+      "vertices": 2028
+    },
+    {
+      "name": "Dana-Palmer",
+      "resource": 71,
+      "feature": 0,
+      "heightFt": 36.1,
+      "eavesFt": 36.1,
+      "vertices": 234
+    },
+    {
+      "name": "Smith Campus Center",
+      "resource": 89,
+      "feature": 0,
+      "heightFt": 160.51,
+      "eavesFt": 160.51,
+      "vertices": 7599
+    },
+    {
+      "name": "Holworthy Hall",
+      "resource": 100,
+      "feature": 0,
+      "heightFt": 60.99,
+      "eavesFt": 60.99,
+      "vertices": 162
+    },
+    {
+      "name": "Westmorly Court, Adams House",
+      "resource": 104,
+      "feature": 0,
+      "heightFt": 71.04,
+      "eavesFt": 71.04,
+      "vertices": 2004
+    },
+    {
+      "name": "Smith Center Health Services",
+      "resource": 116,
+      "feature": 0,
+      "heightFt": 28.05,
+      "eavesFt": 28.05,
+      "vertices": 39
+    },
+    {
+      "name": "74 Mount Auburn Street",
+      "resource": 117,
+      "feature": 0,
+      "heightFt": 51.08,
+      "eavesFt": 51.08,
+      "vertices": 381
+    },
+    {
+      "name": "Harvard Hall",
+      "resource": 118,
+      "feature": 0,
+      "heightFt": 76.56,
+      "eavesFt": 76.56,
+      "vertices": 447
+    },
+    {
+      "name": "University Hall",
+      "resource": 119,
+      "feature": 0,
+      "heightFt": 59.66,
+      "eavesFt": 59.66,
+      "vertices": 342
+    },
+    {
+      "name": "Claverly Hall",
+      "resource": 120,
+      "feature": 0,
+      "heightFt": 73.75,
+      "eavesFt": 73.75,
+      "vertices": 786
+    },
+    {
+      "name": "Claverly Hall",
+      "resource": 121,
+      "feature": 0,
+      "heightFt": 38.95,
+      "eavesFt": 38.95,
+      "vertices": 114
+    },
+    {
+      "name": "Carpenter Center",
+      "resource": 125,
+      "feature": 0,
+      "heightFt": 64.96,
+      "eavesFt": 64.96,
+      "vertices": 636
+    },
+    {
+      "name": "Apthorp House, Adams House",
+      "resource": 146,
+      "feature": 0,
+      "heightFt": 51.22,
+      "eavesFt": 51.22,
+      "vertices": 423
+    },
+    {
+      "name": "Linden Street Studios",
+      "resource": 146,
+      "feature": 1,
+      "heightFt": 50.22,
+      "eavesFt": 50.22,
+      "vertices": 303
+    },
+    {
+      "name": "5-7 Linden Street",
+      "resource": 146,
+      "feature": 2,
+      "heightFt": 47.96,
+      "eavesFt": 47.96,
+      "vertices": 753
+    },
+    {
+      "name": "22 Plympton Street",
+      "resource": 146,
+      "feature": 3,
+      "heightFt": 17.71,
+      "eavesFt": 17.71,
+      "vertices": 69
+    },
+    {
+      "name": "65 Rear Mount Auburn Tele Building",
+      "resource": 155,
+      "feature": 0,
+      "heightFt": 22.69,
+      "eavesFt": 22.69,
+      "vertices": 36
+    },
+    {
+      "name": "Apley Court at Dudley House",
+      "resource": 155,
+      "feature": 1,
+      "heightFt": 67.89,
+      "eavesFt": 67.89,
+      "vertices": 258
+    },
+    {
+      "name": "65 Mount Auburn Street",
+      "resource": 155,
+      "feature": 2,
+      "heightFt": 80.29,
+      "eavesFt": 80.29,
+      "vertices": 483
+    },
+    {
+      "name": "Farkas Hall",
+      "resource": 155,
+      "feature": 3,
+      "heightFt": 57.68,
+      "eavesFt": 57.68,
+      "vertices": 696
+    },
+    {
+      "name": "Wadsworth House",
+      "resource": 162,
+      "feature": 0,
+      "heightFt": 44.49,
+      "eavesFt": 44.49,
+      "vertices": 864
+    },
+    {
+      "name": "Wigglesworth Hall, Entries J+K",
+      "resource": 162,
+      "feature": 1,
+      "heightFt": 42.44,
+      "eavesFt": 42.44,
+      "vertices": 720
+    },
+    {
+      "name": "Grays Hall",
+      "resource": 162,
+      "feature": 2,
+      "heightFt": 59.76,
+      "eavesFt": 59.76,
+      "vertices": 768
+    },
+    {
+      "name": "Manter Hall",
+      "resource": 162,
+      "feature": 3,
+      "heightFt": 56.84,
+      "eavesFt": 56.84,
+      "vertices": 105
+    },
+    {
+      "name": "Holden Chapel",
+      "resource": 163,
+      "feature": 0,
+      "heightFt": 35.52,
+      "eavesFt": 35.52,
+      "vertices": 42
+    },
+    {
+      "name": "Mower Hall",
+      "resource": 163,
+      "feature": 1,
+      "heightFt": 46.34,
+      "eavesFt": 46.34,
+      "vertices": 939
+    },
+    {
+      "name": "Lionel Hall",
+      "resource": 163,
+      "feature": 2,
+      "heightFt": 41.95,
+      "eavesFt": 41.95,
+      "vertices": 1005
+    },
+    {
+      "name": "Phillips Brooks House",
+      "resource": 163,
+      "feature": 3,
+      "heightFt": 62.92,
+      "eavesFt": 62.92,
+      "vertices": 276
+    },
+    {
+      "name": "Wigglesworth Hall, Entries E,F,G,H+I",
+      "resource": 172,
+      "feature": 0,
+      "heightFt": 45.24,
+      "eavesFt": 45.24,
+      "vertices": 1998
+    },
+    {
+      "name": "Boylston Hall",
+      "resource": 172,
+      "feature": 1,
+      "heightFt": 79.96,
+      "eavesFt": 79.96,
+      "vertices": 309
+    },
+    {
+      "name": "Fairfax Hall",
+      "resource": 172,
+      "feature": 2,
+      "heightFt": 78.73,
+      "eavesFt": 78.73,
+      "vertices": 945
+    },
+    {
+      "name": "Widener Library",
+      "resource": 172,
+      "feature": 3,
+      "heightFt": 92.85,
+      "eavesFt": 92.85,
+      "vertices": 1800
+    },
+    {
+      "name": "Loeb House, 17 Quincy Street",
+      "resource": 175,
+      "feature": 0,
+      "heightFt": 64.47,
+      "eavesFt": 64.47,
+      "vertices": 603
+    },
+    {
+      "name": "Emerson Hall",
+      "resource": 175,
+      "feature": 1,
+      "heightFt": 69.86,
+      "eavesFt": 69.86,
+      "vertices": 270
+    },
+    {
+      "name": "Houghton Library",
+      "resource": 175,
+      "feature": 2,
+      "heightFt": 56.32,
+      "eavesFt": 56.32,
+      "vertices": 702
+    },
+    {
+      "name": "Faculty Club",
+      "resource": 175,
+      "feature": 3,
+      "heightFt": 38.04,
+      "eavesFt": 38.04,
+      "vertices": 39
+    },
+    {
+      "name": "Matthews Hall",
+      "resource": 176,
+      "feature": 0,
+      "heightFt": 76.9,
+      "eavesFt": 76.9,
+      "vertices": 1404
+    },
+    {
+      "name": "Massachusetts Hall",
+      "resource": 176,
+      "feature": 1,
+      "heightFt": 57.97,
+      "eavesFt": 57.97,
+      "vertices": 1101
+    },
+    {
+      "name": "Straus Hall",
+      "resource": 176,
+      "feature": 2,
+      "heightFt": 58.06,
+      "eavesFt": 58.06,
+      "vertices": 1086
+    },
+    {
+      "name": "Hollis Hall",
+      "resource": 176,
+      "feature": 3,
+      "heightFt": 60.86,
+      "eavesFt": 60.86,
+      "vertices": 378
+    },
+    {
+      "name": "Memorial Church Appleton Chapel",
+      "resource": 184,
+      "feature": 0,
+      "heightFt": 185.09,
+      "eavesFt": 185.09,
+      "vertices": 414
+    },
+    {
+      "name": "Canaday Hall, Entries A, B",
+      "resource": 184,
+      "feature": 1,
+      "heightFt": 59.95,
+      "eavesFt": 59.95,
+      "vertices": 318
+    },
+    {
+      "name": "Thayer Hall",
+      "resource": 184,
+      "feature": 2,
+      "heightFt": 86.7,
+      "eavesFt": 86.7,
+      "vertices": 630
+    },
+    {
+      "name": "Canaday Hall, Entries C, D",
+      "resource": 184,
+      "feature": 3,
+      "heightFt": 77.68,
+      "eavesFt": 77.68,
+      "vertices": 258
+    },
+    {
+      "name": "Hurlbut Hall",
+      "resource": 193,
+      "feature": 0,
+      "heightFt": 57.43,
+      "eavesFt": 57.43,
+      "vertices": 510
+    },
+    {
+      "name": "Barker Center, Union/Burr",
+      "resource": 193,
+      "feature": 1,
+      "heightFt": 30.21,
+      "eavesFt": 30.21,
+      "vertices": 288
+    },
+    {
+      "name": "1201 Massachusetts Ave",
+      "resource": 193,
+      "feature": 2,
+      "heightFt": 55.79,
+      "eavesFt": 55.79,
+      "vertices": 1908
+    },
+    {
+      "name": "Barker Center, Union/Burr",
+      "resource": 193,
+      "feature": 3,
+      "heightFt": 15.98,
+      "eavesFt": 15.98,
+      "vertices": 36
+    },
+    {
+      "name": "Hampden Hall",
+      "resource": 197,
+      "feature": 0,
+      "heightFt": 88,
+      "eavesFt": 88,
+      "vertices": 837
+    },
+    {
+      "name": "Lamont Library",
+      "resource": 197,
+      "feature": 1,
+      "heightFt": 62.55,
+      "eavesFt": 62.55,
+      "vertices": 273
+    },
+    {
+      "name": "Wigglesworth Hall, Entries A,B,C+D",
+      "resource": 197,
+      "feature": 2,
+      "heightFt": 41.2,
+      "eavesFt": 41.2,
+      "vertices": 1974
+    },
+    {
+      "name": "9 Bow Street",
+      "resource": 197,
+      "feature": 3,
+      "heightFt": 41.34,
+      "eavesFt": 41.34,
+      "vertices": 714
+    },
+    {
+      "name": "Sever Hall",
+      "resource": 211,
+      "feature": 0,
+      "heightFt": 87.83,
+      "eavesFt": 87.83,
+      "vertices": 780
+    },
+    {
+      "name": "Robinson Hall",
+      "resource": 211,
+      "feature": 1,
+      "heightFt": 64.71,
+      "eavesFt": 64.71,
+      "vertices": 66
+    },
+    {
+      "name": "Canaday Hall, Entries E, F, G",
+      "resource": 211,
+      "feature": 2,
+      "heightFt": 60.56,
+      "eavesFt": 60.56,
+      "vertices": 480
+    }
+  ],
+  "excluded": {
+    "Weld Hall": "Drawn by src/scene/weldGeometry.ts instead, which is parametric: the dimension sliders, the four cutaway modes, the threshold sweep and the window bays that align with the interior suite all run through it. Harvard's mesh is still decoded on every run as a cross-check of this script's coordinate transform, then discarded."
+  },
+  "provenance": {
+    "dataset": "Harvard PPM, Facilities3D_Facilities (I3S 3D object scene layer)",
+    "item": "d371f09c273e417f907577d92004127b",
+    "url": "https://services6.arcgis.com/xj2fNQwUFCYCWY8a/arcgis/rest/services/Facilities3D_Facilities/SceneServer/layers/0",
+    "access": "public",
+    "geometry": "uncompressed PerAttributeArray buffers (geometries/0); no Draco decoder needed",
+    "sourceSha256": [
+      {
+        "resource": 2,
+        "geometry": "203066686d57f1cda6482a3f4ded9124966bf9ecc1683d4eeef3c6f949602c34"
+      },
+      {
+        "resource": 10,
+        "geometry": "1af0fd94f203378cfa3d3a2754827b0932003e0cde7e2ad69ecb090ff89d6463"
+      },
+      {
+        "resource": 12,
+        "geometry": "426331f9c7e9bd05ae5012973a222acc12c58e89b1027a40ca82cf47d2dff580"
+      },
+      {
+        "resource": 16,
+        "geometry": "dc8a5132e6bb233d5f89db9a903c3e88af7a6f1af130df22a00c2993777e9279"
+      },
+      {
+        "resource": 19,
+        "geometry": "3da05e67962c7d42b216a66bd4051a00d37eaf077b601f8e79aea4db1b8e3f58"
+      },
+      {
+        "resource": 33,
+        "geometry": "57171c018e2cad376d0c03d83c75c8dcbff1663e9c42839e7c69a5e910777bc2"
+      },
+      {
+        "resource": 38,
+        "geometry": "907f964ef821725a05a3ab790ef6c397ba05665add7acbf80cfc556f84168aa3"
+      },
+      {
+        "resource": 55,
+        "geometry": "eca39cd6506cc9785bf027db0de7e909cf6105396330420bd0e172f3377b98c5"
+      },
+      {
+        "resource": 71,
+        "geometry": "a1001b0e0b907e1bc253cd6d18fbb9e82235a580e44087956e5500fbaf75b61b"
+      },
+      {
+        "resource": 89,
+        "geometry": "08a8305b83eb22906a857a90d6aae1360b3c0bf8872454d7e4f5ef21c9c807cf"
+      },
+      {
+        "resource": 100,
+        "geometry": "ef2c1530371a3d5b7afeb531c8198ef98e6f68d445e69d24aa2cb163c678a532"
+      },
+      {
+        "resource": 104,
+        "geometry": "78cfd211f992c5c9363885ad3a43f7347ebeb49be70f5eb8b5fa096c90f87a5c"
+      },
+      {
+        "resource": 116,
+        "geometry": "1d7bd359885d306651e53950df0a9f1b858eb4a3fdaf113fff1e6b6812351ee1"
+      },
+      {
+        "resource": 117,
+        "geometry": "03e0fbcc522cb58c3f8135d05f1d3291bea7ec52fcc7f2f0448e76e6914124d8"
+      },
+      {
+        "resource": 118,
+        "geometry": "be5f850c584d847d5e513c647ab92f1fda10814cd8a51899782345db45a2492b"
+      },
+      {
+        "resource": 119,
+        "geometry": "a80f49c0658898c41bad53bfe27d01aca64094955520c5f0aa40e3d6f13e7950"
+      },
+      {
+        "resource": 120,
+        "geometry": "4a8b86e6ba2055694bc20de07a601e5787ef1e3c6e94c571082f88816d2a6c7e"
+      },
+      {
+        "resource": 121,
+        "geometry": "79d4f8f31375c16ea59e59064ccf42a079731e80f8a54bbbffab9be333795b35"
+      },
+      {
+        "resource": 125,
+        "geometry": "b4cb8203423985e4fc76d8e60f3578cd753d91e022a4dc2144f4f8f181bb60ca"
+      },
+      {
+        "resource": 146,
+        "geometry": "3b13a7f5b7d401d67b025e5b183d3883d68205ad2c54b0eff8fad18fb6fd5586"
+      },
+      {
+        "resource": 155,
+        "geometry": "c0ca01c9d5bb9680a195351a002afa252bb9849db2a85d8888f5eb02e2a4bd65"
+      },
+      {
+        "resource": 162,
+        "geometry": "a6710def875202873689ca4d04dad06440f6fefc5b1b6dd900973e87ef666c9e"
+      },
+      {
+        "resource": 163,
+        "geometry": "e5cc661a511d41434149820f5ab78aa8476398b3f46fa22b0a7411e40c7c59c8"
+      },
+      {
+        "resource": 172,
+        "geometry": "c62776cd7e932cf735de3ef7c7d7014dda41c3490270a294bdb779e59cba8aeb"
+      },
+      {
+        "resource": 175,
+        "geometry": "7b195f45ba30f88ca0ae981e5ddc6e96a7b3f27b25037f4eb773485325a43563"
+      },
+      {
+        "resource": 176,
+        "geometry": "37273d47f1ed90754e2a301883783bfda22c2e5ed8a99561467e00e9a8d42071"
+      },
+      {
+        "resource": 184,
+        "geometry": "46b39ae6a753afc5e30d851844351efda7891a42107d712f8d17758cf886185d"
+      },
+      {
+        "resource": 193,
+        "geometry": "6f1aecbdec95cde4398ed4c35b179b4228f6ab2a9010ac427a1434a3fbc52014"
+      },
+      {
+        "resource": 197,
+        "geometry": "94e9e82da56d2a1b081f2f44168dc17261d2510ba422925040e464d2c31d0672"
+      },
+      {
+        "resource": 211,
+        "geometry": "d8cc973b998405caefaac21179e7f5c87da00e27d4b473a9abc44d64e19dd885"
+      }
+    ]
+  },
+  "derived": {
+    "what": "materialClass, per vertex: 0 wall, 1 roof, 2 base, 3 trim. And the window grid CampusMesh.tsx draws on wall faces.",
+    "why": "Harvard's layer is untextured -- every node texture is a blank white plate, measured at channel means 251.3/251.3/251.3, stdev 7.8.",
+    "how": "roof = normal.y > 0.5 above the per-building eaves break; base = below 3 ft; trim = within 2 ft of the eaves break; wall = the rest. The eaves break is the highest vertex that still has a vertical face.",
+    "notMeasured": "No source in this project gives the materials, the courses or the window positions of any building other than Weld. These are a plausible reading of the massing, not a record of it."
+  }
+}
