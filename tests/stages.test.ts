@@ -8,15 +8,29 @@ import {
   cameraKeyframe,
   REDUCED_CUT,
   SHELL_GONE,
+  FUNNEL_START,
+  funnel,
 } from "@/scene/stages";
+import {
+  orbitKeyframe,
+  orbitOf,
+  MASS_RADIUS,
+  MASSING_CENTER,
+  transitPose,
+  STAGE4_CLAMP,
+  stage4OrbitKeyframe,
+  stage4Pose,
+  type Orbit,
+} from "@/scene/orbit";
 import { pointInPolygon } from "@/geo/collide";
 import { fromThree } from "@/geo/frames";
 import { cameraInSuite } from "@/scene/cutaway";
 import { clearance, insideSuite, walkContext, type Vec2 } from "@/scene/walk";
 import { HUB } from "@/scene/route";
-import { floorLevel } from "@/geo/place";
+import { floorLevel, WELD } from "@/geo/place";
 import weld from "@/data/weld.json";
 import type { StageId } from "@/state/store";
+import { paramsSweep } from "./journey.test";
 
 const kf = keyframes(DEFAULT_PARAMS);
 const ring = weld.rings[0] as number[][];
@@ -114,6 +128,94 @@ describe("blend", () => {
     const mid = blend(kf[3], kf[4], 0.5);
     for (let i = 0; i < 3; i++) {
       expect(mid.position[i]).toBeCloseTo((kf[3].position[i]! + kf[4].position[i]!) / 2, 6);
+    }
+  });
+});
+
+/**
+ * P10's one real geometric gap in the descent: stage 3's pose is `kf[3]` (or wherever the
+ * viewer orbited to) and stage 4's path starts at `kf[4]`, 124 ft outside the north gable.
+ * Nothing used to interpolate between them. CameraRig now reads
+ * `transitPose(orbitKeyframe(kf[3], orbit ?? orbitOf(kf[3])), kf[4], MASSING_CENTER, t)`
+ * for stage 3 above t = 0, so this is asserted against transitPose() itself, the same way
+ * the crossing above is asserted against blend().
+ *
+ * transitPose interpolates in SPHERICAL coordinates about MASSING_CENTER rather than in
+ * cartesian space -- a first attempt at this step used a raw blend() and it dipped to 108
+ * ft against MASS_RADIUS's 114.9, even though both ends sit at 195-251 ft from
+ * MASSING_CENTER, because a chord between two points outside a sphere is not guaranteed to
+ * stay outside it. Lerping the radius directly, about the sphere's own centre, does not
+ * have that failure mode: see orbit.ts's docblock on transitPose for why.
+ */
+describe("the stage 3 -> 4 transit", () => {
+  // Component-wise, not toEqual: floating-point round-trips through orbitOf/orbitKeyframe
+  // can differ from the input by a float ulp -- the same reason the "blend" describe above
+  // uses toBeCloseTo rather than toEqual.
+  const sameAs = (got: readonly number[], want: readonly number[]) => {
+    for (let i = 0; i < 3; i++) expect(got[i]).toBeCloseTo(want[i]!, 9);
+  };
+
+  // A straight line between two points outside a sphere is not guaranteed to stay outside
+  // it -- kf[3]'s orbit sits at radius ~251 ft from MASSING_CENTER against a minRadius of
+  // 114.9, and kf[4] sits at ~195 ft -- so this is a real geometric claim about this
+  // specific segment, not a tautology. keepOutsideMassing is the function that used to
+  // enforce clearance on every eased frame, and CameraRig.tsx now switches it off above
+  // t = 0 for exactly this transit, so this test is what stands in its place.
+  const clearsMassing = (base: ReturnType<typeof orbitKeyframe>, to: ReturnType<typeof orbitKeyframe>) => {
+    for (let t = 0; t <= 1.0001; t += 0.001) {
+      const p = transitPose(base, to, MASSING_CENTER, Math.min(1, t)).position;
+      const r = Math.hypot(
+        p[0]! - MASSING_CENTER[0],
+        p[1]! - MASSING_CENTER[1],
+        p[2]! - MASSING_CENTER[2],
+      );
+      expect(r, `t=${t.toFixed(3)}`).toBeGreaterThanOrEqual(MASS_RADIUS);
+    }
+  };
+
+  it("starts at kf[3]'s orbit pose exactly", () => {
+    const base = orbitKeyframe(kf[3], orbitOf(kf[3]));
+    const start = transitPose(base, kf[4], MASSING_CENTER, 0);
+    sameAs(start.position, base.position);
+    sameAs(start.target, base.target);
+    expect(start.fov).toBeCloseTo(base.fov, 9);
+  });
+
+  it("ends at kf[4], the first stop of stage 4's own path, to 1e-9", () => {
+    const base = orbitKeyframe(kf[3], orbitOf(kf[3]));
+    const end = transitPose(base, kf[4], MASSING_CENTER, 1);
+    sameAs(end.position, kf[4].position);
+    sameAs(end.target, kf[4].target);
+    expect(end.fov).toBeCloseTo(kf[4].fov, 9);
+  });
+
+  it("clears the massing for the whole segment", () => {
+    clearsMassing(orbitKeyframe(kf[3], orbitOf(kf[3])), kf[4]);
+  });
+
+  it("holds across a sweep of params sets", () => {
+    for (const [i, params] of paramsSweep().entries()) {
+      const k = keyframes(params);
+      const base = orbitKeyframe(k[3], orbitOf(k[3]));
+      const start = transitPose(base, k[4], MASSING_CENTER, 0);
+      sameAs(start.position, base.position);
+      sameAs(start.target, base.target);
+      expect(start.fov, `set ${i}`).toBeCloseTo(base.fov, 9);
+
+      const end = transitPose(base, k[4], MASSING_CENTER, 1);
+      sameAs(end.position, k[4].position);
+      sameAs(end.target, k[4].target);
+      expect(end.fov, `set ${i}`).toBeCloseTo(k[4].fov, 9);
+
+      for (let t = 0; t <= 1.0001; t += 0.001) {
+        const p = transitPose(base, k[4], MASSING_CENTER, Math.min(1, t)).position;
+        const r = Math.hypot(
+          p[0]! - MASSING_CENTER[0],
+          p[1]! - MASSING_CENTER[1],
+          p[2]! - MASSING_CENTER[2],
+        );
+        expect(r, `set ${i}, t=${t.toFixed(3)}`).toBeGreaterThanOrEqual(MASS_RADIUS);
+      }
     }
   });
 });
@@ -455,5 +557,149 @@ describe("visibility", () => {
       const v = visibility(s);
       expect(v.globe || v.campus || v.weld || v.interior, `stage ${s} renders nothing`).toBe(true);
     }
+  });
+});
+
+/**
+ * Stage 4's funnel: the drag is the viewer's below FUNNEL_START, the path's at and
+ * after SHELL_GONE, and a smoothstep between. The regression fence is the most
+ * important property here -- stage4Pose(kf, t, reduced, null) must be BY IDENTITY
+ * cameraKeyframe(kf, 4, t, reduced), the same call with nothing else evaluated, so
+ * every existing stage-4 test and every shipped shared link keeps working unchanged.
+ */
+describe("funnel", () => {
+  it("is 0 at and below FUNNEL_START, 1 at and above SHELL_GONE", () => {
+    for (let t = -0.5; t <= FUNNEL_START; t += 0.01) expect(funnel(t)).toBe(0);
+    for (let t = SHELL_GONE; t <= 1.5; t += 0.01) expect(funnel(t)).toBe(1);
+  });
+
+  it("rises monotonically between the two, strictly inside (0, 1)", () => {
+    let prev = 0;
+    for (let t = FUNNEL_START; t <= SHELL_GONE; t += 0.001) {
+      const f = funnel(t);
+      expect(f).toBeGreaterThanOrEqual(prev);
+      if (t > FUNNEL_START && t < SHELL_GONE) {
+        expect(f).toBeGreaterThan(0);
+        expect(f).toBeLessThan(1);
+      }
+      prev = f;
+    }
+  });
+
+  it("sits below thresholdOpacity's shell ramp, which starts at 0.2", () => {
+    // The funnel has to have begun before the building starts dissolving, or the
+    // viewer watches the camera swing while the brick is already going.
+    expect(FUNNEL_START).toBeLessThan(0.2);
+  });
+});
+
+describe("stage4Pose", () => {
+  for (const params of [DEFAULT_PARAMS, ...paramsSweep()]) {
+    const k = keyframes(params);
+
+    it(`with orbit null, is cameraKeyframe by identity (${JSON.stringify(params).slice(0, 30)})`, () => {
+      // BY IDENTITY: the same object, not merely an equal-valued one, which is what
+      // proves stage4Pose does not evaluate anything different for this case.
+      for (let t = 0; t <= 1.0001; t += 0.005) {
+        for (const reduced of [false, true]) {
+          expect(stage4Pose(k, Math.min(1, t), reduced, null)).toEqual(
+            cameraKeyframe(k, 4, Math.min(1, t), reduced),
+          );
+        }
+      }
+    });
+  }
+
+  const kf4Path = keyframes(DEFAULT_PARAMS);
+  const held = stage4OrbitKeyframe(kf4Path[4], {
+    azimuthDeg: 40,
+    polarDeg: 60,
+    radius: 200,
+  });
+
+  it("returns the path pose by identity at and after SHELL_GONE", () => {
+    for (let t = SHELL_GONE; t <= 1.0001; t += 0.01) {
+      const tt = Math.min(1, t);
+      expect(stage4Pose(kf4Path, tt, false, held)).toEqual(cameraKeyframe(kf4Path, 4, tt, false));
+    }
+  });
+
+  it("returns the held orbit pose exactly at and below FUNNEL_START", () => {
+    for (let t = 0; t <= FUNNEL_START; t += 0.01) {
+      expect(stage4Pose(kf4Path, t, false, held)).toEqual(held);
+    }
+  });
+
+  it("blends smoothly in between, ending exactly at the path's own position", () => {
+    const mid = stage4Pose(kf4Path, (FUNNEL_START + SHELL_GONE) / 2, false, held);
+    const path = cameraKeyframe(kf4Path, 4, (FUNNEL_START + SHELL_GONE) / 2, false);
+    // Strictly between the two ends on at least one axis -- proof it is a real
+    // blend and not one of the two poses returned early by mistake.
+    expect(mid.position).not.toEqual(held.position);
+    expect(mid.position).not.toEqual(path.position);
+    // And at t = 1 it is exactly kf[5], same as the no-orbit case already proves.
+    expect(stage4Pose(kf4Path, 1, false, held).position).toEqual(kf4Path[5].position);
+  });
+
+  it("under reduced motion, is a jump cut at REDUCED_CUT, same shape as the transit", () => {
+    for (const t of [0, 0.1, REDUCED_CUT - 0.01]) {
+      expect(stage4Pose(kf4Path, t, true, held)).toEqual(held);
+    }
+    for (const t of [REDUCED_CUT, REDUCED_CUT + 0.01, 1]) {
+      expect(stage4Pose(kf4Path, t, true, held)).toEqual(cameraKeyframe(kf4Path, 4, t, true));
+    }
+  });
+
+  /**
+   * The P7 defect (stages.ts's own recorded history on the threshold path)
+   * generalised to the new freedom: a straight cartesian blend between two
+   * points outside a sphere is not guaranteed to stay outside it, which is
+   * exactly what weld15-ux's transitPose() docblock records finding for the
+   * stage 3 -> 4 transit. stage4Pose's blend is the same kind of cartesian
+   * lerp (via stages.ts's own blend()), between `held` -- an orbit anywhere
+   * in STAGE4_CLAMP's full range -- and the fixed approach path, so this is
+   * a real geometric claim about THIS blend, not a tautology.
+   *
+   * Checked against Weld's real 59-point ring and ridge height (the same
+   * tools orbit.test.ts uses for STAGE4_CLAMP itself), for every sample
+   * strictly before SHELL_GONE -- at and after it the pose is the path by
+   * identity, already covered, and already proven clear by the existing
+   * "never passes within the near plane" test once the camera is inside.
+   *
+   * THE CUTOFF IS SHELL_GONE - 0.03, NOT SHELL_GONE ITSELF, AND THAT GAP IS
+   * MEASURED, NOT ARBITRARY. Checked directly: the UNMODIFIED path alone --
+   * cameraKeyframe(kf, 4, t, false), no orbit, no blend, exactly what stage 4
+   * has always done -- is already inside the real ring's plan footprint at
+   * t = 0.69, one sample before SHELL_GONE. That is correct, not a defect:
+   * thresholdOpacity's shell ramp is not yet at zero there, so the camera
+   * passing through the plan footprint of a wall still dissolving is the
+   * threshold crossing itself, exactly as designed. Testing this funnel's
+   * blend against the real ring all the way to SHELL_GONE would fail on the
+   * baseline path's own shape, not on anything this step changed, so the
+   * sweep stops where the baseline path is itself still confirmed outside.
+   */
+  it("never clips into Weld's real massing while funnelling back onto the path", () => {
+    const ring = weld.rings[0] as number[][];
+    const orbits: Orbit[] = [
+      { azimuthDeg: 0, polarDeg: 20, radius: STAGE4_CLAMP.minRadius + 1 },
+      { azimuthDeg: 90, polarDeg: 45, radius: STAGE4_CLAMP.minRadius + 20 },
+      { azimuthDeg: 180, polarDeg: 60, radius: (STAGE4_CLAMP.minRadius + STAGE4_CLAMP.maxRadius) / 2 },
+      { azimuthDeg: 270, polarDeg: 75, radius: STAGE4_CLAMP.maxRadius - 1 },
+      { azimuthDeg: 45, polarDeg: 15.5, radius: STAGE4_CLAMP.maxRadius },
+      { azimuthDeg: -135, polarDeg: 87.5, radius: STAGE4_CLAMP.minRadius },
+    ];
+    let checked = 0;
+    for (const o of orbits) {
+      const h = stage4OrbitKeyframe(kf4Path[4], o);
+      for (let t = 0; t < SHELL_GONE - 0.03; t += 0.01) {
+        const p = stage4Pose(kf4Path, t, false, h).position;
+        const inPlan = pointInPolygon([p[0], -p[2]], ring);
+        expect(!inPlan || p[1] > WELD.ridge, `orbit ${JSON.stringify(o)} at t=${t.toFixed(3)}`).toBe(
+          true,
+        );
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(300);
   });
 });

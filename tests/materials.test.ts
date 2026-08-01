@@ -26,6 +26,7 @@ import {
   OAK_TILE_FT,
   materials,
   oakNormalMap,
+  plasterNormalMap,
   scaleFloorUv,
   disposeMaterials,
 } from "@/scene/materials";
@@ -410,6 +411,15 @@ describe("procedural oak grain, canvas path", () => {
     expect(m.oak.normalScale.x).toBeGreaterThan(0);
     expect(m.oak.normalScale.x).toBe(m.oak.normalScale.y);
   });
+
+  it("gives plaster and masonry the same tooth, at a fraction of the grain's amplitude", () => {
+    const m = withStubCanvas(() => materials()).value;
+    expect(m.plaster.normalMap).toBeInstanceOf(THREE.CanvasTexture);
+    expect(m.masonry.normalMap).toBe(m.plaster.normalMap);
+    expect(m.plaster.normalScale.x).toBeGreaterThan(0);
+    expect(m.plaster.normalScale.x).toBe(m.plaster.normalScale.y);
+    expect(m.plaster.normalScale.x).toBeLessThan(m.oak.normalScale.x);
+  });
 });
 
 // ------------------------------------------------------------ grain, headless
@@ -435,6 +445,8 @@ describe("headless, where vitest and any SSR pass live", () => {
     const m = materials();
     expect(m.oak.normalMap).toBeNull();
     expect(m.oakDeep.normalMap).toBeNull();
+    expect(m.plaster.normalMap).toBeNull();
+    expect(m.masonry.normalMap).toBeNull();
     // The rest of the material is unaffected: only the relief is missing.
     expect(hexOf(m.oak.color)).toBe(DAY.oak.toLowerCase());
     expect(m.oak.roughness).toBeGreaterThan(0);
@@ -444,11 +456,12 @@ describe("headless, where vitest and any SSR pass live", () => {
 // ------------------------------------------------------------------- palette
 
 describe("palette", () => {
-  it("returns exactly the eight keys in the contract", () => {
+  it("returns exactly the nine keys in the contract", () => {
     expect(Object.keys(materials()).sort()).toEqual([
       "brick",
       "crimson",
       "glazing",
+      "hardware",
       "masonry",
       "oak",
       "oakDeep",
@@ -484,9 +497,23 @@ describe("palette", () => {
     expect(lum(m.oakDeep.color)).toBeLessThan(lum(m.oak.color));
   });
 
-  it("is entirely non-metal", () => {
+  it("is entirely non-metal, except the one material that is furniture hardware", () => {
     for (const [k, mat] of Object.entries(materials())) {
+      if (k === "hardware") continue;
       expect(mat.metalness, k).toBe(0);
+    }
+  });
+
+  it("makes hardware a dark satin metal", () => {
+    const m = materials();
+    expect(m.hardware.metalness).toBeGreaterThan(0.5);
+    const [r, g, b] = bytes(hexOf(m.hardware.color));
+    expect(Math.max(r, g, b)).toBeLessThan(150);
+    // Satin, not mirror: rougher than the glazing highlight, sharper than plaster.
+    expect(m.hardware.roughness).toBeGreaterThan(m.slate.roughness);
+    expect(m.hardware.roughness).toBeLessThan(m.plaster.roughness);
+    for (const [k, v] of Object.entries(SCAN)) {
+      expect(hexOf(m.hardware.color), `hardware took the ${k} token`).not.toBe(v.toLowerCase());
     }
   });
 
@@ -554,14 +581,16 @@ describe("palette", () => {
     }
   });
 
-  it("disposes every material and the grain texture, then rebuilds fresh", () => {
+  it("disposes every material, the grain texture and the plaster tooth, then rebuilds fresh", () => {
     const first = withStubCanvas(() => materials()).value;
     const grain = oakNormalMap();
+    const tooth = plasterNormalMap();
     const fired: string[] = [];
     for (const [k, mat] of Object.entries(first)) {
       mat.addEventListener("dispose", () => fired.push(k));
     }
     grain.addEventListener("dispose", () => fired.push("grain"));
+    tooth.addEventListener("dispose", () => fired.push("tooth"));
 
     disposeMaterials();
 
@@ -570,14 +599,17 @@ describe("palette", () => {
       "crimson",
       "glazing",
       "grain",
+      "hardware",
       "masonry",
       "oak",
       "oakDeep",
       "plaster",
       "slate",
+      "tooth",
     ]);
     expect(materials()).not.toBe(first);
     expect(oakNormalMap()).not.toBe(grain);
+    expect(plasterNormalMap()).not.toBe(tooth);
   });
 
   it("survives dispose with nothing built", () => {

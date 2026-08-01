@@ -13,6 +13,28 @@ import { useStore } from "@/state/store";
  *
  * Disabled entirely under reduced motion. Bloom is not motion, but it is
  * additional visual intensity, and the cheapest respectful default is to drop it.
+ *
+ * P10 TRIED N8AO (screen-space ambient occlusion) HERE, AT STAGE 5, AND DROPPED
+ * IT. geo/pieces.ts's per-part furniture and geo/trim.ts's baseboard and cornice
+ * are exactly the fine, close-set surfaces contact shadow makes read as real, so
+ * the idea was sound -- but N8AO is a real per-frame screen-space pass, and
+ * Perf.tsx's own header already warns why that is dangerous here: "headless
+ * Chromium runs SwiftShader in software, where the bloom pass costs about 70 ms
+ * against roughly 1-3 ms on a real GPU... frame time must not be used as a gate."
+ * N8AO's cost under SwiftShader turned out to be severe enough to break tests
+ * that have nothing to do with rendering quality: tests/e2e/walk.spec.ts's
+ * "walks the hall end to end" holds a key for a fixed WALL-CLOCK duration
+ * (holdUntil's `maxMs`) and reads distance off however many frames actually
+ * rendered in that window, and perf.spec.ts's composer test timed out at 90 s
+ * outright. Gating N8AO on a measured frame time -- the fix that would otherwise
+ * suggest itself -- is exactly what Perf.tsx's header says not to do, since the
+ * effect's own cost is what would make the measurement high in the first place.
+ * With no frame-time-tiered quality mechanism in this project to key it off some
+ * other way, and the furniture/trim/window fidelity work this phase actually
+ * asked for already shipped and already tested, N8AO was cut rather than risking
+ * the load-bearing walk and perf suites for a subtle contact-shadow improvement.
+ * The environment map and the plaster tooth (both one-time costs, not a
+ * per-frame pass) stayed.
  */
 export function Effects() {
   const reduced = useStore((s) => s.reducedMotion);

@@ -154,17 +154,34 @@ type Store = {
   hour: number;
 
   /**
-   * Stage 3's free orbit, or null while the camera still sits where stages.ts put
-   * it.
+   * The free orbit at stage 3 OR stage 4, or null while the camera still sits
+   * where stages.ts put it.
    *
    * Null rather than a seeded Orbit because the seed is `orbitOf(keyframes[3])`
-   * and this module cannot compute it: stages.ts imports StageId from here, so
-   * importing stages.ts back would be a real cycle rather than the type-only one
-   * `import type { Orbit }` above erases. Writing the seed out as three literals
-   * instead would be a second copy of a derived number, and the first drag would
-   * jerk the camera the moment the two disagreed. CameraRig resolves the null.
+   * (or the stage-4 equivalent) and this module cannot compute it: stages.ts
+   * imports StageId from here, so importing stages.ts back would be a real
+   * cycle rather than the type-only one `import type { Orbit }` above erases.
+   * Writing the seed out as three literals instead would be a second copy of a
+   * derived number, and the first drag would jerk the camera the moment the
+   * two disagreed. CameraRig resolves the null.
    */
   orbit: Orbit | null;
+  /**
+   * Which of stage 3 or stage 4 `orbit` was set at, or null when `orbit` is.
+   *
+   * THE REASON THIS FIELD EXISTS AT ALL. `orbit`'s three numbers mean something
+   * different depending on which stage set them: stage 3's orbit is about
+   * kf[3].target = [0, 42, 0], stage 4's is about MASSING_CENTER (see
+   * orbit.ts's stage4OrbitKeyframe). The same numeric orbit applied at the
+   * OTHER stage is not a stale pose, it is a WRONG one -- a valid-looking
+   * camera position about the wrong pivot. `orbitStage` is what lets a stage
+   * change tell "returning to the stage this orbit belongs to" (keep it) from
+   * "arriving somewhere else that would misread it" (clear it), in either
+   * direction, including a jump that skips the stage the orbit was set at
+   * entirely -- see clearWrongOrbit() below, which every stage-changing
+   * action routes through.
+   */
+  orbitStage: StageId | null;
 
   /**
    * How much of the shell is taken away so the plan can be read. Four modes, from
@@ -246,8 +263,39 @@ type Store = {
    */
   notice: string | null;
 
+  /**
+   * How many CUTS have happened. A counter, not a boolean, and not the stage.
+   *
+   * CameraRig un-settles on this rather than on `stage`, and that one change is what deletes
+   * every boundary jump in the descent. The poses either side of a stage boundary are already
+   * identical -- descentPath() pins each leg's last stop to the next stage's keyframe OBJECT
+   * -- so the jump was never geometry. It was `settled.current = false` firing on a stage
+   * change and making the next frame COPY the new pose instead of easing into it.
+   *
+   * Bumped by the five actions that are genuinely a jump: setStage, next, prev, skipToSuite,
+   * and entering or leaving first person. NOT bumped by setT, setJourney or flyStep -- those
+   * three are continuous motion, and flyStep's exclusion is precisely what turns the
+   * fly-down from three moves with two pops into one nine-second descent.
+   */
+  cuts: number;
+
+  /**
+   * Whether a pointer is currently down on the master scrubber.
+   *
+   * CameraRig copies rather than eases while this is true, on the same argument it copies for
+   * the walker: a dragged control must track the hand. The exponential approach at k = 3.2/s
+   * lags by about 0.3 s, which on a scrubber reads as the camera fighting the slider.
+   *
+   * A separate flag rather than inferring it from rapid setJourney calls, because "rapid" is
+   * a guess about event rates and pointerdown/pointerup are facts.
+   */
+  scrubbing: boolean;
+
   setStage: (s: StageId) => void;
   setT: (t: number) => void;
+  /** Stage and t together, with no cut and no reset. The master scrubber's only writer. */
+  setJourney: (stage: StageId, t: number) => void;
+  setScrubbing: (v: boolean) => void;
   next: () => void;
   prev: () => void;
   skipToSuite: () => void;
@@ -501,6 +549,28 @@ function noRoomToStand(what: string): string {
   );
 }
 
+/**
+ * `orbit`/`orbitStage`, carried over unchanged unless the stage being
+ * arrived at is 3 or 4 and disagrees with the stage the orbit was set at --
+ * see `orbitStage`'s own comment for why that specific mismatch is a wrong
+ * pose rather than a stale one. Every stage-changing action spreads this in.
+ *
+ * Arriving at a stage OTHER than 3 or 4 never clears anything, which is what
+ * keeps today's behaviour for every other transition: leaving stage 3 for
+ * stage 2 and returning still finds the same orbit there, because at no
+ * point did a stage 3-anchored orbit get read as a stage 4 one, or the
+ * reverse.
+ */
+function orbitAfterStage(
+  s: { orbit: Orbit | null; orbitStage: StageId | null },
+  newStage: StageId,
+): { orbit: Orbit | null; orbitStage: StageId | null } {
+  if ((newStage === 3 || newStage === 4) && s.orbitStage !== null && s.orbitStage !== newStage) {
+    return { orbit: null, orbitStage: null };
+  }
+  return { orbit: s.orbit, orbitStage: s.orbitStage };
+}
+
 export const useStore = create<Store>((set, get) => ({
   stage: 0,
   t: 0,
@@ -511,12 +581,15 @@ export const useStore = create<Store>((set, get) => ({
   date: DEFAULT_DATE,
   hour: DEFAULT_HOUR,
   orbit: null,
+  orbitStage: null,
   cutaway: "none",
   pieces: DEFAULT_SNAPSHOT.pieces,
   occupancy: DEFAULT_OCCUPANCY,
   firstPerson: null,
   selected: null,
   notice: null,
+  cuts: 0,
+  scrubbing: false,
 
   // Every stage change drops the walker, and that is not tidiness. First person replaces
   // the stage's camera, so a walker surviving a jump to stage 2 would be a viewer standing
@@ -527,7 +600,15 @@ export const useStore = create<Store>((set, get) => ({
   // deliberate act by the viewer that also moves the camera has to win, or the two fight and
   // the fly-down appears to drag the viewer back. Picking a stage, stepping, skipping to the
   // suite and entering first person all qualify. setT does NOT -- see its own note.
-  setStage: (stage) => set({ stage, t: 0, firstPerson: null, flying: false }),
+  setStage: (stage) =>
+    set((s) => ({
+      stage,
+      t: 0,
+      firstPerson: null,
+      flying: false,
+      cuts: s.cuts + 1,
+      ...orbitAfterStage(s, stage),
+    })),
   /**
    * Scrub within a stage.
    *
@@ -538,21 +619,51 @@ export const useStore = create<Store>((set, get) => ({
    * two apart.
    */
   setT: (t) => set({ t: Math.min(1, Math.max(0, t)) }),
+  setJourney: (stage, t) =>
+    // NOT setStage-then-setT: setStage resets t to 0 and cancels the flight, and a scrubber
+    // that reset the very number it is writing would snap to the start of each leg as it
+    // crossed into it. One set(), so no render ever sees the half-applied pair.
+    set((s) => ({
+      stage,
+      t: Math.min(1, Math.max(0, t)),
+      firstPerson: null,
+      flying: false,
+      ...orbitAfterStage(s, stage),
+    })),
+  setScrubbing: (scrubbing) => set({ scrubbing }),
   next: () =>
-    set((s) => ({
-      stage: Math.min(LAST_STAGE, s.stage + 1) as StageId,
-      t: 0,
-      firstPerson: null,
-      flying: false,
-    })),
+    set((s) => {
+      const stage = Math.min(LAST_STAGE, s.stage + 1) as StageId;
+      return {
+        stage,
+        t: 0,
+        firstPerson: null,
+        flying: false,
+        cuts: s.cuts + 1,
+        ...orbitAfterStage(s, stage),
+      };
+    }),
   prev: () =>
+    set((s) => {
+      const stage = Math.max(0, s.stage - 1) as StageId;
+      return {
+        stage,
+        t: 0,
+        firstPerson: null,
+        flying: false,
+        cuts: s.cuts + 1,
+        ...orbitAfterStage(s, stage),
+      };
+    }),
+  skipToSuite: () =>
     set((s) => ({
-      stage: Math.max(0, s.stage - 1) as StageId,
-      t: 0,
+      stage: LAST_STAGE,
+      t: 1,
       firstPerson: null,
       flying: false,
+      cuts: s.cuts + 1,
+      ...orbitAfterStage(s, LAST_STAGE),
     })),
-  skipToSuite: () => set({ stage: LAST_STAGE, t: 1, firstPerson: null, flying: false }),
   setFlying: (flying) => set({ flying }),
   flyStep: () =>
     set((s) => {
@@ -632,7 +743,7 @@ export const useStore = create<Store>((set, get) => ({
   // cannot import at runtime for the reason given on `orbit` above, and a second
   // implementation of the clamp is exactly the drift the clamp exists to stop.
   // CameraRig passes every value through clampOrbit before it arrives.
-  setOrbit: (orbit) => set({ orbit }),
+  setOrbit: (orbit) => set((s) => ({ orbit, orbitStage: orbit ? s.stage : null })),
   // Validated rather than trusted: this is reached from a URL as well as from a
   // button, and pick() in url.ts guards the wire format but not a later caller.
   setCutaway: (cutaway) =>
@@ -681,13 +792,15 @@ export const useStore = create<Store>((set, get) => ({
         // until the viewer pressed Escape and was then somewhere else entirely.
         flying: false,
         notice: `Standing in ${room.label}. W, A, S and D to walk; Escape to stop.`,
+        cuts: s.cuts + 1,
       });
       return;
     }
     set({ notice: `Refused: ${noRoomToStand("Every room in this suite")}` });
   },
 
-  leaveFirstPerson: () => set({ firstPerson: null, notice: null }),
+  leaveFirstPerson: () =>
+    set((s) => ({ firstPerson: null, notice: null, cuts: s.cuts + 1 })),
 
   // No clamping, no validation, and no recomputation of the room: this is the frame path,
   // and FirstPerson.tsx has the WalkCtx that walk() and roomAt() were both answered
@@ -788,9 +901,12 @@ export const useStore = create<Store>((set, get) => ({
       date: DEFAULT_DATE,
       hour: DEFAULT_HOUR,
       orbit: null,
+      orbitStage: null,
       firstPerson: null,
       selected: null,
       notice: "Back to the sourced dimensions and the shipped fit-out.",
+      cuts: 0,
+      scrubbing: false,
     }),
 
   /**
@@ -814,6 +930,10 @@ export const useStore = create<Store>((set, get) => ({
       hour: s.hour,
       date: s.date,
       orbit: s.orbit,
+      // Derived from the incoming stage, not carried in the URL: whichever stage the
+      // link's own `stage` field names is, by construction, the stage this orbit was
+      // captured at -- there is nowhere else it could have come from.
+      orbitStage: s.orbit ? s.stage : null,
       // Set, NOT re-fitted. `pieces` above is the sender's actual arrangement and it
       // arrives whole; running layout() at this occupancy instead would throw away
       // every piece they moved. So the two arrive independently, exactly as they sat

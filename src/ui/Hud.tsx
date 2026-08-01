@@ -632,7 +632,10 @@ export function Hud() {
         </button>
       ) : null}
 
-      <div className={stage === LAST_STAGE ? "hud hud-room" : "hud"} data-testid="hud">
+      <div
+        className={stage === LAST_STAGE || stage === 4 ? "hud hud-room" : "hud"}
+        data-testid="hud"
+      >
         <div className="hud-stage" data-testid="stage-name">
           <span className="hud-num">{stage}</span>
           {STAGES[stage].name}

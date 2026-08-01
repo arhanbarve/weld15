@@ -323,7 +323,7 @@ function adjacency(
     if (hi) found.add(hi);
     if (!lo || !hi || lo === hi) return;
     // Sorted so a pair is one key whichever face the probe found first.
-    pairs.add([lo, hi].sort().join(" "));
+    pairs.add([lo, hi].sort().join(" "));
   };
 
   // Across the band's thickness at each step along its length. Which axis is
@@ -338,7 +338,7 @@ function adjacency(
 
   return {
     between: [...found].sort(),
-    separates: [...pairs].map((k) => k.split(" ") as [string, string]),
+    separates: [...pairs].map((k) => k.split(" ") as [string, string]),
   };
 }
 

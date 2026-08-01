@@ -593,3 +593,202 @@ describe("first person", () => {
     expect(useStore.getState().notice).toBe(null);
   });
 });
+
+/**
+ * P10: telling a cut from a move.
+ *
+ * `cuts` is what CameraRig will un-settle on instead of `stage`, so what matters here is
+ * exactly which actions bump it and which do not -- setStage, next, prev, skipToSuite and
+ * both ends of first person are jumps; setT, setJourney and flyStep are the continuous
+ * motion the counter has to stay silent for, or the fly-down would pop at every stage it
+ * crosses.
+ */
+describe("cuts", () => {
+  it("bumps by exactly one for each of the five cut actions", () => {
+    const before = useStore.getState().cuts;
+    useStore.getState().setStage(2);
+    expect(useStore.getState().cuts).toBe(before + 1);
+
+    useStore.getState().next();
+    expect(useStore.getState().cuts).toBe(before + 2);
+
+    useStore.getState().prev();
+    expect(useStore.getState().cuts).toBe(before + 3);
+
+    useStore.getState().skipToSuite();
+    expect(useStore.getState().cuts).toBe(before + 4);
+
+    useStore.getState().enterFirstPerson();
+    expect(useStore.getState().firstPerson, "the suite stands somebody up").not.toBeNull();
+    expect(useStore.getState().cuts).toBe(before + 5);
+
+    useStore.getState().leaveFirstPerson();
+    expect(useStore.getState().cuts).toBe(before + 6);
+  });
+
+  it("does not move for setT, setJourney or flyStep, the continuous ones", () => {
+    const before = useStore.getState().cuts;
+    useStore.getState().setT(0.4);
+    useStore.getState().setJourney(2, 0.6);
+    useStore.getState().flyStep();
+    expect(useStore.getState().cuts).toBe(before);
+  });
+
+  it("resets to zero and false on resetAll, and hydrate leaves both alone", () => {
+    useStore.getState().setStage(3);
+    expect(useStore.getState().cuts).toBeGreaterThan(0);
+    useStore.getState().setScrubbing(true);
+    useStore.getState().resetAll();
+    expect(useStore.getState().cuts).toBe(0);
+    expect(useStore.getState().scrubbing).toBe(false);
+
+    useStore.getState().setStage(1);
+    useStore.getState().setScrubbing(true);
+    const beforeCuts = useStore.getState().cuts;
+    const s = decode(encode({ ...DEFAULT_SNAPSHOT, stage: 4 }))!;
+    useStore.getState().hydrate(s);
+    expect(useStore.getState().stage, "the snapshot did arrive").toBe(4);
+    expect(useStore.getState().cuts, "hydrate is not a cut").toBe(beforeCuts);
+    expect(useStore.getState().scrubbing, "hydrate does not touch session facts").toBe(true);
+  });
+});
+
+describe("setJourney", () => {
+  it("sets stage and t together, and leaves cuts unchanged", () => {
+    const beforeCuts = useStore.getState().cuts;
+    useStore.getState().setJourney(4, 0.5);
+    const after = useStore.getState();
+    expect(after.stage).toBe(4);
+    expect(after.t).toBe(0.5);
+    expect(after.cuts).toBe(beforeCuts);
+  });
+
+  it("clamps t to [0, 1]", () => {
+    useStore.getState().setJourney(2, -0.5);
+    expect(useStore.getState().t).toBe(0);
+    useStore.getState().setJourney(2, 1.5);
+    expect(useStore.getState().t).toBe(1);
+  });
+
+  it("clears the walker, for the reason setStage does: the walker owns a different camera", () => {
+    useStore.getState().enterFirstPerson();
+    expect(useStore.getState().firstPerson).not.toBeNull();
+    useStore.getState().setJourney(2, 0.3);
+    expect(useStore.getState().firstPerson).toBeNull();
+  });
+});
+
+describe("setScrubbing", () => {
+  it("writes the flag both ways", () => {
+    useStore.getState().setScrubbing(true);
+    expect(useStore.getState().scrubbing).toBe(true);
+    useStore.getState().setScrubbing(false);
+    expect(useStore.getState().scrubbing).toBe(false);
+  });
+});
+
+/**
+ * `orbit` stops surviving a change of anchor.
+ *
+ * Stage 3's orbit is about kf[3].target = [0, 42, 0]; stage 4's is about
+ * MASSING_CENTER (orbit.ts's stage4OrbitKeyframe). The same three numbers
+ * read at the other stage is not a stale pose, it is the WRONG one -- a
+ * valid-looking camera position about a pivot the viewer never chose one
+ * relative to. `orbitStage` is what lets a stage change tell that apart from
+ * "returning to the stage this orbit already belongs to", which must still
+ * work exactly as it always has.
+ */
+describe("orbit survives only a return to its own anchor stage", () => {
+  const SOME_ORBIT = { azimuthDeg: 12, polarDeg: 40, radius: 200 };
+
+  it("keeps the orbit and its stage across a round trip through a non-anchor stage", () => {
+    useStore.getState().setStage(3);
+    useStore.getState().setOrbit(SOME_ORBIT);
+    expect(useStore.getState().orbitStage).toBe(3);
+
+    useStore.getState().setStage(2);
+    expect(useStore.getState().orbit).toEqual(SOME_ORBIT);
+    expect(useStore.getState().orbitStage).toBe(3);
+
+    useStore.getState().setStage(3);
+    expect(useStore.getState().orbit).toEqual(SOME_ORBIT);
+    expect(useStore.getState().orbitStage).toBe(3);
+  });
+
+  it("clears a stage-3 orbit on a direct move to stage 4", () => {
+    useStore.getState().setStage(3);
+    useStore.getState().setOrbit(SOME_ORBIT);
+    useStore.getState().setStage(4);
+    expect(useStore.getState().orbit).toBeNull();
+    expect(useStore.getState().orbitStage).toBeNull();
+  });
+
+  it("clears a stage-4 orbit on a direct move to stage 3", () => {
+    useStore.getState().setStage(4);
+    useStore.getState().setOrbit(SOME_ORBIT);
+    useStore.getState().setStage(3);
+    expect(useStore.getState().orbit).toBeNull();
+  });
+
+  it("clears a stale orbit even on a jump that skips the anchor stage entirely", () => {
+    // The gap a simpler "only clear on a direct 3<->4 move" rule would leave: set at
+    // stage 3, wander to stage 2 (orbit persists, unread), then jump straight to stage
+    // 4 without passing through 3 again. The orbit is still stage 3's and must not
+    // apply at stage 4 just because nothing happened to touch it in between.
+    useStore.getState().setStage(3);
+    useStore.getState().setOrbit(SOME_ORBIT);
+    useStore.getState().setStage(2);
+    expect(useStore.getState().orbit).toEqual(SOME_ORBIT); // still there, still stage 3's
+    useStore.getState().setStage(4);
+    expect(useStore.getState().orbit).toBeNull();
+  });
+
+  it("clears via next()/prev() the same way as setStage()", () => {
+    useStore.getState().setStage(3);
+    useStore.getState().setOrbit(SOME_ORBIT);
+    useStore.getState().next(); // 3 -> 4
+    expect(useStore.getState().orbit).toBeNull();
+
+    useStore.getState().setStage(4);
+    useStore.getState().setOrbit(SOME_ORBIT);
+    useStore.getState().prev(); // 4 -> 3
+    expect(useStore.getState().orbit).toBeNull();
+  });
+
+  it("clears via setJourney() too, since the master scrubber can cross 3 <-> 4", () => {
+    useStore.getState().setStage(3);
+    useStore.getState().setOrbit(SOME_ORBIT);
+    useStore.getState().setJourney(4, 0);
+    expect(useStore.getState().orbit).toBeNull();
+  });
+
+  it("leaves the orbit alone when the stage does not actually change", () => {
+    useStore.getState().setStage(3);
+    useStore.getState().setOrbit(SOME_ORBIT);
+    useStore.getState().setStage(3);
+    expect(useStore.getState().orbit).toEqual(SOME_ORBIT);
+  });
+
+  it("resetAll clears both fields", () => {
+    useStore.getState().setStage(3);
+    useStore.getState().setOrbit(SOME_ORBIT);
+    useStore.getState().resetAll();
+    expect(useStore.getState().orbit).toBeNull();
+    expect(useStore.getState().orbitStage).toBeNull();
+  });
+
+  it("hydrate derives orbitStage from the incoming stage, not the wire format", () => {
+    useStore.getState().hydrate({
+      stage: 4,
+      t: 0.5,
+      params: DEFAULT_SNAPSHOT.params,
+      pieces: DEFAULT_SNAPSHOT.pieces,
+      cutaway: "none",
+      hour: 9,
+      date: "2026-07-31",
+      orbit: SOME_ORBIT,
+      occupancy: 4,
+    });
+    expect(useStore.getState().orbitStage).toBe(4);
+  });
+});

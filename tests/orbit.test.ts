@@ -5,10 +5,13 @@ import { WELD } from "@/geo/place";
 import { DEFAULT_PARAMS } from "@/geo/rooms";
 import {
   STAGE3_CLAMP,
+  STAGE4_CLAMP,
+  MASSING_CENTER,
   WELD_FOOTPRINT_RADIUS,
   clampOrbit,
   orbitKeyframe,
   orbitOf,
+  stage4OrbitKeyframe,
   type Orbit,
 } from "@/scene/orbit";
 import { keyframes, type Keyframe } from "@/scene/stages";
@@ -253,6 +256,95 @@ describe("orbitKeyframe", () => {
   it("clamps a request that would fly past the Yard", () => {
     const got = orbitKeyframe(base, { azimuthDeg: 0, polarDeg: 45, radius: 1e5 });
     expect(dist(got.position, got.target)).toBeCloseTo(STAGE3_CLAMP.maxRadius, 6);
+  });
+});
+
+describe("STAGE4_CLAMP", () => {
+  it("keeps the same near limit as stage 3, for the same footprint-and-ridge reason", () => {
+    expect(STAGE4_CLAMP.minRadius).toBe(STAGE3_CLAMP.minRadius);
+    expect(STAGE4_CLAMP.minRadius).toBeGreaterThan(WELD_FOOTPRINT_RADIUS);
+    expect(STAGE4_CLAMP.minRadius).toBeGreaterThan(WELD.ridge);
+  });
+
+  it("stops well short of stage 3's own range", () => {
+    // Twice GABLE_BACK lets the viewer pull back to see Weld whole without
+    // reaching the range where Weld stops being the subject.
+    expect(STAGE4_CLAMP.maxRadius).toBeLessThan(STAGE3_CLAMP.maxRadius);
+    expect(STAGE4_CLAMP.maxRadius).toBeGreaterThan(STAGE4_CLAMP.minRadius);
+  });
+
+  it("never lets the eye reach the horizon, same as stage 3", () => {
+    expect(STAGE4_CLAMP.maxPolarDeg).toBeLessThan(90);
+  });
+});
+
+describe("stage4OrbitKeyframe", () => {
+  const kf4 = kf[4];
+  /** kf[4]'s own orbit, about MASSING_CENTER -- NOT about kf4.target. */
+  const seed = orbitOf({ position: kf4.position, target: MASSING_CENTER, fov: kf4.fov });
+
+  it("reproduces kf[4] exactly at its own seed orbit", () => {
+    // The round trip that proves the seed is right: a viewer who never drags
+    // must see precisely today's kf[4], not a nearby approximation.
+    const got = stage4OrbitKeyframe(kf4, seed);
+    for (let i = 0; i < 3; i++) expect(got.position[i]).toBeCloseTo(kf4.position[i]!, 6);
+    expect(got.target).toEqual(kf4.target);
+    expect(got.fov).toBe(kf4.fov);
+  });
+
+  it("brackets kf[4]'s own seed orbit inside the clamp", () => {
+    // If the clamp did not already contain it, enabling the orbit would jerk
+    // the camera before the viewer touched anything -- the same guarantee
+    // STAGE3_CLAMP's "brackets the stage-3 base keyframe" test makes.
+    expect(seed.radius).toBeGreaterThan(STAGE4_CLAMP.minRadius);
+    expect(seed.radius).toBeLessThan(STAGE4_CLAMP.maxRadius);
+    expect(seed.polarDeg).toBeGreaterThan(STAGE4_CLAMP.minPolarDeg);
+    expect(seed.polarDeg).toBeLessThan(STAGE4_CLAMP.maxPolarDeg);
+  });
+
+  it("always looks at kf[4].target, whatever the orbit request", () => {
+    // The one thing every dragged pose must agree on: the pivot for the RADIUS
+    // clamp is MASSING_CENTER, but where the camera looks never moves off
+    // insideBedB, or the crossing at t = 1 would not land on kf[4].
+    for (const o of [...WILD, ...sweep()]) {
+      expect(stage4OrbitKeyframe(kf4, o).target).toEqual(kf4.target);
+      expect(stage4OrbitKeyframe(kf4, o).fov).toBe(kf4.fov);
+    }
+  });
+
+  it("stands at exactly the clamped radius from MASSING_CENTER, not from kf4.target", () => {
+    // The property STAGE4_CLAMP's own header exists to prove: this is an
+    // equality, not the on-axis inequality STAGE3_CLAMP's minRadius relies on,
+    // because the clamp is applied with MASSING_CENTER as the pivot directly.
+    for (const o of sweep()) {
+      const p = stage4OrbitKeyframe(kf4, o).position;
+      const fromCentre = Math.hypot(p[0] - MASSING_CENTER[0], p[1] - MASSING_CENTER[1], p[2] - MASSING_CENTER[2]);
+      expect(fromCentre, JSON.stringify(o)).toBeCloseTo(clampOrbit(o, STAGE4_CLAMP).radius, 6);
+    }
+  });
+
+  it("never puts the eye at or below grade", () => {
+    for (const o of sweep()) {
+      expect(stage4OrbitKeyframe(kf4, o).position[1], JSON.stringify(o)).toBeGreaterThan(0);
+    }
+  });
+
+  it("never sits inside the footprint radius of the origin", () => {
+    for (const o of sweep()) {
+      const p = stage4OrbitKeyframe(kf4, o).position;
+      expect(Math.hypot(p[0], p[1], p[2]), JSON.stringify(o)).toBeGreaterThanOrEqual(
+        STAGE4_CLAMP.minRadius - 1e-6,
+      );
+      expect(Math.hypot(p[0], p[1], p[2])).toBeGreaterThan(WELD_FOOTPRINT_RADIUS);
+    }
+  });
+
+  it("never sits inside Weld's real massing", () => {
+    for (const o of sweep()) {
+      const p = stage4OrbitKeyframe(kf4, o).position;
+      const inPlan = pointInPolygon([p[0], -p[2]], ring);
+      expect(!inPlan || p[1] > WELD.ridge, JSON.stringify(o)).toBe(true);
+    }
   });
 });
 

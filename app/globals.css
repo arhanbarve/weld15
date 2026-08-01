@@ -159,7 +159,7 @@ button,
   align-items: center;
 }
 
-/* In the room, the HUD moves to the top.
+/* In the room, and now at stage 4 too (P10), the HUD moves to the top.
    MEASURED, not a preference. At stage 5 the camera stands in bedroom B and looks
    diagonally down, so the floor -- and every piece of furniture standing on it --
    projects into the bottom of the frame: the fit-out's 29 anchors land between y 589
@@ -170,7 +170,18 @@ button,
    The top is empty at this stage for the same reason the bottom is full -- it holds
    wall and ceiling, which nothing stands on. So this is not a compromise between the
    two: it is the only half of the frame the HUD can sit in without covering the
-   thing the stage exists to let you touch. */
+   thing the stage exists to let you touch.
+   Stage 4 (P10) is the same shape of problem: it is now draggable too, and every
+   capture through the phase showed the panel sitting centre-bottom over the gable's
+   own base at t = 0. Its box measures 369 px wide at 1280 x 720 (x 455 to 825),
+   clear of .a11y-alt-dock's 430 px right edge by 25 px.
+   STAGE 3 IS DELIBERATELY NOT INCLUDED, and that is a measurement too, not an
+   oversight. Stage 3's HUD carries the full orbit control row alongside every other
+   row at once and measures 537 px wide at 1280 x 720 (x 371 to 908) -- 58 px into
+   .a11y-alt-dock's box, which made the stage nav buttons themselves unclickable
+   under Playwright's actionability check. Moving stage 3's HUD to the top would
+   need its own width or layout change to clear that dock, which is a second
+   project and not this one. */
 .hud.hud-room {
   bottom: auto;
   top: var(--s2);

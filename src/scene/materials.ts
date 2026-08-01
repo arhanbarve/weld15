@@ -64,6 +64,14 @@ const BRICK = mix(DAY.crimson, DAY.oakDeep, 0.35);
 const SLATE = scale(mix(DAY.edge, DAY.sky, 0.5), 0.14);
 
 /**
+ * Furniture hardware -- drawer pulls, nothing else. No source gives a finish, so
+ * this is one documented operation on `edge`, in the manner of BRICK and SLATE
+ * rather than an invented hex: a third of the way toward black, which is what
+ * turns a mineral grey satin rather than leaving it reading as stone.
+ */
+const HARDWARE = scale(DAY.edge, 0.65);
+
+/**
  * Nominal oak board width, ft.
  *
  * No source in the project gives one: not weld.json, not the 1875 specification,
@@ -300,6 +308,74 @@ export function oakNormalMap(size: number = DEFAULT_GRAIN_PX): THREE.Texture {
   return tex;
 }
 
+const DEFAULT_PLASTER_PX = 256;
+
+/** Fixed seed, distinct from the oak grain's. */
+const PLASTER_SEED = 0x9e;
+
+/**
+ * Plaster's tooth is isotropic -- unlike oak's grain, which is deliberately
+ * anisotropic (see tiltX() above) -- so it tilts in BOTH x and y, at an
+ * amplitude an order of magnitude below the grain's: a trowelled surface, not
+ * a plank. ASSUMED, like every surface figure in this module without a
+ * source.
+ */
+const PLASTER_TILT = 0.05;
+/** Specks per pixel^2 of canvas, at DEFAULT_PLASTER_PX. ASSUMED density. */
+const PLASTER_DENSITY = 1 / 300;
+const PLASTER_SPECK_PX = 2;
+
+function tiltXY(dx: number, dy: number): string {
+  return `rgb(${Math.round(clamp(128 + dx * 127, 0, 255))},${Math.round(clamp(128 + dy * 127, 0, 255))},255)`;
+}
+
+/**
+ * The plaster tooth, drawn once: a neutral field of small, randomly tilted
+ * specks. Only fillRect is used, for the same reason drawGrain() avoids arc
+ * -- tests/materials.test.ts's canvas stub implements fillRect and stroked
+ * paths, not curves, and this module has to survive that stub as well as a
+ * real canvas.
+ */
+function drawPlasterTooth(ctx: Ctx2D, size: number): void {
+  const rand = mulberry32(PLASTER_SEED);
+  ctx.fillStyle = tiltXY(0, 0);
+  ctx.fillRect(0, 0, size, size);
+
+  const count = Math.round(size * size * PLASTER_DENSITY);
+  for (let i = 0; i < count; i++) {
+    const x = rand() * size;
+    const y = rand() * size;
+    const dx = (rand() - 0.5) * 2 * PLASTER_TILT;
+    const dy = (rand() - 0.5) * 2 * PLASTER_TILT;
+    ctx.fillStyle = tiltXY(dx, dy);
+    ctx.fillRect(x, y, PLASTER_SPECK_PX, PLASTER_SPECK_PX);
+  }
+}
+
+const plasterCache = new Map<number, THREE.Texture>();
+
+/** Procedural plaster tooth as a normal map. No texture file, same machinery as oakNormalMap(). */
+export function plasterNormalMap(size: number = DEFAULT_PLASTER_PX): THREE.Texture {
+  const hit = plasterCache.get(size);
+  if (hit) return hit;
+
+  const surface = grainCanvas(size);
+  let tex: THREE.Texture;
+  if (surface) {
+    drawPlasterTooth(surface.ctx, size);
+    tex = new THREE.CanvasTexture(surface.canvas);
+  } else {
+    tex = new THREE.Texture();
+  }
+
+  tex.name = `plaster-tooth-${size}`;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(1, 1);
+  plasterCache.set(size, tex);
+  return tex;
+}
+
 export type Palette = {
   plaster: THREE.MeshStandardMaterial;
   oak: THREE.MeshStandardMaterial;
@@ -309,6 +385,7 @@ export type Palette = {
   oakDeep: THREE.MeshStandardMaterial;
   slate: THREE.MeshStandardMaterial;
   brick: THREE.MeshStandardMaterial;
+  hardware: THREE.MeshStandardMaterial;
 };
 
 let cache: Palette | null = null;
@@ -331,6 +408,16 @@ export function materials(): Palette {
     roughness: 0.95,
     metalness: 0,
   });
+  // Both are the same trowelled surface, just shaded and tinted differently,
+  // so both take the same tooth -- unlike the oak grain, low-amplitude and
+  // isotropic enough that neither needs scaleFloorUv()'s per-face scaling.
+  const tooth = plasterNormalMap();
+  if (tooth.image) {
+    plaster.normalMap = tooth;
+    plaster.normalScale.set(0.18, 0.18);
+    masonry.normalMap = tooth;
+    masonry.normalScale.set(0.18, 0.18);
+  }
 
   // Satin-finished boards: enough sheen to catch the north light, nowhere near
   // gloss.
@@ -394,8 +481,8 @@ export function materials(): Palette {
     //
     // What carries the glass instead: a low roughness for the specular highlight,
     // an ior that still drives the Fresnel falloff so it brightens at grazing
-    // angles, and opacity. If it ever needs to look wetter, an envMap is the cheap
-    // next step, not transmission.
+    // angles, and opacity. Lighting.tsx's scene.environment (P10) is the envMap
+    // this note used to call the next step, not transmission.
     transmission: 0,
     ior: 1.52,
     transparent: true,
@@ -418,7 +505,16 @@ export function materials(): Palette {
     metalness: 0,
   });
 
-  cache = { plaster, oak, masonry, glazing, crimson, oakDeep, slate, brick };
+  // The one metal in the palette: drawer and dresser pulls. Satin, not mirror --
+  // enough metalness to read as hardware rather than painted wood, roughness high
+  // enough that it never throws a hard specular pinpoint under the single sun.
+  const hardware = new THREE.MeshStandardMaterial({
+    color: HARDWARE,
+    roughness: 0.45,
+    metalness: 0.85,
+  });
+
+  cache = { plaster, oak, masonry, glazing, crimson, oakDeep, slate, brick, hardware };
   return cache;
 }
 
@@ -427,4 +523,6 @@ export function disposeMaterials(): void {
   cache = null;
   for (const t of grainCache.values()) t.dispose();
   grainCache.clear();
+  for (const t of plasterCache.values()) t.dispose();
+  plasterCache.clear();
 }

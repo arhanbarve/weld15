@@ -7,6 +7,8 @@ import * as THREE from "three";
 import { mergeBufferGeometries } from "three-stdlib";
 import { buildSuite, type Rect, type SuiteParams } from "@/geo/rooms";
 import { buildWalls, suiteFootprint, type Opening, type Wall } from "@/geo/walls";
+import { sashParts } from "@/geo/sash";
+import { trimParts, RAIL_H } from "@/geo/trim";
 import { suiteToThree, floorLevel } from "@/geo/place";
 import type { Piece } from "@/geo/furniture";
 import type { DragResult } from "@/geo/drag";
@@ -20,13 +22,18 @@ import { Furniture } from "./Furniture";
  * with a reveal at every window.
  *
  * WHAT IS DRAWN, AND HOW MANY DRAW CALLS IT COSTS
- * Seven meshes at the defaults, plus eight from <Furniture>. Every one of them is
- * a merge of many boxes: the fifteen wall bands become thirty-one boxes once the
- * openings are cut out of them, and all thirty-one land in two geometries chosen
- * by wall kind, because the kind is what decides the material. One mesh per box
- * would be 31 draw calls for the walls alone against a budget of 25 for the whole
- * suite. The merge is therefore not an optimisation bolted on afterwards; it is
- * why the openings can be cut at all.
+ * Nine meshes at the defaults (P10 added sash joinery, which also carries
+ * baseboard and picture rail, and a separate cornice mesh so it stays
+ * visible when the ceiling plate is cut away), plus eleven from <Furniture>
+ * (P10 batches by kind AND material, up from eight). Every one of them is a
+ * merge of many boxes: the fifteen wall bands
+ * become thirty-one boxes once the openings are cut out of them, and all
+ * thirty-one land in two geometries chosen by wall kind, because the kind is
+ * what decides the material. One mesh per box would be 31 draw calls for the
+ * walls alone against a budget of 25 for the whole suite, already exceeded
+ * and re-measured at the end of P10 rather than pretended otherwise. The
+ * merge is therefore not an optimisation bolted on afterwards; it is why the
+ * openings can be cut at all.
  *
  * WHY OPENINGS ARE THREE OR FOUR BOXES AND NEVER A HOLE
  * There is no CSG here and none is wanted. A band with a door in it is emitted as
@@ -53,16 +60,12 @@ import { Furniture } from "./Furniture";
  * depth occludes whatever is drawn after it, so the suite sorted wrong against the
  * dissolving shell during the threshold.
  *
- * WHAT THE OPENING LIST GETS WRONG, AND WHY IT IS RENDERED ANYWAY
- * buildOpenings() centres each face window on its WALL BAND rather than on the
- * room it lights. The facade band is one 44 ft band shared by four rooms, so at the
- * defaults all four facade windows come back at offset 18 with width 8 -- the same
- * span, four times over. Rendering them literally means four coincident panes of a
- * transmissive material fighting for the same depth, so overlapping cuts of the same
- * kind are merged before anything is emitted. What is NOT done is moving them: the
- * exterior's window bays come from the same list, and an interior that quietly
- * disagrees with the facade is worse than an interior that is wrong in the same way.
- * The fix belongs in buildOpenings(); see the report.
+ * WHY OVERLAPPING CUTS ARE STILL MERGED, EVEN THOUGH THEY NO LONGER OVERLAP AT THE DEFAULTS
+ * buildOpenings() (walls.ts) centres each window on the ROOM it lights, not on the
+ * band it sits in -- a bug where all four facade windows landed at the same offset
+ * was fixed there. What remains here is the merge of overlapping cuts of the same
+ * kind before anything is emitted, kept because a slider can still bring two rooms'
+ * windows into contact on a shared band; at the defaults it has nothing to do.
  */
 
 /** Floor slab thickness, ft. Reads as a floor in the cutaway rather than as paper. */
@@ -84,8 +87,7 @@ const DOOR_H = 7;
 const SILL_H = 2.5;
 const HEAD_H = 9;
 
-/** Glazing: a nominal single pane, and how far in from the outer face it sits. */
-const PANE_T = 0.06;
+/** How far in from the outer face the sash sits -- see sashSlabs(). */
 const PANE_INSET = 0.3;
 
 /**
@@ -286,46 +288,102 @@ function wallSlabs(w: Wall, cuts: Cut[], floor: number, wallH: number): Slab[] {
 }
 
 /**
- * Where the pane sits across the band's thickness: the low coordinate of the
- * glass, measured on whichever axis the band is thin in.
- *
- * A sash sits toward the OUTER face, and that asymmetry is the point -- it is what
- * leaves 1.2 ft of reveal on the room side of a 1.5 ft masonry wall and only 0.3 ft
- * outside. Which face is outer is derived from the rooms the band touches rather
- * than assumed: the facade band runs at u = -1.5..0 with its rooms at higher u, the
- * gable band at v = 44..45.5 with its room at lower v, so no fixed sign is right
- * for both. A band that touches no room at all gets a centred pane.
+ * Whether the ROOM face of this band is at its low or high edge on the
+ * thickness axis, derived from the rooms the band touches rather than
+ * assumed: the facade band runs at u = -1.5..0 with its rooms at higher u
+ * (room is high), the gable band at v = 44..45.5 with its room at lower v
+ * (room is low), so no fixed sign is right for both. A band that touches no
+ * room at all is called low arbitrarily -- nothing looks at it from either
+ * side.
  */
-function paneLow(w: Wall, rooms: Rect[]): number {
-  const { alongV, thick } = bandAxis(w);
+function roomFaceIsLow(w: Wall, rooms: Rect[]): boolean {
+  const { alongV } = bandAxis(w);
   const mid = alongV ? w.u + w.du / 2 : w.v + w.dv / 2;
-  const low = alongV ? w.u : w.v;
   const centres = w.between
     .map((id) => rooms.find((r) => r.id === id))
     .filter((r): r is Rect => r !== undefined)
     .map((r) => (alongV ? r.u + r.du / 2 : r.v + r.dv / 2));
-
-  if (centres.length === 0) return mid - PANE_T / 2;
+  if (centres.length === 0) return true;
   const inside = centres.reduce((a, b) => a + b, 0) / centres.length;
-  return inside > mid
-    ? low + PANE_INSET
-    : low + thick - PANE_INSET - PANE_T;
+  return inside <= mid;
 }
 
-/** The glass in one band's window voids. Doors get none, which is the point of the split. */
-function paneSlabs(w: Wall, cuts: Cut[], rooms: Rect[], floor: number): Slab[] {
-  const { alongV } = bandAxis(w);
-  const p = paneLow(w, rooms);
-  // A window is the cut with a sill under it; a door reaches the floor.
-  return cuts
-    .filter((c) => c.y0 > EPS)
-    .map((c) => ({
-      ...(alongV
-        ? { u: p, v: w.v + c.lo, du: PANE_T, dv: c.hi - c.lo }
-        : { u: w.u + c.lo, v: p, du: c.hi - c.lo, dv: PANE_T }),
-      y0: floor + c.y0,
-      y1: floor + c.y1,
-    }));
+/**
+ * Every real window in one band's voids, as Slabs in the suite frame. Doors
+ * get none, which is the point of the cut-kind split in cutsFor().
+ *
+ * geo/sash.ts builds each window in its OWN local frame -- u along the
+ * opening's width, v from the room face (0) into the wall, y absolute height
+ * -- so this function's whole job is the same axis remap paneSlabs() used to
+ * do for one flat pane: which suite axis is "along" the band (the opening's
+ * u) and which is "across" its thickness (the opening's v), and, since v
+ * always runs room-to-outer while the suite has no such universal sign,
+ * mirroring it when the room face is the band's HIGH edge rather than its low
+ * one. `sashDepth` keeps the same ~1.2 ft (of a 1.5 ft wall) reveal on the
+ * room side the old flat pane placed its glass at, now spent on a sash with
+ * real thickness instead of a single 0.06 ft plane.
+ */
+function sashSlabs(
+  w: Wall,
+  cuts: Cut[],
+  rooms: Rect[],
+  floor: number,
+): { joinery: Slab[]; glass: Slab[] } {
+  const { alongV, thick } = bandAxis(w);
+  const low = alongV ? w.u : w.v;
+  const roomLow = roomFaceIsLow(w, rooms);
+  const sashDepth = thick - PANE_INSET;
+
+  const joinery: Slab[] = [];
+  const glass: Slab[] = [];
+  for (const c of cuts) {
+    if (c.y0 <= EPS) continue; // a door reaches the floor; only windows get a sash
+    const width = c.hi - c.lo;
+    for (const p of sashParts(width, floor + c.y0, floor + c.y1, sashDepth)) {
+      const alongLo = c.lo + p.u;
+      const across = roomLow ? low + p.v : low + thick - p.v - p.dv;
+      const slab: Slab = alongV
+        ? { u: across, v: w.v + alongLo, du: p.dv, dv: p.du, y0: p.y0, y1: p.y1 }
+        : { u: w.u + alongLo, v: across, du: p.du, dv: p.dv, y0: p.y0, y1: p.y1 };
+      (p.material === "glass" ? glass : joinery).push(slab);
+    }
+  }
+  return { joinery, glass };
+}
+
+/**
+ * Baseboard, picture rail and cornice for one band, on every room-facing
+ * side of it. An exterior band has exactly one: the room it encloses. A
+ * partition, in this suite's layout, always has a real room on both sides
+ * -- rooms.ts never leaves a partition's far side open -- so both faces get
+ * trim, each proud in the opposite direction, at the SAME across-axis
+ * mirror sashSlabs() uses.
+ */
+function roomTrimSlabs(
+  w: Wall,
+  cuts: Cut[],
+  rooms: Rect[],
+  floor: number,
+  ceiling: number,
+): { joinery: Slab[]; plaster: Slab[] } {
+  const { alongV, along, thick } = bandAxis(w);
+  const low = alongV ? w.u : w.v;
+  const doorSpans = solidSpans(cuts.filter((c) => c.y0 <= EPS), along);
+  const railSpans = solidSpans(cuts.filter((c) => c.y1 > RAIL_H + EPS), along);
+  const faces = w.kind === "exterior" ? [roomFaceIsLow(w, rooms)] : [true, false];
+
+  const joinery: Slab[] = [];
+  const plaster: Slab[] = [];
+  for (const roomLow of faces) {
+    for (const p of trimParts(doorSpans, railSpans, along, ceiling)) {
+      const across = roomLow ? low + p.v : low + thick - p.v - p.dv;
+      const slab: Slab = alongV
+        ? { u: across, v: w.v + p.u, du: p.dv, dv: p.du, y0: floor + p.y0, y1: floor + p.y1 }
+        : { u: w.u + p.u, v: across, du: p.du, dv: p.dv, y0: floor + p.y0, y1: floor + p.y1 };
+      (p.material === "plaster" ? plaster : joinery).push(slab);
+    }
+  }
+  return { joinery, plaster };
 }
 
 /**
@@ -370,13 +428,15 @@ type SuiteGeometry = {
   unknownMark: THREE.BufferGeometry | null;
   partitions: THREE.BufferGeometry | null;
   masonry: THREE.BufferGeometry | null;
+  sashJoinery: THREE.BufferGeometry | null;
   glazing: THREE.BufferGeometry | null;
+  cornice: THREE.BufferGeometry | null;
   ceiling: THREE.BufferGeometry | null;
   yaw: number;
 };
 
 /**
- * The whole interior as at most seven geometries, grouped by the material each
+ * The whole interior as at most nine geometries, grouped by the material each
  * needs rather than by what part of the building it is.
  */
 function buildSuiteGeometry(params: SuiteParams, hidden: ReadonlySet<string>): SuiteGeometry {
@@ -408,7 +468,9 @@ function buildSuiteGeometry(params: SuiteParams, hidden: ReadonlySet<string>): S
 
   const partitions: Slab[] = [];
   const masonry: Slab[] = [];
-  const panes: Slab[] = [];
+  const sashJoinery: Slab[] = [];
+  const glazing: Slab[] = [];
+  const cornice: Slab[] = [];
   for (const w of walls) {
     // A hidden wall is not drawn at all rather than drawn transparent, and its glazing
     // goes with it. Transparency would leave the pane hanging in mid-air where the
@@ -419,7 +481,12 @@ function buildSuiteGeometry(params: SuiteParams, hidden: ReadonlySet<string>): S
     const cuts = cutsFor(w, openings, wallH);
     const target = w.kind === "exterior" ? masonry : partitions;
     target.push(...wallSlabs(w, cuts, floor, wallH));
-    panes.push(...paneSlabs(w, cuts, suite.rooms, floor));
+    const sash = sashSlabs(w, cuts, suite.rooms, floor);
+    sashJoinery.push(...sash.joinery);
+    glazing.push(...sash.glass);
+    const trim = roomTrimSlabs(w, cuts, suite.rooms, floor, wallH);
+    sashJoinery.push(...trim.joinery);
+    cornice.push(...trim.plaster);
   }
 
   /**
@@ -448,6 +515,10 @@ function buildSuiteGeometry(params: SuiteParams, hidden: ReadonlySet<string>): S
     y0: ceilingH,
     y1: ceilingH + CEILING_SLAB,
   }));
+  // NOT merged into the ceiling plate above, on purpose: that mesh is hidden
+  // in every cutaway mode but "none" (see the `ceiling` visibility prop
+  // below), while the cornice sits on the WALLS and should stay visible
+  // looking down into a roofless room.
 
   return {
     oakFloors: mergeSlabs(oak, yaw, params, "oak floors"),
@@ -455,14 +526,16 @@ function buildSuiteGeometry(params: SuiteParams, hidden: ReadonlySet<string>): S
     unknownMark: mergeSlabs(mark, yaw, params, "unknown room mark"),
     partitions: mergeSlabs(partitions, yaw, params, "partitions"),
     masonry: mergeSlabs(masonry, yaw, params, "exterior walls"),
-    glazing: mergeSlabs(panes, yaw, params, "glazing"),
+    sashJoinery: mergeSlabs(sashJoinery, yaw, params, "sash joinery"),
+    glazing: mergeSlabs(glazing, yaw, params, "glazing"),
+    cornice: mergeSlabs(cornice, yaw, params, "cornice"),
     ceiling: mergeSlabs(ceiling, yaw, params, "ceiling"),
     yaw,
   };
 }
 
 /**
- * The five palette materials this component paints with, cloned once.
+ * The six palette materials this component paints with, cloned once.
  *
  * materials() hands out singletons for the life of the process and that is
  * exactly right for what it guarantees: one shader program, one grain texture, no
@@ -482,6 +555,7 @@ function useSuitePalette(opacity: number) {
     const m = materials();
     const p = {
       oak: m.oak.clone(),
+      oakDeep: m.oakDeep.clone(),
       plaster: m.plaster.clone(),
       masonry: m.masonry.clone(),
       glazing: m.glazing.clone(),
@@ -685,7 +759,13 @@ export function Suite({
       {geo.masonry ? (
         <mesh geometry={geo.masonry} material={pal.masonry} receiveShadow={solid} />
       ) : null}
+      {geo.sashJoinery ? (
+        <mesh geometry={geo.sashJoinery} material={pal.oakDeep} receiveShadow={solid} />
+      ) : null}
       {geo.glazing ? <mesh geometry={geo.glazing} material={pal.glazing} /> : null}
+      {geo.cornice ? (
+        <mesh geometry={geo.cornice} material={pal.plaster} receiveShadow={solid} />
+      ) : null}
       {geo.ceiling ? (
         <mesh geometry={geo.ceiling} material={pal.plaster} visible={ceiling} />
       ) : null}
