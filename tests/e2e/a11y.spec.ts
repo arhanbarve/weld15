@@ -121,22 +121,30 @@ async function scanStage(page: Page, stage: number): Promise<string[]> {
     /*
      * The one INCOMPLETE result, accounted for rather than ignored.
      *
-     * Every scan reports exactly one: color-contrast, and its FIFTEEN nodes at stage 0
-     * (9 that axe cannot resolve against a gradient, 6 it calls too short) are all
-     * (the count has moved twice and is worth tracking rather than rounding: fourteen
-     * until `.hud-num` took an opaque --void-deep ground in 5bcb253 -- its contrast was
-     * 4.15:1 against a ground that moved with the frame, because 18% of Earth's lit limb
-     * came through --chip-scan behind it, and it is 5.06:1 flat now -- then thirteen,
-     * then fifteen when the high-contrast toggle added `button[data-testid=
-     * "contrast-toggle"]` and `.hud-orbit > span[aria-hidden="true"]`. Both are the
-     * gradient cause, and the toggle deliberately keeps --chip-scan so it looks like
-     * every other HUD button; an opaque ground would resolve it and single it out)
-     * in other owners' chrome -- `.hud-stage`, `.hud-num`, the six stage buttons,
-     * the two `.hud-t` rows, the sun readout, the area readout and Sources' summary.
-     * Two causes, both read out of axe's own messages: "background color could not
-     * be determined due to a background gradient", because the HUD sits on
-     * --chip-scan over .vignette's radial gradient, and "content is too short to
-     * determine if it is actual text content" for the single-digit stage buttons.
+     * Every scan reports exactly one: color-contrast, and its TWELVE nodes at stage 0
+     * (six that axe cannot resolve against a gradient, six it calls too short) are all
+     * (the count has moved several times and is worth tracking rather than rounding:
+     * fourteen until `.hud-num` took an opaque --void-deep ground in 5bcb253 -- its
+     * contrast was 4.15:1 against a ground that moved with the frame, because 18% of
+     * Earth's lit limb came through --chip-scan behind it, and it is 5.06:1 flat now --
+     * then thirteen, then fifteen when the high-contrast toggle added `button[data-testid=
+     * "contrast-toggle"]` and `.hud-orbit > span[aria-hidden="true"]`, both the gradient
+     * cause. P10 step 5 folded the sun and Sources into the dock and replaced the per-stage
+     * HUD with `.dock-card`, which removed `.hud-num` from this list (it inherits the
+     * dock's own ground now) and added `.imagery-chip`, `journey-read` and the two
+     * disclosure summaries -- `.dock-fold` and `.sources-toggle` -- each still sitting on
+     * --chip-scan. Step 6 then retired the contrast toggle outright rather than build the
+     * missing control, which is why RE-MEASURED at twelve rather than fourteen or fifteen:
+     * gradient nodes are `.imagery-chip`, `.hud-stage`, `journey-read`, `.fly`,
+     * `.dock-fold > summary` and `summary[data-testid="sources-toggle"]`; too-short nodes
+     * are `.on` -- the current stage tick -- and the five OTHER stage buttons, `Stage 1`
+     * through `Stage 5`. `.hud-orbit > span[aria-hidden="true"]` is NOT among them at
+     * stage 0: it belongs to the first-person walk row, which only mounts at stage 5, and
+     * step 8's orbit keys have not landed yet either)
+     * in other owners' chrome. Two causes, both read out of axe's own messages:
+     * "background color could not be determined due to a background gradient", because the
+     * dock sits on --chip-scan over .vignette's radial gradient, and "content is too short
+     * to determine if it is actual text content" for the single-digit stage buttons.
      * Neither is a failure and neither is this owner's to fix.
      *
      * What IS asserted is that none of those nodes is A11yAlt's. That is not
@@ -296,12 +304,31 @@ test.describe("P8 -- the model has a text alternative", () => {
     await gotoStage(page, 4);
 
     /*
-     * Stage 4's threshold slider IS a camera move: it flies the camera thirty-odd feet
-     * through Weld's north gable wall, and the description names the percentage it is
-     * through, so every input event changes the sentence. That makes it the one control
-     * in the app that can flood a live region, and P8's requirement -- "a live region
-     * that fires on every frame is worse than none" -- is measured here rather than
-     * asserted from the presence of a setTimeout.
+     * Stage 4's OWN SHARE of the master bar IS a camera move: it flies the camera
+     * thirty-odd feet through Weld's north gable wall, and the description names the
+     * percentage it is through, so every input event changes the sentence. That makes it
+     * the one control in the app that can flood a live region, and P8's requirement -- "a
+     * live region that fires on every frame is worse than none" -- is measured here rather
+     * than asserted from the presence of a setTimeout.
+     *
+     * P10 step 5 replaced the stage-4-only `threshold-t` slider with `journey`, one input
+     * for the whole descent (JourneyBar.tsx). Sweeping its full 0..1 range would fly
+     * through all six stages rather than flood stage 4's own sentence, so the sweep below
+     * is confined to stage 4's slice of the bar, `[boundaries[4], boundaries[5])`, read
+     * off `window.__journey`, the same probe the slider itself publishes.
+     *
+     * KEPT SHORT OF THE TOP BY MORE THAN HALF A STEP, AND THAT MARGIN IS MEASURED, NOT
+     * GUESSED. `fromJourney` names u = boundaries[5] (which is 1) {stage: 5, t: 0} rather
+     * than {stage: 4, t: 1} -- those are the same pose, named from the far side of the
+     * seam -- so reaching it would swap the stage the sweep is flooding a live region
+     * about, mid-sweep. The obvious fix, capping at u = 0.999 of the way from lo to hi,
+     * measured as landing on stage 5 anyway: Chromium's range input rounds a
+     * PROGRAMMATICALLY set `.value` to the nearest `step` (0.0005 here) even though the
+     * spec's sanitisation algorithm only documents clamping to min/max, and 0.999 of a
+     * ~13%-of-bar-wide leg lands within a quarter-step of the top, so it snapped up to
+     * exactly 1. `marginU` below is chosen to sit inside the one window that clears both
+     * constraints: bigger than half a step, so Chromium rounds down instead of up, and
+     * small enough that the stopping point still names "100 per cent" (t >= 0.995).
      *
      * The whole sweep runs INSIDE the page. Forty round trips from Node would each take
      * tens of milliseconds under SwiftShader and the gaps between them, not the throttle,
@@ -316,8 +343,16 @@ test.describe("P8 -- the model has a text alternative", () => {
     const N = 40;
     const measured = await page.evaluate(async (n) => {
       const el = document.querySelector('[data-testid="a11y-alt-live"]')!;
-      const slider = document.querySelector('[data-testid="threshold-t"]') as HTMLInputElement;
+      const slider = document.querySelector('[data-testid="journey"]') as HTMLInputElement;
       const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      const boundaries = (window as unknown as { __journey: { boundaries: number[] } }).__journey
+        .boundaries;
+      const lo = boundaries[4]!;
+      const hi = boundaries[5]!;
+      const step = Number(slider.step) || 0.0005;
+      // Between 0.5 step (Chromium's own rounding radius) and 0.5% of the leg's span
+      // (the room "100 per cent" has before it rounds down to "99"). See above.
+      const marginU = step * 0.9;
 
       const emitted: string[] = [];
       const record = () => {
@@ -329,10 +364,13 @@ test.describe("P8 -- the model has a text alternative", () => {
       obs.observe(el, { childList: true, characterData: true, subtree: true });
 
       // 40 events over roughly a second, which is a slow deliberate drag rather than a
-      // flick: a fast one would be an easier test to pass.
+      // flick: a fast one would be an easier test to pass. Capped at hi - marginU rather
+      // than hi itself, for the reason above.
       const values: string[] = [];
+      const cap = Math.min(1, Math.max(0, 1 - marginU / (hi - lo)));
       for (let i = 0; i < n; i++) {
-        const v = String(i / (n - 1));
+        const frac = Math.min(cap, i / (n - 1));
+        const v = String(lo + frac * (hi - lo));
         values.push(v);
         setValue.call(slider, v);
         slider.dispatchEvent(new Event("input", { bubbles: true }));
@@ -383,21 +421,20 @@ test.describe("P8 -- the model has a text alternative", () => {
      *
      * Second is then the toggle, and that is a visual-order claim rather than an
      * arbitrary one: the dock is top-left, directly under where skip appears, and the
-     * HUD's stage buttons are centred. Tab has to walk top-left before centre.
+     * right-hand dock is top-right. Tab has to walk top-left before top-right.
      */
     /*
-     * FOUR STOPS SINCE P9, NOT THREE, and the addition is placed by the same visual-order rule
-     * this test already argues from rather than appended for convenience. P9 adds a fly-down
-     * control, and it sits at the TOP CENTRE of the viewport -- above the HUD, which is bottom
-     * centre. So the walk is top-left, top-left, top-centre, bottom-centre: skip, the description
-     * toggle, the fly-down, then the stage buttons.
+     * FOUR STOPS, AND THE THIRD CHANGED UNDER P10 STEP 5, NOT STEP 6. Through P9 the fly-down
+     * sat at the top centre of the viewport on its own, ahead of the HUD's stage buttons in
+     * tab order, so the third stop was `fly-down`. Step 5 folded the fly-down into the one
+     * dock's `.dock-card`, behind JourneyBar -- and JourneyBar's own `journey` input, the
+     * master scrubber, is now the first focusable thing inside the card, ahead of both the
+     * fly-down button and the stage ticks it carries. So the third stop is `journey`, not
+     * `fly-down`; this was a step 5 regression this test did not catch until step 6 re-ran it.
      *
-     * The claim this test exists to make is unchanged and is still the first two entries: skip is
-     * first, and the description toggle is second. The tail is what pins the new control's place
-     * so that a later control cannot quietly insert itself ahead of the description.
-     *
-     * The fly-down is not mounted under reduced motion or at stage 3 and beyond, and this test
-     * runs at stage 0 with motion on, so it is present here.
+     * The claim this test exists to make is unchanged and is still the first two entries: skip
+     * is first, and the description toggle is second. The tail pins whichever control the dock
+     * puts first, so a later control cannot quietly insert itself ahead of the description.
      */
     const stops: (string | null)[] = [];
     for (let i = 0; i < 4; i++) {
@@ -409,7 +446,7 @@ test.describe("P8 -- the model has a text alternative", () => {
     expect(stops, `tab stops: ${stops.join(" -> ")}`).toEqual([
       "skip",
       "a11y-alt-toggle",
-      "fly-down",
+      "journey",
       "stage-0",
     ]);
 
@@ -446,28 +483,37 @@ test.describe("P8 -- the model has a text alternative", () => {
     await expect(page.getByTestId("a11y-alt-scroll")).toHaveAttribute("tabindex", "0");
 
     /*
-     * AND IT DOES NOT COVER A CONTROL. At stage 5 the HUD moves to the top of the frame,
-     * which is the same corner this dock lives in, and the panel is at its tallest when
-     * open. globals.css's .sources rule records this exact defect being shipped once
-     * already -- a 38rem disclosure over the stage buttons -- so it is gated rather than
-     * commented. The check is on the boxes, because "it looked fine" is what shipped it.
+     * AND IT DOES NOT COVER A CONTROL. Through P9 the HUD moved to the top of the frame at
+     * stage 5, the same corner this description dock lives in; P10 step 5 put the right-hand
+     * dock at the top on every stage, so the two docks are always in the same corner and the
+     * panel is at its tallest when open regardless of stage. globals.css's .sources rule
+     * records this exact defect being shipped once already -- a 38rem disclosure over the
+     * stage buttons -- so it is gated rather than commented. The check is on the boxes,
+     * because "it looked fine" is what shipped it.
+     *
+     * LEFT DOCK VS RIGHT DOCK, NOT LEFT DOCK VS TWO OF THE RIGHT DOCK'S CHILDREN. Through
+     * P9 the HUD and Sources were separate fixed elements, so `[data-testid="hud"]` and
+     * `[data-testid="sources"]` were the two boxes worth checking against the left-hand
+     * description panel. P10 step 5 put both inside one `.dock`, `data-testid="dock"`
+     * (Hud.tsx), which is now the single fixed element on the right -- `hud` is a
+     * `.dock-card` nested inside it, and `sources` sits alongside that card in the same
+     * column. Checking the two children individually would miss the disclosure between
+     * them (`view-fold`) overlapping the left dock while both named children stayed
+     * clear, so this compares the two OUTER boxes, which is the property that actually
+     * matters: do the two sides of the screen collide.
      */
     await gotoStage(page, 5);
     await page.getByTestId("a11y-alt").waitFor();
     const overlap = await page.evaluate(() => {
       const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
-      const a = box(".a11y-alt-dock");
-      const b = box('[data-testid="hud"]');
-      const c = box('[data-testid="sources"]');
+      const left = box(".a11y-alt-dock");
+      const right = box('[data-testid="dock"]');
       const hits = (p: DOMRect, q: DOMRect) =>
         p.left < q.right && q.left < p.right && p.top < q.bottom && q.top < p.bottom;
       const r = (x: DOMRect) => [x.left, x.right, x.top, x.bottom].map(Math.round);
-      return { hud: hits(a, b), sources: hits(a, c), dock: r(a), hudBox: r(b), sourcesBox: r(c) };
+      return { hits: hits(left, right), leftBox: r(left), rightBox: r(right) };
     });
-    expect(overlap.hud, `dock ${overlap.dock} vs hud ${overlap.hudBox}`).toBe(false);
-    expect(overlap.sources, `dock ${overlap.dock} vs sources ${overlap.sourcesBox}`).toBe(false);
-    console.log(
-      `stage 5 boxes [l,r,t,b]: dock ${overlap.dock}, hud ${overlap.hudBox}, sources ${overlap.sourcesBox}`,
-    );
+    expect(overlap.hits, `left ${overlap.leftBox} vs right ${overlap.rightBox}`).toBe(false);
+    console.log(`stage 5 boxes [l,r,t,b]: left dock ${overlap.leftBox}, right dock ${overlap.rightBox}`);
   });
 });

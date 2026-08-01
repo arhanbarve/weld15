@@ -1,0 +1,378 @@
+{
+  "boxes": {
+    "0": {
+      "hud": {
+        "x": 1058,
+        "y": 14,
+        "width": 368,
+        "height": 238
+      },
+      "a11yAltDock": {
+        "x": 14,
+        "y": 14,
+        "width": 416,
+        "height": 44
+      },
+      "a11yAltToggle": {
+        "x": 14,
+        "y": 14,
+        "width": 252,
+        "height": 44
+      },
+      "sources": {
+        "x": 1058,
+        "y": 367,
+        "width": 368,
+        "height": 46
+      },
+      "panelToggle": {
+        "x": 1058,
+        "y": 310,
+        "width": 368,
+        "height": 44
+      },
+      "flyDown": {
+        "x": 1082,
+        "y": 195,
+        "width": 165,
+        "height": 44
+      },
+      "imageryChip": {
+        "x": 1248,
+        "y": 857,
+        "width": 178,
+        "height": 29
+      }
+    },
+    "1": {
+      "hud": {
+        "x": 1058,
+        "y": 14,
+        "width": 368,
+        "height": 238
+      },
+      "a11yAltDock": {
+        "x": 14,
+        "y": 14,
+        "width": 416,
+        "height": 44
+      },
+      "a11yAltToggle": {
+        "x": 14,
+        "y": 14,
+        "width": 252,
+        "height": 44
+      },
+      "sources": {
+        "x": 1058,
+        "y": 367,
+        "width": 368,
+        "height": 46
+      },
+      "panelToggle": {
+        "x": 1058,
+        "y": 310,
+        "width": 368,
+        "height": 44
+      },
+      "flyDown": {
+        "x": 1160,
+        "y": 195,
+        "width": 165,
+        "height": 44
+      },
+      "imageryChip": {
+        "x": 1146,
+        "y": 857,
+        "width": 280,
+        "height": 29
+      }
+    },
+    "2": {
+      "hud": {
+        "x": 1058,
+        "y": 14,
+        "width": 368,
+        "height": 238
+      },
+      "a11yAltDock": {
+        "x": 14,
+        "y": 14,
+        "width": 416,
+        "height": 44
+      },
+      "a11yAltToggle": {
+        "x": 14,
+        "y": 14,
+        "width": 252,
+        "height": 44
+      },
+      "sources": {
+        "x": 1058,
+        "y": 367,
+        "width": 368,
+        "height": 46
+      },
+      "panelToggle": {
+        "x": 1058,
+        "y": 310,
+        "width": 368,
+        "height": 44
+      },
+      "flyDown": {
+        "x": 1160,
+        "y": 195,
+        "width": 165,
+        "height": 44
+      },
+      "imageryChip": {
+        "x": 1146,
+        "y": 857,
+        "width": 280,
+        "height": 29
+      }
+    },
+    "3": {
+      "hud": {
+        "x": 1058,
+        "y": 14,
+        "width": 368,
+        "height": 306
+      },
+      "a11yAltDock": {
+        "x": 14,
+        "y": 14,
+        "width": 416,
+        "height": 44
+      },
+      "a11yAltToggle": {
+        "x": 14,
+        "y": 14,
+        "width": 252,
+        "height": 44
+      },
+      "sources": {
+        "x": 1058,
+        "y": 435,
+        "width": 368,
+        "height": 46
+      },
+      "panelToggle": {
+        "x": 1058,
+        "y": 378,
+        "width": 368,
+        "height": 44
+      },
+      "flyDown": null,
+      "imageryChip": null
+    },
+    "4": {
+      "hud": {
+        "x": 1058,
+        "y": 14,
+        "width": 368,
+        "height": 194
+      },
+      "a11yAltDock": {
+        "x": 14,
+        "y": 14,
+        "width": 416,
+        "height": 44
+      },
+      "a11yAltToggle": {
+        "x": 14,
+        "y": 14,
+        "width": 252,
+        "height": 44
+      },
+      "sources": {
+        "x": 1058,
+        "y": 323,
+        "width": 368,
+        "height": 46
+      },
+      "panelToggle": {
+        "x": 1058,
+        "y": 266,
+        "width": 368,
+        "height": 44
+      },
+      "flyDown": null,
+      "imageryChip": null
+    },
+    "5": {
+      "hud": {
+        "x": 1058,
+        "y": 14,
+        "width": 368,
+        "height": 350
+      },
+      "a11yAltDock": {
+        "x": 14,
+        "y": 14,
+        "width": 416,
+        "height": 44
+      },
+      "a11yAltToggle": {
+        "x": 14,
+        "y": 14,
+        "width": 252,
+        "height": 44
+      },
+      "sources": {
+        "x": 1058,
+        "y": 479,
+        "width": 368,
+        "height": 46
+      },
+      "panelToggle": {
+        "x": 1058,
+        "y": 422,
+        "width": 368,
+        "height": 44
+      },
+      "flyDown": null,
+      "imageryChip": null
+    }
+  },
+  "marker": {
+    "w": 12,
+    "h": 12
+  },
+  "groundPatch": {
+    "1": {
+      "mean": [
+        143,
+        140,
+        138
+      ],
+      "meanSat": 0.049
+    },
+    "2": {
+      "mean": [
+        121,
+        133,
+        143
+      ],
+      "meanSat": 0.155
+    },
+    "3": {
+      "mean": [
+        119,
+        126,
+        127
+      ],
+      "meanSat": 0.074
+    }
+  },
+  "perf": {
+    "0": {
+      "calls": 21,
+      "triangles": 12465,
+      "lines": 0,
+      "geometries": 5,
+      "textures": 20,
+      "shadows": true,
+      "casters": 1,
+      "frames": 42,
+      "medianMs": 91.2
+    },
+    "1": {
+      "calls": 24,
+      "triangles": 16489,
+      "lines": 0,
+      "geometries": 12,
+      "textures": 25,
+      "shadows": true,
+      "casters": 1,
+      "frames": 73,
+      "medianMs": 112.2
+    },
+    "2": {
+      "calls": 30,
+      "triangles": 17569,
+      "lines": 0,
+      "geometries": 18,
+      "textures": 25,
+      "shadows": true,
+      "casters": 1,
+      "frames": 102,
+      "medianMs": 130
+    },
+    "3": {
+      "calls": 28,
+      "triangles": 16905,
+      "lines": 0,
+      "geometries": 17,
+      "textures": 25,
+      "shadows": true,
+      "casters": 1,
+      "frames": 120,
+      "medianMs": 152.2
+    },
+    "4": {
+      "calls": 21,
+      "triangles": 433,
+      "lines": 0,
+      "geometries": 17,
+      "textures": 25,
+      "shadows": true,
+      "casters": 1,
+      "frames": 120,
+      "medianMs": 167.1
+    },
+    "5": {
+      "calls": 38,
+      "triangles": 1469,
+      "lines": 0,
+      "geometries": 24,
+      "textures": 26,
+      "shadows": true,
+      "casters": 9,
+      "frames": 120,
+      "medianMs": 172.3
+    }
+  },
+  "cam": {
+    "0": {
+      "stage": 0,
+      "t": 0,
+      "alt": 31353346.5,
+      "fov": 45
+    },
+    "1": {
+      "stage": 1,
+      "t": 0,
+      "alt": 16332.26,
+      "fov": 45
+    },
+    "2": {
+      "stage": 2,
+      "t": 0,
+      "alt": 814.62,
+      "fov": 45
+    },
+    "3": {
+      "stage": 3,
+      "t": 0,
+      "alt": 110,
+      "fov": 45
+    },
+    "4": {
+      "stage": 4,
+      "t": 0,
+      "alt": 54.7,
+      "fov": 50
+    },
+    "5": {
+      "stage": 5,
+      "t": 0,
+      "alt": 17.83,
+      "fov": 62
+    }
+  },
+  "reach": {
+    "reachable": 17,
+    "total": 29
+  }
+}

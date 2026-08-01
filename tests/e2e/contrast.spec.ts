@@ -1,13 +1,17 @@
 import { test, expect, type Browser, type Page } from "@playwright/test";
 
 /**
- * MASTER.md's high-contrast toggle, and the two numbers it names.
+ * MASTER.md's high contrast, and the two numbers it names.
  *
- * §Accessibility gates does not leave the effect to taste: the toggle "thickens strokes to
- * 2.5px, raises `--mass` opacity to 0.22". docs/CHECKLIST.md measured that no such control
- * existed -- every `<button>` and `<input>` at all six stages scanned for "contrast" in
- * text, `aria-label` or `data-testid`, and the list came back empty -- so this file gates
- * both halves: that the control is a real toggle, and that the two figures reach the GPU.
+ * §Accessibility gates does not leave the effect to taste: high contrast "thickens strokes
+ * to 2.5px, raises `--mass` opacity to 0.22". Through P9 that lived behind a button
+ * (`contrast-toggle`) which docs/CHECKLIST.md had measured absent from the shipped app. P10
+ * step 6 retired the button outright rather than build the missing one: `highContrast` now
+ * mirrors `prefers-contrast: more` unconditionally, seeded and kept live by an effect in
+ * CameraRig.tsx beside the `prefers-reduced-motion` one it was modelled on, because the
+ * platform already reports the preference a button existed to ask for a second time. So
+ * this file gates one thing now, not two: that the two figures reach the GPU when the media
+ * query says `more`, driven by Playwright's `contrast` emulation rather than a click.
  *
  * WHY BOTH A PROBE AND PIXELS, WHICH IS THE ONE DESIGN DECISION IN HERE
  * Neither alone is enough and they fail in opposite directions.
@@ -59,9 +63,6 @@ type Campus = {
   dpr: number;
   lineWidth: number;
   weldLineWidth: number;
-  massOpacity: number;
-  /** Added in P9: the fill now ramps with altitude, and this is the other end of the ramp. */
-  massCeiling: number;
 };
 
 type Perf = { calls: number; triangles: number; lines: number };
@@ -73,21 +74,40 @@ const perf = (page: Page): Promise<Perf> =>
 const stageOf = (page: Page): Promise<number> =>
   page.evaluate(() => (window as unknown as { __weld: { stage: number } }).__weld.stage);
 
-/** MASTER.md's two figures, and the shipped values they replace. */
-const NORMAL = { line: 1.5, weld: 2.2, mass: 0.12 };
-const HIGH = { line: 2.5, mass: 0.22 };
+/**
+ * MASTER.md's stroke-width figure, and the shipped value it replaces.
+ *
+ * The `--mass` opacity figure that used to live beside this is gone, P10 STEP 10: the campus
+ * buildings are opaque MeshStandardMaterials now (Campus.tsx's header), so there is no fill
+ * opacity left for a high-contrast toggle to raise. `window.__campus` lost `massOpacity` and
+ * `massCeiling` with it, and every assertion in this file that read them is gone too.
+ */
+const NORMAL = { line: 1.5, weld: 2.2 };
+const HIGH = { line: 2.5 };
 
 /**
- * Booted, hydrated and with the toggle present.
+ * The floor for high contrast's white-pixel ratio at stage 2, re-measured for P10 step 10.
+ * See the note beside its use for why the P9 bound of 1.25 no longer applies.
  *
- * The toggle rather than the canvas is what proves the HUD has hydrated -- a11y.spec.ts
- * waits on `a11y-alt-toggle` for the same reason -- and every assertion below is about a
- * control in the HUD or about a flag the HUD writes.
+ * MEASURED, three runs: 12,153 -> 14,699 (1.210), 12,153 -> 14,800 (1.218), 12,214 -> 13,441
+ * (1.100). Looser and noisier than the P9 figure -- the campus is opaque and photographed now,
+ * so far more of the frame is textured roof rather than flat fill, and how many of those
+ * texture-edge pixels cross into the near-white bucket varies a little run to run. 1.05 keeps a
+ * real margin under the lowest of the three while staying well above 1.0.
+ */
+const WHITE_RATIO_BOUND = 1.05;
+
+/**
+ * Booted and hydrated.
+ *
+ * `a11y-alt-toggle` rather than the canvas is what proves the HUD has hydrated --
+ * a11y.spec.ts waits on the same testid for the same reason. It replaces `contrast-toggle`
+ * here, which P10 step 6 retired along with the rest of the button.
  */
 async function open(page: Page) {
   await page.goto("/");
   await expect(page.locator("canvas")).toBeVisible({ timeout: 30_000 });
-  await page.getByTestId("contrast-toggle").waitFor();
+  await page.getByTestId("a11y-alt-toggle").waitFor();
   /*
    * And then the probe, which is a SEPARATE wait and not belt-and-braces. The toggle is in
    * the HUD, which hydrates as soon as React does; `window.__campus` is published from
@@ -176,71 +196,12 @@ async function pixels(page: Page): Promise<{ white: number; p75: number }> {
   return { white: mid("white"), p75: mid("p75") };
 }
 
-test("the toggle is a real toggle: keyboard, aria-pressed, and a face that changes", async ({
-  page,
-}) => {
-  await open(page);
-  const btn = page.getByTestId("contrast-toggle");
-
-  // Off by default, and the accessible name does NOT carry the state: a toggle whose name
-  // changes is announced as a different control every press.
-  await expect(btn).toHaveAttribute("aria-pressed", "false");
-  await expect(btn).toHaveText("normal");
-  await expect(btn).toHaveAttribute(
-    "aria-label",
-    "High contrast: thicker campus strokes and denser building masses",
-  );
-
-  // MASTER.md's 44 x 44 minimum, on the element rather than on an ancestor.
-  const box = (await btn.boundingBox())!;
-  expect(box.width, `${box.width} x ${box.height}`).toBeGreaterThanOrEqual(44);
-  expect(box.height, `${box.width} x ${box.height}`).toBeGreaterThanOrEqual(44);
-
-  // REACHED AND OPERATED BY KEYBOARD ONLY, which is the requirement -- and with the ring,
-  // read off the focused element rather than off the stylesheet.
-  await btn.focus();
-  const ring = await btn.evaluate((el) => {
-    const s = getComputedStyle(el);
-    return {
-      style: s.outlineStyle,
-      width: parseFloat(s.outlineWidth),
-      color: s.outlineColor,
-      visible: el.matches(":focus-visible"),
-    };
-  });
-  expect(ring.style, JSON.stringify(ring)).toBe("solid");
-  expect(ring.width, JSON.stringify(ring)).toBeGreaterThanOrEqual(2);
-  expect(ring.visible, JSON.stringify(ring)).toBe(true);
-
-  // Enter, the platform's own activation on a real <button>.
-  await page.keyboard.press("Enter");
-  await expect(btn).toHaveAttribute("aria-pressed", "true");
-  await expect(btn).toHaveText("high");
-  expect((await campus(page)).highContrast).toBe(true);
-
-  /*
-   * THREE SIGNALS, TWO OF THEM NOT COLOUR. MASTER.md's rule is that colour is never the
-   * sole indicator and the checklist proves it of every other toggle in this app, so it is
-   * proved of this one too: the rendered WORD, the font WEIGHT, and aria-pressed -- plus
-   * the border, which is the colour one. Read as computed styles, because `.on` is a class
-   * name and a class name is not a rendered difference.
-   */
-  const on = await btn.evaluate((el) => {
-    const s = getComputedStyle(el);
-    return { weight: s.fontWeight, border: s.borderTopColor };
-  });
-  await page.keyboard.press(" ");
-  await expect(btn).toHaveAttribute("aria-pressed", "false");
-  await expect(btn).toHaveText("normal");
-  const off = await btn.evaluate((el) => {
-    const s = getComputedStyle(el);
-    return { weight: s.fontWeight, border: s.borderTopColor };
-  });
-  expect(Number(on.weight), `${on.weight} on / ${off.weight} off`).toBeGreaterThan(
-    Number(off.weight),
-  );
-  expect(on.border, `${on.border} on / ${off.border} off`).not.toBe(off.border);
-});
+// "the toggle is a real toggle: keyboard, aria-pressed, and a face that changes" lived
+// here through P9, proving contrast-toggle's keyboard reach, aria-pressed, 44 x 44 target
+// and three-signal state change. P10 step 6 retired the button it tested; there is no
+// control left for a toggle test to be about. What survives of the claim -- that high
+// contrast is not colour-only -- is unchanged and untestable here, because nothing renders
+// it as a state a person presses.
 
 test("MASTER's two figures reach the scene, and they are CSS pixels", async ({ browser }) => {
   /*
@@ -263,20 +224,21 @@ test("MASTER's two figures reach the scene, and they are CSS pixels", async ({ b
       5,
     );
     expect(before.weldLineWidth).toBeCloseTo(NORMAL.weld * dpr, 5);
-    expect(before.massOpacity).toBeCloseTo(NORMAL.mass, 5);
 
-    await page.getByTestId("contrast-toggle").click();
+    // Drives CameraRig's `prefers-contrast` mirror directly, in place of the retired
+    // button's click: Playwright's media emulation fires the same `change` event a real OS
+    // preference flip would, which is what the effect listens for.
+    await page.emulateMedia({ contrast: "more" });
     await expect
       .poll(async () => (await campus(page)).highContrast, { timeout: 5_000 })
       .toBe(true);
     const after = await campus(page);
 
-    // MASTER.md, quoted: strokes to 2.5px, --mass opacity to 0.22.
+    // MASTER.md, quoted: strokes to 2.5px.
     expect(after.lineWidth, `dpr ${dpr}: ${JSON.stringify(after)}`).toBeCloseTo(
       HIGH.line * dpr,
       5,
     );
-    expect(after.massOpacity, `dpr ${dpr}: ${JSON.stringify(after)}`).toBeCloseTo(HIGH.mass, 5);
 
     /*
      * AND WELD IS STILL THE WIDER STROKE. That is not decoration: the checklist measures
@@ -291,8 +253,7 @@ test("MASTER's two figures reach the scene, and they are CSS pixels", async ({ b
     );
     console.log(
       `dpr ${dpr}: line ${before.lineWidth} -> ${after.lineWidth}, ` +
-        `weld ${before.weldLineWidth} -> ${after.weldLineWidth}, ` +
-        `mass ${before.massOpacity} -> ${after.massOpacity}`,
+        `weld ${before.weldLineWidth} -> ${after.weldLineWidth}`,
     );
     await ctx.close();
   }
@@ -305,7 +266,7 @@ test("it changes the picture and costs no draw calls", async ({ page }) => {
   await gotoStage(page, 2);
 
   const before = { ...(await perf(page)), ...(await pixels(page)) };
-  await page.getByTestId("contrast-toggle").click();
+  await page.emulateMedia({ contrast: "more" });
   await expect.poll(async () => (await campus(page)).highContrast, { timeout: 5_000 }).toBe(true);
   await page.waitForTimeout(600);
   const after = { ...(await perf(page)), ...(await pixels(page)) };
@@ -328,105 +289,63 @@ test("it changes the picture and costs no draw calls", async ({ page }) => {
    * Thicker strokes cover more of the frame, and this is the assertion that the flag reaches the
    * GPU rather than only the probe.
    *
-   * RE-MEASURED AND THE BOUND MOVED FROM 1.4 TO 1.25 WHEN P9 LANDED. Originally 3,045 -> 5,620
-   * near-white pixels, a factor of 1.85. P9 put a photograph under the campus and made the mass
-   * fill ramp with altitude, and both compress this ratio without touching the strokes:
-   *
-   *   run 1   2,399 -> 3,238   1.350
-   *   run 2   2,401 -> 3,284   1.368
-   *   run 3   2,392 -> 3,256   1.361
-   *
-   * Tight across runs, so this is a moved baseline and not noise. The MECHANISM is worth naming
-   * because it is not obvious: `white` requires b - r < 40 to isolate neutral line work, and the
-   * mass is #96c8f5 where b - r is 95. A denser mass therefore bleeds into the anti-aliased edge of
-   * every stroke and pushes those pixels OUT of the neutral bucket -- so the count falls in both
-   * states, and falls further in high contrast where the mass is densest. Nothing about the strokes
-   * changed: window.__campus still reports 2.5 CSS px, asserted separately above.
-   *
-   * 1.25 keeps a real margin under the measured 1.35 while staying far above 1.0.
+   * RE-MEASURED FOR P10 STEP 10. The bound moved again because the thing `white` used to be
+   * confounded by moved: through P9 the campus masses were a translucent #96c8f5 fill (b - r of
+   * 95) that bled into the anti-aliased edge of every stroke and pulled those pixels out of the
+   * neutral `white` bucket, densest in high contrast -- which is why the old ratio (1.35 measured,
+   * gated at 1.25) was well under the underlying stroke-width ratio of 1.67. The masses are opaque
+   * MeshStandardMaterials now, lit and textured by aerial.ts's roof photograph rather than filled
+   * with a flat translucent blue, so that bleed is gone. Measured on this build, three runs:
+   * 1.210, 1.218, 1.100 -- WHITE_RATIO_BOUND's own comment carries the raw counts.
    */
   expect(after.white, `white ${before.white} -> ${after.white}`).toBeGreaterThan(
-    before.white * 1.25,
+    before.white * WHITE_RATIO_BOUND,
   );
   /*
-   * AND THE MASSES ARE DENSER -- but p75 CANNOT SEE THAT ANY MORE, so the assertion moved to the
-   * probe and the pixel check was demoted rather than quietly loosened.
-   *
-   * The original was p75 luminance 55.13 -> 69.92, a factor of 1.268, gated at 1.12 against 1.021
-   * on a build where the strokes thickened and the mass did not. That worked because the frame was
-   * mostly dark void, so the 75th percentile sat inside the massing. P9's photograph covers 100% of
-   * the frame at this stage, which moves p75 from 55 to 101 and makes it a statistic about the
-   * PHOTOGRAPH: measured now, 101.08 -> 103.30, a factor of 1.022.
-   *
-   * 1.022 is indistinguishable from the 1.021 this gate was built to catch, and the mass is in fact
-   * far denser than before -- the ramp runs 0.12 to 0.34 normally and 0.22 to 0.62 in high contrast,
-   * against the flat 0.12/0.22 this test was written for. So lowering the bound to 1.01 would make
-   * the gate vacuous: it would pass on exactly the broken build it exists to reject.
-   *
-   * A blue-channel population count (b - r > 70) does move properly, 33,323 -> 52,137 or 1.565 --
-   * but the campus edge colour #8fc4f2 has b - r of 99, so it counts strokes as well as mass and
-   * cannot make the discrimination p75's three-build table established. Rather than swap in a metric
-   * whose selectivity is unverified, the exact claim now comes from the probe, which reports the
-   * alpha actually handed to the material at both ends of the ramp.
+   * THE MASS-DENSITY HALF OF THIS TEST IS GONE, P10 STEP 10. `p75`, `massOpacity` and
+   * `massCeiling` all existed to show that high contrast raised the campus's fill alpha; the
+   * campus has no fill alpha left to raise -- Campus.tsx's buildings are opaque, and
+   * `window.__campus` dropped both fields. What MASTER.md's high-contrast figure still means for
+   * the campus is the stroke width asserted above and in the DPR test; there is no second
+   * figure left for this test to carry.
    */
-  const c = await campus(page);
-  expect(c.massOpacity, "high contrast must put the fill on MASTER's 0.22").toBeCloseTo(0.22, 6);
-  expect(c.massCeiling, "and raise the ramp's ceiling in the same proportion").toBeCloseTo(
-    0.34 * (0.22 / 0.12),
-    6,
-  );
-  // The pixel check survives as a direction rather than a magnitude: the frame must not get
-  // DARKER when the masses densify, which is the one thing p75 can still tell us.
-  expect(after.p75, `p75 luminance ${before.p75.toFixed(2)} -> ${after.p75.toFixed(2)}`).toBeGreaterThan(
-    before.p75,
-  );
 });
 
-test("prefers-contrast: more seeds it, and the control still overrides it", async ({ browser }) => {
+test("prefers-contrast: more seeds it", async ({ browser }) => {
   /*
-   * THE PLATFORM FIRST. A viewer who has set the OS preference has already said what they
-   * need, and making them find a button in a HUD to say it again is the accessibility
-   * failure rather than the fix -- so the flag opens at the media query's value, exactly as
-   * CameraRig seeds reducedMotion from `prefers-reduced-motion`.
+   * THE PLATFORM FIRST, AND NOW THE WHOLE STORY. A viewer who has set the OS preference has
+   * already said what they need, and making them find a button in a HUD to say it again was
+   * the accessibility failure this control existed to work around -- so the flag opens at
+   * the media query's value, exactly as CameraRig seeds reducedMotion from
+   * `prefers-reduced-motion`.
    *
-   * AND THEN THE PERSON WINS. The second half of this test is the half that would rot: a
-   * `change` listener mirroring the query unconditionally would look correct here and would
-   * silently switch high contrast back on for somebody who had just turned it off.
+   * THE OTHER HALF OF THIS TEST -- "and the control still overrides it" -- is gone along
+   * with the control. P10 step 6 made the mirror unconditional: there is no button left to
+   * out-vote the media query, so there is nothing left to assert about an override.
    */
   const ctx = await browser.newContext({ contrast: "more" });
   const page = await ctx.newPage();
   await open(page);
 
-  const btn = page.getByTestId("contrast-toggle");
-  await expect(btn).toHaveAttribute("aria-pressed", "true");
-  await expect(btn).toHaveText("high");
   const seeded = await campus(page);
   expect(seeded.highContrast, JSON.stringify(seeded)).toBe(true);
   expect(seeded.lineWidth, JSON.stringify(seeded)).toBeCloseTo(HIGH.line, 5);
-  expect(seeded.massOpacity, JSON.stringify(seeded)).toBeCloseTo(HIGH.mass, 5);
-
-  await btn.click();
-  await expect(btn).toHaveAttribute("aria-pressed", "false");
-  const overridden = await campus(page);
-  expect(overridden.highContrast, JSON.stringify(overridden)).toBe(false);
-  expect(overridden.lineWidth, JSON.stringify(overridden)).toBeCloseTo(NORMAL.line, 5);
 
   /*
    * And the seed is the query's VALUE, not merely the query's existence: the same build
    * with no preference set opens off. Without this, a seeding effect that ignored
    * `mq.matches` and simply switched high contrast on would satisfy everything above --
-   * measured, by writing exactly that mutation, and the assertions above stayed green.
+   * measured, by writing exactly that mutation, and the assertion above stayed green.
    *
    * Worth recording the other half of that measurement, because it moves where a claim can
    * be made: the store's own `highContrast: false` initial value is NOT observable in a
-   * browser. Hud.tsx's effect writes the query's value on mount, so shipping the store at
+   * browser. CameraRig's effect writes the query's value on mount, so shipping the store at
    * `true` changes nothing a page can see and this file cannot gate it.
    * tests/store.test.ts does, at the unit level, where the effect is not in the way.
    */
   const plain = await browser.newContext();
   const p2 = await plain.newPage();
   await open(p2);
-  await expect(p2.getByTestId("contrast-toggle")).toHaveAttribute("aria-pressed", "false");
   expect((await campus(p2)).highContrast).toBe(false);
 
   await plain.close();
@@ -463,7 +382,14 @@ test("the bracket guards: a form field, a modifier, and a walker", async ({ page
    * genuinely takes typed characters -- so a bracket arriving at one must not move the
    * camera. This is the same guard the piece-nudge handler above it carries, and the same
    * failure it exists to prevent: a keyboard user's own control silently stolen.
+   *
+   * OPENED FIRST. P10 step 6 folded the sun controls into `view-fold`, a closed
+   * <details> by default, and a collapsed disclosure's content is display: none -- not
+   * focusable at all, so an unopened summary would make this guard untested rather than
+   * satisfied. Measured: without this click, BracketLeft moved the stage from 5 to 4
+   * because .focus() on the hidden input silently did nothing.
    */
+  await page.getByTestId("view-fold").locator("summary").click();
   await page.getByTestId("sun-date").focus();
   await page.keyboard.press("BracketLeft");
   await page.waitForTimeout(400);

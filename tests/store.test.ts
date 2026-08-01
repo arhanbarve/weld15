@@ -792,3 +792,35 @@ describe("orbit survives only a return to its own anchor stage", () => {
     expect(useStore.getState().orbitStage).toBe(4);
   });
 });
+
+/**
+ * P10 step 7: how far the viewer has turned the globe at stage 0.
+ *
+ * On the same footing as `orbit`: null means "as stages.ts posed it", not {0, 0}, so a
+ * reset button has something to restore to and an untouched view is a distinct state
+ * rather than a spin of zero degrees.
+ */
+describe("globeSpin", () => {
+  it("writes the field both ways, and opens null", () => {
+    expect(useStore.getState().globeSpin).toBe(null);
+    useStore.getState().setGlobeSpin({ yawDeg: 12, pitchDeg: -4 });
+    expect(useStore.getState().globeSpin).toEqual({ yawDeg: 12, pitchDeg: -4 });
+    useStore.getState().setGlobeSpin(null);
+    expect(useStore.getState().globeSpin).toBe(null);
+  });
+
+  it("is cleared by resetAll, on the same footing as orbit", () => {
+    useStore.getState().setGlobeSpin({ yawDeg: 30, pitchDeg: 10 });
+    useStore.getState().resetAll();
+    expect(useStore.getState().globeSpin).toBe(null);
+  });
+
+  it("is untouched by hydrate, for the reason orbit and firstPerson are: it is where the recipient is looking, not what the model is", () => {
+    useStore.getState().setGlobeSpin({ yawDeg: 45, pitchDeg: 20 });
+    const s = decode(encode({ ...DEFAULT_SNAPSHOT, stage: 3 }))!;
+    useStore.getState().hydrate(s);
+    expect(useStore.getState().stage, "the snapshot did arrive").toBe(3);
+    expect(useStore.getState().globeSpin).toEqual({ yawDeg: 45, pitchDeg: 20 });
+    useStore.getState().setGlobeSpin(null);
+  });
+});

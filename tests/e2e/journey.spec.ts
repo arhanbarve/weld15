@@ -116,10 +116,23 @@ test("the threshold never shows an empty frame as it crosses", async ({ page }) 
   await expect(page.locator("canvas")).toBeVisible({ timeout: 30_000 });
   await gotoStage(page, 4);
 
-  const slider = page.getByTestId("threshold-t");
+  // P10 folded the per-stage threshold-t slider into JourneyBar's single master bar, which
+  // carries `u` rather than a per-stage t. Converted through window.__journey (JourneyBar.tsx's
+  // debug probe) rather than through a second implementation of journey.ts's mapping.
+  const slider = page.getByTestId("journey");
   const worst: string[] = [];
   for (const t of [0, 0.2, 0.35, 0.5, 0.65, 0.8, 1]) {
-    await slider.fill(String(t));
+    const u = await page.evaluate((tt) => {
+      const j = (window as unknown as { __journey: { boundaries: number[]; spans: number[]; total: number } })
+        .__journey;
+      // Snapped to the slider's own 0.0005 step: Playwright's fill() on a range input
+      // refuses a value that is not one of the step's own multiples ("Malformed value").
+      // Floored rather than rounded to nearest -- see threshold.spec.ts's statsAt(), which
+      // hit the case where rounding up crossed a ramp boundary and changed what was drawn.
+      const raw = j.boundaries[4]! + (tt * j.spans[4]!) / j.total;
+      return Math.floor(raw / 0.0005) * 0.0005;
+    }, t);
+    await slider.fill(String(u));
     await page.waitForTimeout(500);
     const s = await frameStats(page);
     worst.push(`t=${t}: ${s.nonBgPct.toFixed(1)}%/${s.distinct}`);

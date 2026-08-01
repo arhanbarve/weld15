@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FLY_DOWN_END, LAST_STAGE, STAGES, pieceLabel, useStore, type StageId } from "@/state/store";
 import { buildSuite } from "@/geo/rooms";
 import { footprintArea } from "@/geo/walls";
@@ -8,11 +8,13 @@ import { Panel } from "./Panel";
 import { STAGE3_CLAMP, clampOrbit, orbitOf, type Orbit } from "@/scene/orbit";
 import { keyframes, visibility } from "@/scene/stages";
 import { places } from "@/scene/route";
+import { fromJourney } from "@/scene/journey";
 import type { NudgeDir } from "@/geo/drag";
 import { UrlSync } from "./UrlSync";
 import { Sources } from "./Sources";
 import { ImageryChip } from "./ImageryChip";
 import { A11yAlt } from "./A11yAlt";
+import { JourneyBar } from "./JourneyBar";
 
 /**
  * Stage scrubber, stage name, the daylight controls, the stage-3 orbit keys, and
@@ -128,73 +130,30 @@ const FP_ROW_MAX = "18rem";
 /** One press worth of orbit. Defaults are the identity nudge. */
 type Nudge = { az?: number; polar?: number; zoom?: number };
 
-type OrbitControl = {
-  /** data-testid suffix, and the React key. */
-  id: string;
-  /**
-   * Button face. A typographic arrow in the HUD's mono face, not an icon: the
-   * project ships no icon set, and MASTER.md's ban is on emoji, which these are
-   * not. Same register as the numbered stage buttons next to them.
-   */
-  glyph: string;
-  label: string;
-  /** KeyboardEvent.key values, all of which do exactly what the button does. */
-  keys: string[];
-  nudge: Nudge;
-};
-
 /**
- * The six directions, driving both the buttons and the key map.
+ * Arrow, page and plus/minus keys to an orbit nudge.
  *
- * SIGNS follow CameraRig's drag exactly: right increases azimuth, up increases
- * polar. That is the choice, not an inevitability -- the other reading, where the
- * arrow moves the camera rather than the scene, inverts both axes. Two things
- * decided it. The drag is the established gesture and two paths into one piece of
- * state that disagree about direction are worse than either direction. And the
- * glyphs have to agree with what is seen: polar is measured from straight up, so
- * a rising polar brings the camera down from a plan toward eye level and the view
- * tilts UP toward the horizon, which is what an up arrow should do.
+ * ORBIT_CONTROLS and its six buttons are gone (step 5); this is only the mapping that
+ * survives them. SIGNS follow CameraRig's drag exactly, the same choice ORBIT_CONTROLS'
+ * own docblock recorded: right increases azimuth, up increases polar, because polar is
+ * measured from straight up, so a rising polar tilts the view UP toward the horizon --
+ * which is what an up arrow should do.
  *
- * `=` and `_` are in the map because on a US layout `+` and `-` share keys with
- * them and an unshifted press reports the unshifted character. Without `=` the
- * plus key only zooms while shift is held, which reads as a broken key.
+ * `=` and `_` stay for the reason they always did: on a US layout `+` and `-` share keys
+ * with them, and an unshifted press reports the unshifted character.
  */
-const ORBIT_CONTROLS: OrbitControl[] = [
-  { id: "left", glyph: "←", label: "Orbit left", keys: ["ArrowLeft"], nudge: { az: -STEP_DEG } },
-  { id: "right", glyph: "→", label: "Orbit right", keys: ["ArrowRight"], nudge: { az: STEP_DEG } },
-  {
-    id: "up",
-    glyph: "↑",
-    label: "Tilt up toward eye level",
-    keys: ["ArrowUp"],
-    nudge: { polar: STEP_DEG },
-  },
-  {
-    id: "down",
-    glyph: "↓",
-    label: "Tilt down toward a plan",
-    keys: ["ArrowDown"],
-    nudge: { polar: -STEP_DEG },
-  },
-  {
-    id: "in",
-    glyph: "+",
-    label: "Closer to the building",
-    keys: ["PageUp", "+", "="],
-    nudge: { zoom: 1 / ZOOM_PER_PRESS },
-  },
-  {
-    id: "out",
-    glyph: "−",
-    label: "Further from the building",
-    keys: ["PageDown", "-", "_"],
-    nudge: { zoom: ZOOM_PER_PRESS },
-  },
-];
-
-const NUDGE_BY_KEY: Record<string, Nudge> = Object.fromEntries(
-  ORBIT_CONTROLS.flatMap((c) => c.keys.map((k) => [k, c.nudge] as const)),
-);
+const NUDGE_BY_KEY: Record<string, Nudge> = {
+  ArrowLeft: { az: -STEP_DEG },
+  ArrowRight: { az: STEP_DEG },
+  ArrowUp: { polar: STEP_DEG },
+  ArrowDown: { polar: -STEP_DEG },
+  PageUp: { zoom: 1 / ZOOM_PER_PRESS },
+  "+": { zoom: 1 / ZOOM_PER_PRESS },
+  "=": { zoom: 1 / ZOOM_PER_PRESS },
+  PageDown: { zoom: ZOOM_PER_PRESS },
+  "-": { zoom: ZOOM_PER_PRESS },
+  _: { zoom: ZOOM_PER_PRESS },
+};
 
 /**
  * Arrow keys to a piece move, in the SUITE frame.
@@ -275,11 +234,10 @@ export function Hud() {
   const stage = useStore((s) => s.stage);
   const t = useStore((s) => s.t);
   const setStage = useStore((s) => s.setStage);
-  const setT = useStore((s) => s.setT);
+  const setJourney = useStore((s) => s.setJourney);
+  const setScrubbing = useStore((s) => s.setScrubbing);
   const skip = useStore((s) => s.skipToSuite);
   const reduced = useStore((s) => s.reducedMotion);
-  const high = useStore((s) => s.highContrast);
-  const setHighContrast = useStore((s) => s.setHighContrast);
   const flying = useStore((s) => s.flying);
   const setFlying = useStore((s) => s.setFlying);
 
@@ -289,17 +247,9 @@ export function Hud() {
   const setHour = useStore((s) => s.setHour);
   const selected = useStore((s) => s.selected);
   const params = useStore((s) => s.params);
-  /**
-   * Does this stage travel, or is it a place?
-   *
-   * Asked of the keyframe rather than answered with a list of stage numbers, so that this and
-   * stages.ts cameraKeyframe() cannot come to different conclusions -- cameraKeyframe() tests
-   * exactly the same property to decide whether to walk a path or return a pose. keyframes() is
-   * memoised on the params object's identity, so this is a map lookup.
-   */
-  const travels = keyframes(params)[stage].path !== undefined;
   const orbit = useStore((s) => s.orbit);
   const setOrbit = useStore((s) => s.setOrbit);
+  const setGlobeSpin = useStore((s) => s.setGlobeSpin);
   const cutaway = useStore((s) => s.cutaway);
   const setCutaway = useStore((s) => s.setCutaway);
   const occupancy = useStore((s) => s.occupancy);
@@ -377,6 +327,7 @@ export function Hud() {
 
   /** The orbit stage 3 opens on: the keyframe stages.ts chose, read back as angles. */
   const seed = useMemo(() => orbitOf(keyframes(params)[3]), [params]);
+  /** The orbit to read: the store's, once a press or a drag has set one, else the seed. */
   const here = orbit ?? seed;
 
   /**
@@ -430,43 +381,10 @@ export function Hud() {
     return () => window.clearTimeout(id);
   }, [walking, walkRoom, walkReading]);
 
-  /**
-   * Whether the viewer has pressed the contrast button, which decides who wins.
-   *
-   * A ref rather than state because nothing renders differently for it: it exists only so
-   * the media-query listener below can tell "the platform changed its mind" from "the
-   * viewer has already told me otherwise".
-   */
-  const contrastChosen = useRef(false);
-
-  /**
-   * `prefers-contrast: more` SEEDS high contrast; the button overrides it.
-   *
-   * The seed is the important half and it is the same move CameraRig makes for
-   * `prefers-reduced-motion`: somebody who has already set the preference at the OS level
-   * has said what they need, and making them find a control in a HUD to say it again is
-   * the accessibility failure, not the fix. So the flag opens at `mq.matches`.
-   *
-   * WHY THE `change` LISTENER IS CONDITIONAL, WHICH IS THE ONE DIFFERENCE FROM CameraRig.
-   * `reducedMotion` has no control anywhere in the app, so its listener can mirror the
-   * query unconditionally -- nothing can disagree with it. This flag has a button, and an
-   * unconditional listener would mean a viewer who switched high contrast OFF here had it
-   * silently switched back on by an unrelated OS change. Once the button has been pressed,
-   * the person is the authority and the query is only the default they started from.
-   *
-   * It lives in Hud.tsx rather than beside CameraRig's because this is chrome's business
-   * and because the control it seeds is in this file: two writers of one flag in two
-   * components is how they come to disagree.
-   */
-  useEffect(() => {
-    const mq = window.matchMedia("(prefers-contrast: more)");
-    setHighContrast(mq.matches);
-    const onChange = () => {
-      if (!contrastChosen.current) setHighContrast(mq.matches);
-    };
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, [setHighContrast]);
+  // The contrast toggle, its ref and its `prefers-contrast` effect lived here through P9.
+  // P10 step 6 moved the seed into CameraRig, beside prefers-reduced-motion, and retired
+  // the button outright. `highContrast`/`setHighContrast` stay on the store; nothing in
+  // this file writes them.
 
   useEffect(() => {
     // Null means the camera is still on the keyframe, so there is nothing to
@@ -572,6 +490,56 @@ export function Hud() {
     return () => window.removeEventListener("keydown", onKey);
   }, [walking]);
 
+  /**
+   * The orbit keys, on the window, at stage 3 only.
+   *
+   * ON THE WINDOW because the six buttons that used to carry them are gone -- P10 took every
+   * on-screen control off the canvas at this stage -- and the canvas cannot hold focus
+   * meaningfully: there is nothing inside it to focus. Which is what makes the guards
+   * load-bearing rather than defensive, exactly as they are on the two handlers above:
+   *
+   *   the stage gate   arrow keys belong to the walker at stage 5 and to a selected piece
+   *                    at stage 5; mounting by stage rather than branching inside keeps one
+   *                    owner per key per stage.
+   *   the target gate  every dimension in the panel is a range input, the master scrubber is
+   *                    one, and both sun controls are. Claiming an arrow while one has focus
+   *                    would make them unusable by keyboard, which is the exact failure this
+   *                    project keeps finding.
+   *   no modifiers     Cmd+Arrow and Alt+Arrow are platform navigation.
+   *
+   * STEP_DEG, ZOOM_PER_PRESS and nudgeOrbit are unchanged from when buttons called them. The
+   * derivation in their docblocks -- 15 presses end to end on both the polar span and the
+   * radius, matched to one wheel notch and to 14 px of drag -- is why the keys still feel
+   * like the pointer, and none of it moved.
+   */
+  useEffect(() => {
+    if (stage !== 3) return;
+    const onKey = (e: KeyboardEvent) => {
+      const n = NUDGE_BY_KEY[e.key];
+      if (!n || e.ctrlKey || e.metaKey || e.altKey) return;
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || el?.isContentEditable) return;
+      e.preventDefault();
+      nudgeOrbit(n, seed, setOrbit);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [stage, seed, setOrbit]);
+
+  /**
+   * The master scrubber's only writer.
+   *
+   * u is JourneyBar's own coordinate -- the whole descent, orbit to hall -- and
+   * fromJourney() is journey.ts's one implementation of turning that back into a
+   * (stage, t) pair. setJourney() (store.ts) is the action that writes both without
+   * resetting t or cancelling a flight the way setStage() would.
+   */
+  const onScrub = (u: number) => {
+    const { stage: s, t: k } = fromJourney(u, params);
+    setJourney(s, k);
+  };
+
   return (
     <>
       <UrlSync />
@@ -580,27 +548,12 @@ export function Hud() {
         Skip to the room
       </button>
 
-      {/* THE FLY-DOWN, and it comes AFTER skip in the DOM because journey.spec.ts:120-130
-          asserts that the skip control is the first thing reachable by keyboard. That gate is
-          about an escape hatch being reachable before anything else, so a new control in front
-          of it would fail it -- correctly.
-
-          NOT OFFERED UNDER REDUCED MOTION AT ALL, rather than offered and ignored.
-          MASTER.md:93 asks for jump cuts there, and a nine-second automatic descent through
-          three decades of altitude is the most motion-heavy thing in this app. A control that
-          is present but declines to work is a control a keyboard user has to press to discover
-          is dead, which is the argument the stage-3 orbit keys are mounted by stage for.
-
-          Hidden once the flight is over rather than disabled: past FLY_DOWN_END there is
-          nothing left to fly to, and the camera is at stage 3's free orbit where the viewer has
-          controls of their own. */}
-
       {/* The written description of the frame, which is the only route into this app's
           content for anyone who cannot see a canvas -- and the only one at all if WebGL
-          never comes up. Mounted HERE, between skip and the HUD, and both neighbours are
+          never comes up. Mounted HERE, between skip and the dock, and both neighbours are
           the reason: after skip so the first Tab still reaches the escape hatch, and
-          before the HUD so tab order follows visual order, since this dock is top-left
-          and the HUD is centred. A11yAlt.tsx's header carries the full account.
+          before the dock so tab order follows visual order -- A11yAlt is top-left and the
+          dock is top-right. A11yAlt.tsx's header carries the full account.
 
           Every prop is a value this component already holds for its own controls, which
           is what keeps the description and the picture from drifting: there is no second
@@ -621,361 +574,269 @@ export function Hud() {
            room instead of reporting a position, and the memo it feeds depends on it. */
         firstPerson={walking ? { room: walkRoom } : null}
       />
-      {!reduced && stage < FLY_DOWN_END ? (
-        <button
-          className="fly"
-          onClick={() => setFlying(!flying)}
-          data-testid="fly-down"
-          aria-pressed={flying}
-        >
-          {flying ? "Stop" : "Fly down to Weld"}
-        </button>
-      ) : null}
 
-      <div
-        className={stage === LAST_STAGE || stage === 4 ? "hud hud-room" : "hud"}
-        data-testid="hud"
-      >
-        <div className="hud-stage" data-testid="stage-name">
-          <span className="hud-num">{stage}</span>
-          {STAGES[stage].name}
-          {reduced ? <span className="hud-flag">reduced motion</span> : null}
-        </div>
+      {/* ONE DOCK, TOP RIGHT, AT EVERY STAGE. Replaces a HUD that sat bottom-centre and
+          moved to the top at stage 5 -- and, on `p10-fidelity`, at stage 4 as well once that
+          stage became draggable -- plus a fly-down that sat top-centre on its own: three
+          positions across six stages. Fixing the dock at one corner answers both of those
+          per-stage moves at once. app/globals.css's `.dock` comment carries the measurement
+          that killed that layout. */}
+      <div className="dock" data-testid="dock">
+        <section className="dock-card" data-testid="hud">
+          <div className="hud-stage" data-testid="stage-name">
+            <span className="hud-num">{stage}</span>
+            {STAGES[stage].name}
+            {reduced ? <span className="hud-flag">reduced motion</span> : null}
+          </div>
 
-        {/* aria-keyshortcuts on the GROUP rather than on each button, because the two keys
-            step through the group and do not activate any one of its six members. It is
-            here so the shortcut is discoverable from the control it drives instead of
-            being folklore -- the same reason fp-leave carries aria-keyshortcuts="Escape".
-            The handler is the window keydown above; this attribute only advertises it. */}
-        <div className="hud-scrub" role="group" aria-label="Stage" aria-keyshortcuts="[ ]">
-          {STAGES.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => setStage(s.id as StageId)}
-              aria-current={s.id === stage ? "step" : undefined}
-              aria-label={`Stage ${s.id}: ${s.name}`}
-              data-testid={`stage-${s.id}`}
-              className={s.id === stage ? "on" : ""}
+          {/* The master scrubber: one control for the whole descent, orbit to hall, plus
+              the six stage ticks. JourneyBar.tsx carries the mapping and the rationale;
+              this component only owns the fields it is handed. */}
+          <JourneyBar
+            stage={stage}
+            t={t}
+            params={params}
+            onScrub={onScrub}
+            onScrubbing={setScrubbing}
+            onPickStage={setStage}
+          />
+
+          {/* THE FLY-DOWN, still hidden under reduced motion and past FLY_DOWN_END for the
+              reasons it always was -- MASTER.md:93 asks for jump cuts under reduced motion,
+              and a nine-second automatic descent through three decades of altitude is the
+              most motion-heavy thing in this app; past FLY_DOWN_END there is nothing left
+              to fly to. What moved is only where the button sits: inside the dock instead
+              of pinned to the top of the viewport on its own. */}
+          <div className="dock-row">
+            {!reduced && stage < FLY_DOWN_END ? (
+              <button
+                className="fly"
+                onClick={() => setFlying(!flying)}
+                data-testid="fly-down"
+                aria-pressed={flying}
+              >
+                {flying ? "Stop" : "Fly down to Weld"}
+              </button>
+            ) : null}
+            {/* [Reset the view], at the two stages that have one to reset: stage 0's turn
+                (globeSpin) and stage 3's free orbit (orbit). Both are session state rather
+                than model state -- neither is carried by a link, for the reason store.ts
+                gives on each field -- so nothing else puts either back. */}
+            {stage === 0 || stage === 3 ? (
+              <button
+                type="button"
+                className="fly"
+                onClick={() => (stage === 0 ? setGlobeSpin(null) : setOrbit(null))}
+                data-testid="reset-view"
+              >
+                Reset the view
+              </button>
+            ) : null}
+          </div>
+
+          {/* THE ORBIT'S KEYBOARD HALF, stage 3 only -- and stage-3-only by MOUNT, the same
+              way the window handler above is: every other stage is a fixed shot, and a group
+              that is present but does nothing is a control a keyboard user has to press to
+              discover is dead. No buttons here; the six that used to carry the keys are gone
+              (step 5), and the window handler above carries the interaction now. What is left
+              is the readout, the hint that the keys still work, and the live region.
+
+              `data-testid="orbit-keys"` stays on the group even though it holds no buttons,
+              because it is the group the `aria-keyshortcuts` are advertised on. */}
+          {stage === 3 ? (
+            <div
+              className="dock-orbit"
+              role="group"
+              aria-label="Orbit the camera around Weld"
+              aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown PageUp PageDown"
+              data-testid="orbit-keys"
             >
-              {s.id}
-            </button>
-          ))}
-        </div>
+              <span className="tabular" data-testid="orbit-readout" aria-hidden="true">
+                {readOrbit(here)}
+              </span>
+              <span className="dock-hint">drag to orbit · scroll to zoom · arrows and +/− also work</span>
+              <span className="hud-sr" aria-live="polite" aria-atomic="true" data-testid="orbit-live">
+                {said}
+              </span>
+            </div>
+          ) : null}
 
-        {/* THE SCRUBBER IS NOW ON EVERY STAGE THAT TRAVELS, not only on the threshold.
-            Stages 0, 1 and 2 became flights in P9, and a stage whose camera moves with `t`
-            and offers no way to move `t` is a stage a keyboard user cannot see the middle of.
-            Asked of the keyframe rather than by naming stages, so it cannot disagree with
-            cameraKeyframe(), which decides the same thing the same way.
+          {/* FIRST PERSON, at the last stage only -- and stage-5-only by MOUNT, for the
+              reason a stage-3 orbit row would be: a control that is present but declines to
+              work is a control a keyboard user has to press to discover is dead. store.ts
+              drops the walker on every stage change to match.
 
-            data-testid stays "threshold-t" ON PURPOSE. tests/e2e/threshold.spec.ts and
-            journey.spec.ts both drive it by that name, and renaming it would be a rename of
-            other owners' files for no gain. The label and the wording do change with the stage,
-            because "through the wall" is not what dragging it does at stage 0. */}
-        {travels ? (
+              THE ROW REUSES .hud-orbit AND .hud-scrub, so the 44 x 44 targets, the borders,
+              the hover and the wrapping all come from those rules rather than from a new
+              block in app/globals.css.
+
+              THE PLACES ARE NOT A NICE-TO-HAVE. docs/phases/P7-P8.md requires a real
+              alternative wherever an animation is switched off, and route.ts's places()
+              exists for exactly this: a jump cut to a named room is the reduced-motion form
+              of walking there. So the buttons come FIRST under reduced motion and second
+              otherwise, and both orders are real controls rather than one being a fallback.
+
+              WHAT THIS ROW OWES THE LIVE REGION, AND WHY. A11yAlt.tsx announces which room
+              the camera is in at stage 5, which is the natural home for this sentence -- but
+              it computes the camera from cameraKeyframe(stage, t), so it describes the STAGE
+              and cannot see a walker at all. It takes every fact as a prop and has no prop
+              for one. That file is another owner's in this phase, so the announcement lives
+              here, and the request is written down rather than worked around: A11yAlt should
+              take an optional first-person position and prefer it over the keyframe. Until it
+              does, the long written description says "standing in the Hall" while the viewer
+              is in bedroom A, and this row is the only thing that says otherwise. */}
+          {stage === LAST_STAGE ? (
+            <div
+              className="hud-orbit"
+              role="group"
+              aria-label="Walk through the suite"
+              data-testid="fp-controls"
+              style={{ maxWidth: FP_ROW_MAX }}
+            >
+              <span aria-hidden="true">{reduced ? "go to" : "walk"}</span>
+              <div className="hud-scrub">
+                {(reduced ? ["places", "toggle"] : ["toggle", "places"]).map((part) =>
+                  part === "toggle" ? (
+                    walking ? (
+                      <button
+                        key="toggle"
+                        type="button"
+                        onClick={leaveFirstPerson}
+                        aria-label="Leave first person"
+                        // Discoverable rather than folklore: the shortcut is on the control
+                        // and in the notice enterFirstPerson() writes. FirstPerson.tsx
+                        // handles the key itself, including while pointer lock is engaged.
+                        aria-keyshortcuts="Escape"
+                        data-testid="fp-leave"
+                        className="on"
+                      >
+                        leave
+                      </button>
+                    ) : (
+                      <button
+                        key="toggle"
+                        type="button"
+                        onClick={enterFirstPerson}
+                        aria-label="Stand in the suite at eye height and walk it"
+                        data-testid="fp-enter"
+                      >
+                        stand up
+                      </button>
+                    )
+                  ) : (
+                    spots.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => goToPlace(p.id)}
+                        aria-label={`Go to ${p.label}`}
+                        // Structural, not a tint: which room you are standing in survives a
+                        // stylesheet that renders every button identically. cutaway.ts's
+                        // header asks for exactly this of any mode control.
+                        aria-pressed={walking && walkRoom === p.id}
+                        data-testid={`fp-go-${p.id}`}
+                        className={walking && walkRoom === p.id ? "on" : ""}
+                      >
+                        {placeFace(p.label)}
+                      </button>
+                    ))
+                  ),
+                )}
+              </div>
+              {/* Visible and NOT aria-hidden, unlike the orbit readout: it changes at most
+                  once per doorway rather than on every frame of a drag, and the keys are
+                  the only place the controls are written down for somebody who can see. */}
+              <span className="tabular hud-orbit-read" data-testid="fp-readout">
+                {walkReading}
+              </span>
+              {walking ? (
+                <span data-testid="fp-keys">W A S D walk and turn · Q E sidestep · Esc leaves</span>
+              ) : null}
+              <span className="hud-sr" aria-live="polite" aria-atomic="true" data-testid="fp-live">
+                {saidWalk}
+              </span>
+            </div>
+          ) : null}
+        </section>
+
+        {/* The sun and the floor area, folded shut by default: a viewer arrives to look at
+            the building, not to tune the light, and the dock's own scroll is what a
+            disclosure this size would otherwise cost every stage. */}
+        <details className="dock-fold" data-testid="view-fold">
+          <summary>View and light</summary>
+
+          {/* The sun. Two fields because a season and an hour are two things: the
+              north gable takes 399 minutes of sun in June and none in December, and
+              neither the date nor the hour alone can show that. */}
           <label className="hud-t">
-            {stage === 4 ? "through the wall" : "descend"}
+            date
+            <input
+              type="date"
+              value={date}
+              // Guarded, because a date field reports "" and partial values while it
+              // is being typed into, and an empty date makes the sun NaN.
+              onChange={(e) => ISO_DATE.test(e.target.value) && setDate(e.target.value)}
+              data-testid="sun-date"
+              aria-label="Date the sun is computed for"
+              style={TAP}
+            />
+          </label>
+
+          <label className="hud-t">
+            hour
             <input
               type="range"
               min={0}
-              max={1}
-              step={0.01}
-              value={t}
-              onChange={(e) => {
-                // The viewer's hand wins over the flight. setT() deliberately does not cancel
-                // -- FlyDown drives the same action -- so the cancellation is here, where the
-                // two can be told apart.
-                if (flying) setFlying(false);
-                setT(Number(e.target.value));
-              }}
-              data-testid="threshold-t"
-              aria-label={stage === 4 ? "Threshold progress" : "Descent progress"}
+              max={24}
+              step={0.25}
+              value={hour}
+              onChange={(e) => setHour(Number(e.target.value))}
+              data-testid="sun-hour"
+              aria-label="Hour of the day in Cambridge"
+              // Without this a screen reader announces "9.25" rather than a time.
+              aria-valuetext={clock(hour)}
+              style={TAP}
             />
-            <span className="tabular">{t.toFixed(2)}</span>
+            <span className="tabular" data-testid="sun-time">
+              {clock(hour)}
+            </span>
           </label>
-        ) : null}
 
-        {/* The free orbit's keyboard half, stage 3 only -- and stage-3-only by
-            MOUNT, not by a branch inside the handler. Every other stage is a fixed
-            shot, and a control that is present but declines to work is a control a
-            keyboard user has to press to discover is dead. CameraRig gates the
-            pointer listeners the same way, by attaching them with the stage.
-
-            The buttons carry the whole interaction twice over: click for a pointer,
-            and the keys the group listens for. Real buttons rather than a focusable
-            div, so Tab, Enter and Space come from the platform and .hud-scrub's
-            44 x 44 applies without a second rule. */}
-        {stage === 3 ? (
-          <div
-            className="hud-orbit"
-            role="group"
-            aria-label="Orbit the camera around Weld"
-            onKeyDown={(e) => {
-              const n = NUDGE_BY_KEY[e.key];
-              if (!n) return;
-              // Ours now. Enter and Space are deliberately not in the map: they
-              // already activate the focused button, and claiming them here would
-              // apply the nudge twice.
-              e.preventDefault();
-              nudgeOrbit(n, seed, setOrbit);
-            }}
-            data-testid="orbit-keys"
-          >
-            <span aria-hidden="true">orbit</span>
-            <div className="hud-scrub">
-              {ORBIT_CONTROLS.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => nudgeOrbit(c.nudge, seed, setOrbit)}
-                  aria-label={c.label}
-                  aria-keyshortcuts={c.keys[0]}
-                  data-testid={`orbit-${c.id}`}
-                >
-                  {c.glyph}
-                </button>
-              ))}
-            </div>
-            {/* Hidden from a reader because the live region says the same thing in
-                words, and this row changes on every frame of a pointer drag. */}
-            <span className="tabular hud-orbit-read" data-testid="orbit-readout" aria-hidden="true">
-              {readOrbit(here)}
-            </span>
-            <span className="hud-sr" aria-live="polite" aria-atomic="true" data-testid="orbit-live">
-              {said}
-            </span>
+          {/* The floor area, which is gate 5's readout and the answer to "did that slider
+              do anything to the ROOM". It lives here rather than in Panel because Panel is
+              presentational and takes no suite: buildSuite() is the one import it
+              deliberately does not have. */}
+          <div className="hud-t" data-testid="area-readout">
+            <span>floor area</span>
+            <span className="tabular">{area.toFixed(0)} sq ft</span>
           </div>
-        ) : null}
+        </details>
 
-        {/* FIRST PERSON, at the last stage only -- and stage-5-only by MOUNT, for the
-            reason the orbit row above is stage-3-only by mount: a control that is present
-            but declines to work is a control a keyboard user has to press to discover is
-            dead. store.ts drops the walker on every stage change to match.
-
-            THE ROW REUSES .hud-orbit AND .hud-scrub, so the 44 x 44 targets, the borders,
-            the hover and the wrapping all come from the stage-3 row's rules rather than
-            from a new block in app/globals.css -- which belongs to another owner in this
-            phase, and which already carries a note saying that reuse is the intent.
-
-            THE PLACES ARE NOT A NICE-TO-HAVE. docs/phases/P7-P8.md requires a real
-            alternative wherever an animation is switched off, and route.ts's places()
-            exists for exactly this: a jump cut to a named room is the reduced-motion form
-            of walking there. So the buttons come FIRST under reduced motion and second
-            otherwise, and both orders are real controls rather than one being a fallback.
-
-            WHAT THIS ROW OWES THE LIVE REGION, AND WHY. A11yAlt.tsx announces which room
-            the camera is in at stage 5, which is the natural home for this sentence -- but
-            it computes the camera from cameraKeyframe(stage, t), so it describes the STAGE
-            and cannot see a walker at all. It takes every fact as a prop and has no prop
-            for one. That file is another owner's in this phase, so the announcement lives
-            here, and the request is written down rather than worked around: A11yAlt should
-            take an optional first-person position and prefer it over the keyframe. Until it
-            does, the long written description says "standing in the Hall" while the viewer
-            is in bedroom A, and this row is the only thing that says otherwise. */}
-        {stage === LAST_STAGE ? (
-          <div
-            className="hud-orbit"
-            role="group"
-            aria-label="Walk through the suite"
-            data-testid="fp-controls"
-            style={{ maxWidth: FP_ROW_MAX }}
-          >
-            <span aria-hidden="true">{reduced ? "go to" : "walk"}</span>
-            <div className="hud-scrub">
-              {(reduced ? ["places", "toggle"] : ["toggle", "places"]).map((part) =>
-                part === "toggle" ? (
-                  walking ? (
-                    <button
-                      key="toggle"
-                      type="button"
-                      onClick={leaveFirstPerson}
-                      aria-label="Leave first person"
-                      // Discoverable rather than folklore: the shortcut is on the control
-                      // and in the notice enterFirstPerson() writes. FirstPerson.tsx
-                      // handles the key itself, including while pointer lock is engaged.
-                      aria-keyshortcuts="Escape"
-                      data-testid="fp-leave"
-                      className="on"
-                    >
-                      leave
-                    </button>
-                  ) : (
-                    <button
-                      key="toggle"
-                      type="button"
-                      onClick={enterFirstPerson}
-                      aria-label="Stand in the suite at eye height and walk it"
-                      data-testid="fp-enter"
-                    >
-                      stand up
-                    </button>
-                  )
-                ) : (
-                  spots.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => goToPlace(p.id)}
-                      aria-label={`Go to ${p.label}`}
-                      // Structural, not a tint: which room you are standing in survives a
-                      // stylesheet that renders every button identically. cutaway.ts's
-                      // header asks for exactly this of any mode control.
-                      aria-pressed={walking && walkRoom === p.id}
-                      data-testid={`fp-go-${p.id}`}
-                      className={walking && walkRoom === p.id ? "on" : ""}
-                    >
-                      {placeFace(p.label)}
-                    </button>
-                  ))
-                ),
-              )}
-            </div>
-            {/* Visible and NOT aria-hidden, unlike the orbit readout: it changes at most
-                once per doorway rather than on every frame of a drag, and the keys are
-                the only place the controls are written down for somebody who can see. */}
-            <span className="tabular hud-orbit-read" data-testid="fp-readout">
-              {walkReading}
-            </span>
-            {walking ? (
-              <span data-testid="fp-keys">W A S D walk and turn · Q E sidestep · Esc leaves</span>
-            ) : null}
-            <span className="hud-sr" aria-live="polite" aria-atomic="true" data-testid="fp-live">
-              {saidWalk}
-            </span>
-          </div>
-        ) : null}
-
-        {/* The sun. Two fields because a season and an hour are two things: the
-            north gable takes 399 minutes of sun in June and none in December, and
-            neither the date nor the hour alone can show that. */}
-        <label className="hud-t">
-          date
-          <input
-            type="date"
-            value={date}
-            // Guarded, because a date field reports "" and partial values while it
-            // is being typed into, and an empty date makes the sun NaN.
-            onChange={(e) => ISO_DATE.test(e.target.value) && setDate(e.target.value)}
-            data-testid="sun-date"
-            aria-label="Date the sun is computed for"
-            style={TAP}
-          />
-        </label>
-
-        <label className="hud-t">
-          hour
-          <input
-            type="range"
-            min={0}
-            max={24}
-            step={0.25}
-            value={hour}
-            onChange={(e) => setHour(Number(e.target.value))}
-            data-testid="sun-hour"
-            aria-label="Hour of the day in Cambridge"
-            // Without this a screen reader announces "9.25" rather than a time.
-            aria-valuetext={clock(hour)}
-            style={TAP}
-          />
-          <span className="tabular" data-testid="sun-time">
-            {clock(hour)}
-          </span>
-        </label>
-
-        {/* The cutaway control used to live here as a single roof-on/roof-off toggle,
-            gated to stage 5 because that was the only stage where it did anything --
-            measured, stage by stage, on the deployed build: the mean frame luminance
-            moved by 2.73 at stage 5 and by 0.00, 0.00, 0.18, 0.08 and 0.00 at stages 0
-            to 4.
-
-            It is now four modes in Panel, which owns the radio group, the live-region
-            announcement and the disabled state. There is deliberately no second writer
-            of `cutaway` in this file: two controls over one field is how they come to
-            disagree. The measurement is kept because it is the reason Panel's group is
-            disabled before the interior exists rather than merely inert. */}
-
-        {/* The floor area, which is gate 5's readout and the answer to "did that slider
-            do anything to the ROOM". It lives here rather than in Panel because Panel is
-            presentational and takes no suite: buildSuite() is the one import it
-            deliberately does not have. */}
-        <div className="hud-t" data-testid="area-readout">
-          <span>floor area</span>
-          <span className="tabular">{area.toFixed(0)} sq ft</span>
-        </div>
-
-        {/* HIGH CONTRAST. MASTER.md §Accessibility gates asks for the toggle and states
-            what it does: strokes to 2.5px, --mass opacity to 0.22. Campus.tsx honours both
-            and publishes what it used; this is only the switch.
-
-            MOUNTED AT EVERY STAGE, which is a deliberate break from the two rows above --
-            they are stage-gated by mount because an orbit key at stage 0 would be a
-            control that declines to work. This one is not that: it is a viewer's rendering
-            preference, in the same class as `prefers-reduced-motion`, and it always takes
-            effect. What varies is only whether the campus is on screen to show it, which
-            is stages 1 to 3 (stages.ts's visibility()). A preference control that vanishes
-            when you go looking for it is worse than one whose effect is elsewhere -- and
-            the checklist's audit is the evidence: it scanned for this control at ALL SIX
-            stages and reported an empty list.
-
-            IT REUSES .hud-orbit AND .hud-scrub, so the 44 x 44 target, the border, the
-            hover, the `.on` state and the wrapping all come from the stage-3 row's rules
-            rather than from a new block in app/globals.css. That row already carries a note
-            saying reuse is the intent, and it means this control adds no CSS at all.
-
-            THE STATE IS NOT A TINT. aria-pressed carries it to a reader, the FACE changes
-            word ("normal" / "high"), and `.on` adds the --mark border and weight 600 --
-            three signals, two of them nothing to do with colour, which is what every other
-            toggle in this app already does and what MASTER.md requires of all of them. */}
-        <div className="hud-orbit" role="group" aria-label="Rendering">
-          <span aria-hidden="true">contrast</span>
-          <div className="hud-scrub">
-            <button
-              type="button"
-              onClick={() => {
-                // Latched before the write, so the media-query listener above stops
-                // overruling this person for the rest of the session.
-                contrastChosen.current = true;
-                setHighContrast(!high);
-              }}
-              aria-pressed={high}
-              // A stable name with the state on aria-pressed, rather than a name that
-              // changes: a toggle whose accessible name moves is announced as a different
-              // control every time it is pressed.
-              aria-label="High contrast: thicker campus strokes and denser building masses"
-              data-testid="contrast-toggle"
-              className={high ? "on" : ""}
-            >
-              {high ? "high" : "normal"}
-            </button>
-          </div>
-        </div>
+        <Panel
+          open={panelOpen}
+          onToggle={() => setPanelOpen((v) => !v)}
+          params={params}
+          onParam={setParams}
+          occupancy={occupancy}
+          onOccupancy={setOccupancy}
+          cutaway={cutaway}
+          onCutaway={setCutaway}
+          // visibility() mounts the interior at stage 3, and that is the first stage from
+          // which a cutaway can change anything. Read from the same predicate the scene
+          // uses rather than written out as `stage >= 3`, so the two cannot drift.
+          cutawayEnabled={visibility(stage).interior}
+          selected={selected}
+          selectedLabel={selectedLabel}
+          onRotate={() => selected && rotate(selected)}
+          onNudge={(dir) => selected && nudgePiece(selected, dir)}
+          onDeselect={() => select(null)}
+          notice={notice}
+          onRefit={refit}
+          onCopyLink={copyLink}
+          onReset={resetAll}
+        />
+        <Sources />
       </div>
-
-      <Sources />
-
-      <Panel
-        open={panelOpen}
-        onToggle={() => setPanelOpen((v) => !v)}
-        params={params}
-        onParam={setParams}
-        occupancy={occupancy}
-        onOccupancy={setOccupancy}
-        cutaway={cutaway}
-        onCutaway={setCutaway}
-        // visibility() mounts the interior at stage 3, and that is the first stage from
-        // which a cutaway can change anything. Read from the same predicate the scene
-        // uses rather than written out as `stage >= 3`, so the two cannot drift.
-        cutawayEnabled={visibility(stage).interior}
-        selected={selected}
-        selectedLabel={selectedLabel}
-        onRotate={() => selected && rotate(selected)}
-        onNudge={(dir) => selected && nudgePiece(selected, dir)}
-        onDeselect={() => select(null)}
-        notice={notice}
-        onRefit={refit}
-        onCopyLink={copyLink}
-        onReset={resetAll}
-      />
     </>
   );
 }

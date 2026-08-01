@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { layerOpacity, type LayerOpacity } from "./altitude";
-import { GROUND_LEVELS, levelUrls, loadTexture, quadOf, type GroundLevelId } from "./imagery";
+import { GROUND_LEVELS, quadOf, sharedTexture, type GroundLevelId } from "./imagery";
 
 /**
  * The photographed ground: four nested quads, cross-dissolved by altitude, resolving into the
@@ -52,16 +52,23 @@ const TINT = "#06203f";
 /**
  * How far the tint goes at full strength.
  *
- * 0.82 and not 1.0. A fully tinted photograph is a flat blue rectangle -- every bit of tonal
- * information gone -- and what stage 3 wants is a photograph that has become the GROUND THE
- * DRAWING SITS ON rather than one that has been deleted. Leaving 18% of the image means the paths
- * across the Yard and the difference between grass and paving still read under the cyanotype,
- * which is what makes the massing look like it is standing on something.
+ * 0.22 SINCE P10, down from 0.82, and the 0.82 is worth keeping in the record because its
+ * reasoning was sound and its result was not. It argued that a fully tinted photograph is a
+ * flat blue rectangle and that 18% of the image left is enough for paths across the Yard to
+ * read under the cyanotype. Measured on the shipped build, a 360 x 200 ground patch at
+ * stage 3 came back mean rgb (64, 74, 92) -- a blue monochrome, which is the thing the
+ * paragraph was trying to avoid, one step further on. The tint band clamps to 1.0 below
+ * 400 ft, so stage 3 got the whole of it.
+ *
+ * 0.22 is a GRADE rather than a substitution: enough to tie the photograph to the palette,
+ * not enough to take its colour. The band in altitude.ts is unchanged, so WHEN the grade
+ * arrives is unchanged; only how far it goes.
  */
-const TINT_MAX = 0.82;
+const TINT_MAX = 0.22;
 
-/** Saturation left at full tint. Desaturating alongside the tint is what stops it going purple. */
-const SAT_MIN = 0.25;
+/** Saturation left at full tint. 0.90 since P10: the desaturation was the other half of
+ *  the monochrome, and a 10% pull is enough to stop the grade reading as a colour cast. */
+const SAT_MIN = 0.9;
 
 const GROUND_VERT = /* glsl */ `
   varying vec2 vUv;
@@ -121,11 +128,10 @@ function Quad({
   const mesh = useRef<THREE.Mesh>(null);
   const quad = useMemo(() => quadOf(id), [id]);
 
-  useEffect(() => {
-    const urls = levelUrls(id);
-    if (urls.length === 0) return;
-    return loadTexture(urls, setTex);
-  }, [id]);
+  // sharedTexture rather than loadTexture directly: Campus.tsx's roof skin wants the same L4
+  // plate this quad does, and sharing the one THREE.Texture is what keeps __perf.textures from
+  // rising when the roofs arrive. See imagery.ts's header.
+  useEffect(() => sharedTexture(id, setTex), [id]);
 
   const uniforms = useMemo(
     () => ({

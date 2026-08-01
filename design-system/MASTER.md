@@ -194,3 +194,26 @@ SVG only, one set (Lucide). **No emoji as UI icons.** Fixed 24×24 viewBox.
 - [ ] Color never the sole indicator
 - [ ] `prefers-reduced-motion` honored
 - [ ] Skip control on the intro sequence, reachable by keyboard on first tab
+
+## P10 amendments
+
+Four departures, each traceable to a decision in docs/phases/P10.md and each measured there.
+
+1. **The scan resolves into a photograph.** The palette section commits each stage to one palette and
+   says the two are never blended. Since P10 the ground's tint tops out at 0.22 rather than 0.82 and
+   Weld's exterior wears brick from about 400 ft down, both on altitude.ts's existing 40,000 -> 400 ft
+   band. The drawing-becomes-real progression is intact; what changed is that the bottom of the ramp
+   is a colour photograph rather than a blue monochrome. Measured before: a ground patch at stage 3
+   read mean rgb (64, 74, 92).
+2. **The high-contrast toggle is gone; half its definition survives.** "Thickens strokes to 2.5px"
+   still holds and is still asserted at DPR 1 and 2. "Raises --mass opacity to 0.22" has no referent:
+   the campus massing is opaque since P10, which is what delivers P9.md section 6.9's occlusion. The
+   flag is now seeded from `prefers-contrast: more` alone, unconditionally, exactly as
+   `prefers-reduced-motion` is.
+3. **Stage 3's canvas interactions have no on-screen buttons.** "onKeyDown alongside every onClick"
+   has no onClick left to sit alongside. The keys -- arrows, PageUp/PageDown, +/- -- are bound on the
+   window at that stage, advertised in aria-keyshortcuts on the readout group and in a visible hint
+   line. The requirement is that every canvas interaction has a keyboard equivalent; it holds.
+4. **One dock, top right, at every stage.** Replaces a bottom-centre HUD that moved to the top at
+   stage 5, plus a top-centre fly-down. The stage-5 move was itself a correct fix for a measured
+   defect and it is preserved in effect: nothing sits over the bottom of the frame at any stage now.

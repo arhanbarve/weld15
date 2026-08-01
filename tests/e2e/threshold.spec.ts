@@ -48,6 +48,18 @@ test.setTimeout(120_000);
  * what the cutaway takes off it shows up in the renderer's own triangle total, as an
  * integer, hardware-independently (Perf.tsx says why). Both gates are below, the structural
  * one first.
+ *
+ * P10 STEP 10 MOVED WHAT "0 < progress < 1" MEANS. `<Threshold progress={...}>` used to
+ * receive the dissolve's own `1 - opacity`, so the sweep's mount window was stage 4's own
+ * t in (0.2, 0.7). WeldExterior now feeds it `layerOpacity(camera.position.y).tint` --
+ * altitude.ts's tint band, [40,000, 400] ft -- so the mount window is an ALTITUDE band.
+ * Stage 4 sits at 55-100 ft for its whole crossing, measured: t = 0.2 reads 78.7 ft and
+ * t = 0.35 the same descent path -- both well under the band's 400 ft floor -- so `progress`
+ * is pinned at 1 for every frame stage 4 ever shows, and the sweep never mounts there any
+ * more. The first test below records that as `sweepLost === 0` rather than the 166 it used
+ * to pin. That is a relocation of the invariant, not a loss of it: the second test measures
+ * the same 166-triangle figure where the sweep is actually alive now, in the tail of the
+ * descent.
  */
 
 type Perf = { calls: number; triangles: number };
@@ -98,12 +110,29 @@ async function openAtTheThreshold(page: Page): Promise<string[]> {
  * geometry rebuild that takes one.
  */
 async function statsAt(page: Page, mode: string, t: number): Promise<Perf> {
-  const slider = page.getByTestId("threshold-t");
-  await slider.fill(String(t));
+  // P10 folded the per-stage threshold-t slider into JourneyBar's single master bar, which
+  // carries `u` -- the whole descent, orbit to hall -- rather than a per-stage t. `t` here is
+  // still stage 4's own progress, so it is converted through window.__journey (JourneyBar.tsx's
+  // debug probe) rather than through a second implementation of journey.ts's mapping.
+  const slider = page.getByTestId("journey");
+  const u = await page.evaluate((tt) => {
+    const j = (window as unknown as { __journey: { boundaries: number[]; spans: number[]; total: number } })
+      .__journey;
+    // Snapped to the slider's own 0.0005 step: Playwright's fill() on a range input
+    // refuses a value that is not one of the step's own multiples ("Malformed value").
+    // FLOORED, not rounded to nearest -- BEFORE is exactly thresholdOpacity()'s own
+    // `lo` argument (0.2), the ramp's zero point, and rounding to nearest pushed the
+    // decoded t a hair past 0.2 (0.20019), which was enough for `ramp()` to read a
+    // nonzero progress and draw the sweep where the test needs shell-only. Flooring
+    // always lands at or under the target t, which the ramp resolves to exactly 0.
+    const raw = j.boundaries[4]! + (tt * j.spans[4]!) / j.total;
+    return Math.floor(raw / 0.0005) * 0.0005;
+  }, t);
+  await slider.fill(String(u));
   await slider.dispatchEvent("input");
   await expect
-    // The span immediately after the range input. Not `.hud-t .tabular`: four controls in
-    // Hud.tsx share that class.
+    // The span immediately after the range input, and it still reads stage 4's own t --
+    // JourneyBar.tsx displays the stage's t, not u -- so the assertion is unchanged.
     .poll(async () => slider.locator("+ span.tabular").textContent(), { timeout: 10_000 })
     .toBe(t.toFixed(2));
   await page.getByTestId(`cutaway-${mode}`).click();
@@ -272,12 +301,13 @@ test.describe("P4 -- the seam rides the shell that is actually there", () => {
         `${lit.distinct} distinct, ${report}`,
     ).toBeLessThanOrEqual(20);
 
-    // 166 is the gable (112) plus the eaves lid (54 of the shell's 220), which is exactly
-    // the part of roofOff's 190 the sweep rides: the two roof features are the other 24 and
-    // they are not in the merge. Pinned rather than bounded, because the parts it is made of
-    // are pinned in tests/weldGeometry.test.ts -- so a re-digitised ring fails there too,
-    // and a failure here alone is this component having stopped reading the cut.
-    expect(sweepLost, `the sweep gave up the roof it no longer stands on: ${report}`).toBe(166);
+    // P10 STEP 10: 0 rather than the 166 this used to pin. `progress` is altitude-driven
+    // now (see the file header) and stage 4's altitude never rises above the tint band's
+    // 400 ft floor, so `<Threshold>`'s `0 < progress < 1` mount guard is false for the whole
+    // crossing -- there is no sweep mesh here for a cutaway to change, at either t. The
+    // 166-triangle invariant this used to gate is not gone, it is measured at the altitude
+    // the sweep now actually mounts at, in the test below.
+    expect(sweepLost, `the sweep no longer mounts at stage 4: ${report}`).toBe(0);
 
     expect(errors, errors.join("\n")).toEqual([]);
   });
@@ -308,6 +338,138 @@ test.describe("P4 -- the seam rides the shell that is actually there", () => {
     // flight had reached when the cut was last sampled -- which is the whole reason the
     // exact measurement above is taken in the one mode that needs no camera.
     console.log(seen.join(" | "));
+    expect(errors, errors.join("\n")).toEqual([]);
+  });
+});
+
+/**
+ * P10 STEP 10 -- the same invariant, where the sweep is actually alive now.
+ *
+ * WeldExterior visibility starts at stage 2's own beginning, 814.6 ft (altitude.ts's
+ * tint band already has that 84.5% resolved), and altitude falls through the band's
+ * 400 ft floor before stage 2 hands off to stage 3 -- so the whole fractional window,
+ * `0 < progress < 1`, is a stretch inside stage 2's own descent, never stage 4.
+ *
+ * THE CUTAWAY UI IS GATED THE OTHER WAY: Panel.tsx's `cutawayEnabled` is
+ * `visibility(stage).interior`, true only from stage 3, and by stage 3 altitude has
+ * already dropped under 400 ft -- so the panel can never be used to set a mode while
+ * the fractional window is showing. The one way there is what the master journey
+ * slider is FOR: set the mode while it is enabled (stage 3+), then scrub the one
+ * slider back into stage 2's fractional stretch. store.ts's `cutaway` is not reset by
+ * moving backward (setCutaway is the only writer), and journey-continuity.spec.ts is
+ * the gate that already established scrubbing the descent, either direction, does not
+ * un-settle the camera -- so this is not a special path, it is the one interaction the
+ * master slider exists to allow.
+ */
+test.describe("P10 -- the sweep, relocated to the descent, still rides the cut", () => {
+  const perf = (page: Page) => page.evaluate(() => (window as unknown as { __perf: Perf }).__perf);
+
+  /**
+   * Scrubs the master slider to `u` and waits for window.__perf's triangle total to stop
+   * moving, rather than trusting a fixed delay.
+   *
+   * A FLAT WAIT WAS TRIED FIRST AND WAS FLAKY, MEASURABLY. WeldExterior's `progress` is
+   * throttled to a 1/64 quantum inside a `useFrame` (its own header explains why), so the
+   * sweep mesh mounting or unmounting after a big altitude jump needs at least one rendered
+   * frame to catch up, and this suite's own SwiftShader renderer runs at an 85-100 ms
+   * median frame under load -- 500 ms is four to six frames on a quiet machine and as few as
+   * two under the contention three parallel workers create. Polling the number this test
+   * actually reads removes the guess: a plateau across three checks means the geometry (and
+   * the probe reporting it) has caught up, whatever the frame rate happened to be.
+   */
+  async function setU(page: Page, u: number): Promise<void> {
+    const slider = page.getByTestId("journey");
+    // Snapped to the slider's own 0.0005 step, as an exact multiple -- see statsAt's own
+    // comment above for why a plain toFixed() string fails Playwright's fill() validation.
+    const value = ((Math.round(u / 0.0005) * 5) / 10000).toString();
+    await slider.fill(value);
+    await slider.dispatchEvent("input");
+    let plateau = 0;
+    let last = -1;
+    for (let i = 0; i < 60 && plateau < 3; i++) {
+      await page.waitForTimeout(150);
+      const t = (await perf(page)).triangles;
+      plateau = t === last ? plateau + 1 : 0;
+      last = t;
+    }
+  }
+
+  /**
+   * BEFORE is inside stage 3 (78.7 ft, measured -- progress 1, sweep gone, cutaway settable).
+   * DURING is inside stage 2 (738.5 ft, measured -- progress fractional, sweep mounted,
+   * cutaway NOT settable from here, which is why it is set at BEFORE's altitude first and
+   * carried backward).
+   */
+  const BEFORE_U = 0.83;
+  const DURING_U = 0.665;
+
+  async function statsAt(page: Page, mode: string, u: number): Promise<Perf> {
+    await setU(page, BEFORE_U);
+    await page.getByTestId(`cutaway-${mode}`).click();
+    await expect.poll(async () => (await weld(page)).cutaway, { timeout: 10_000 }).toBe(mode);
+    await setU(page, u);
+    return perf(page);
+  }
+
+  test("the sweep still gives up what the cutaway takes off the shell, measured in the descent", async ({
+    page,
+  }) => {
+    const errors: string[] = [];
+    page.on("console", (m) => {
+      if (m.type() === "error") errors.push(m.text());
+    });
+    page.on("pageerror", (e) => errors.push(e.message));
+    await page.goto("/");
+    await expect(page.locator("canvas")).toBeVisible({ timeout: 30_000 });
+    await page.getByTestId("stage-3").click();
+    await page.waitForTimeout(1400);
+    const panel = page.getByTestId("panel");
+    if (!(await panel.isVisible())) await page.getByTestId("panel-toggle").click();
+    await expect(panel).toBeVisible();
+
+    const noneBefore = await statsAt(page, "none", BEFORE_U);
+    const roofBefore = await statsAt(page, "roofOff", BEFORE_U);
+    const noneDuring = await statsAt(page, "none", DURING_U);
+    const roofDuring = await statsAt(page, "roofOff", DURING_U);
+
+    const report =
+      `none ${noneBefore.triangles}t/${noneBefore.calls}c -> ` +
+      `${noneDuring.triangles}t/${noneDuring.calls}c, ` +
+      `roofOff ${roofBefore.triangles}t/${roofBefore.calls}c -> ` +
+      `${roofDuring.triangles}t/${roofDuring.calls}c`;
+
+    /**
+     * UNLIKE STAGE 4, the shell itself does not go transparent here: thresholdOpacity()
+     * returns shell = 1 for every stage below 4, so `x.transparent = opacity < 1` is false
+     * at both BEFORE and DURING and the shell submits once, not twice, in both. Only the
+     * sweep's own mesh (always transparent + DoubleSide, Threshold.tsx's `scanlineMaterial`)
+     * doubles, and only when it is mounted -- DURING alone. So the shell's own draw-call
+     * cost of the roof cut is the SAME number at both points, not doubled at DURING the way
+     * stage 4's test finds it; that difference is itself evidence the shell stayed opaque.
+     */
+    expect(noneDuring.calls - roofDuring.calls, `draw calls: ${report}`).toBe(
+      noneBefore.calls - roofBefore.calls,
+    );
+    // campus.spec.ts gates stages 1-3 at the same 30; measured here at 30 exactly.
+    expect(noneDuring.calls, `draw calls: ${report}`).toBeLessThanOrEqual(30);
+
+    /**
+     * shellOnly is what the roof cut costs the standing shell alone, undoubled at both
+     * points since the shell stays opaque throughout. withSweep is the same difference
+     * once the sweep mesh has joined the scene, and it is NOT halved directly -- only the
+     * sweep's own contribution is doubled (its own transparency), so shellOnly is
+     * subtracted first and the remainder halved. Measured: shellOnly 190 -- the identical
+     * figure the stage-4 test finds at its own t = 0.2, because it is the same roof on the
+     * same shell -- withSweep 522, sweepLost (522 - 190) / 2 = 166: the exact figure the
+     * stage-4 test used to pin, because buildWeldCut()'s merge has not changed, only where
+     * it is alive to measure.
+     */
+    const shellOnly = noneBefore.triangles - roofBefore.triangles;
+    const withSweep = noneDuring.triangles - roofDuring.triangles;
+    const sweepLost = (withSweep - shellOnly) / 2;
+    console.log(`${report} | shell ${shellOnly}, with sweep ${withSweep}, sweep lost ${sweepLost}`);
+    expect(sweepLost, `the sweep gave up the roof it no longer stands on: ${report}`).toBe(166);
+
     expect(errors, errors.join("\n")).toEqual([]);
   });
 });

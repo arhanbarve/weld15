@@ -66,6 +66,17 @@ async function readPerf(page) {
  * Crimson test per P10-IMPL.md: r > 170 && g < 130 && 80 <= b <= 160 && r - g > 60.
  * Reads the canvas back via a 2D copy -- preserveDrawingBuffer is on
  * (Experience.tsx's <Canvas gl={{...}}>), so this sees the last drawn frame.
+ *
+ * P10 STEP 9: the marker became a GROUP OF TWO MESHES, a filled dot plus a hollow ring
+ * around it (Globe.tsx's MARKER_RING), so a plain bounding box over every crimson pixel
+ * now measures dot-plus-ring together -- 32px, unchanged from before step 9, because the
+ * ring's outer radius is what dominates the box. The 9-12px this script is meant to check
+ * is the DOT alone. Fixed by connected-component labelling: the dot is a filled disc, so
+ * its pixel count fills roughly 78% of its own bounding box; the ring is a thin annulus
+ * around empty space and fills only a few percent of its (larger) box. Keeping the
+ * component with the highest fill ratio -- among those big enough to be a real blob,
+ * rather than a stray terrain pixel that happens to pass the crimson test alone, at fill
+ * ratio 1 for a component of area 1 -- reliably picks the dot out from the ring.
  */
 async function readMarker(page) {
   return page.locator("canvas").evaluate((el) => {
@@ -75,30 +86,68 @@ async function readMarker(page) {
     const ctx = off.getContext("2d");
     ctx.drawImage(el, 0, 0);
     const { data } = ctx.getImageData(0, 0, off.width, off.height);
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    let found = false;
-    for (let y = 0; y < off.height; y++) {
-      for (let x = 0; x < off.width; x++) {
-        const i = (y * off.width + x) * 4;
+    const w = off.width;
+    const h = off.height;
+    const mask = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4;
         const r = data[i], g = data[i + 1], b = data[i + 2];
         if (r > 170 && g < 130 && b >= 80 && b <= 160 && r - g > 60) {
-          found = true;
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
+          mask[y * w + x] = 1;
         }
       }
     }
-    if (!found) return null;
+
+    // 4-connected flood fill over the mask, tracking each component's bbox and pixel
+    // count. MIN_AREA rules out single stray pixels (fill ratio 1, which would otherwise
+    // always beat the dot's ~0.78) without being anywhere close to the dot's own area
+    // (a 9px-diameter disc is roughly 64px^2, comfortably above this).
+    const MIN_AREA = 16;
+    const visited = new Uint8Array(w * h);
+    const stack = [];
+    let best = null;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const start = y * w + x;
+        if (!mask[start] || visited[start]) continue;
+        let minX = x, maxX = x, minY = y, maxY = y, area = 0;
+        stack.length = 0;
+        stack.push(start);
+        visited[start] = 1;
+        while (stack.length > 0) {
+          const cur = stack.pop();
+          const cx = cur % w;
+          const cy = (cur - cx) / w;
+          area++;
+          if (cx < minX) minX = cx;
+          if (cx > maxX) maxX = cx;
+          if (cy < minY) minY = cy;
+          if (cy > maxY) maxY = cy;
+          // Left/right neighbours guarded against wrapping onto the next/previous row.
+          if (cx > 0 && mask[cur - 1] && !visited[cur - 1]) { visited[cur - 1] = 1; stack.push(cur - 1); }
+          if (cx < w - 1 && mask[cur + 1] && !visited[cur + 1]) { visited[cur + 1] = 1; stack.push(cur + 1); }
+          if (cur - w >= 0 && mask[cur - w] && !visited[cur - w]) { visited[cur - w] = 1; stack.push(cur - w); }
+          if (cur + w < w * h && mask[cur + w] && !visited[cur + w]) { visited[cur + w] = 1; stack.push(cur + w); }
+        }
+        if (area < MIN_AREA) continue;
+        const bboxW = maxX - minX + 1;
+        const bboxH = maxY - minY + 1;
+        const fill = area / (bboxW * bboxH);
+        if (!best || fill > best.fill) {
+          best = { minX, maxX, minY, maxY, fill };
+        }
+      }
+    }
+    if (!best) return null;
     // Report in CSS pixels, not device pixels: el.width/height are the canvas's
     // backing-store size, which can be devicePixelRatio times the CSS box.
     const rect = el.getBoundingClientRect();
-    const scaleX = rect.width / off.width;
-    const scaleY = rect.height / off.height;
+    const scaleX = rect.width / w;
+    const scaleY = rect.height / h;
     return {
-      w: Math.round((maxX - minX + 1) * scaleX),
-      h: Math.round((maxY - minY + 1) * scaleY),
+      w: Math.round((best.maxX - best.minX + 1) * scaleX),
+      h: Math.round((best.maxY - best.minY + 1) * scaleY),
     };
   });
 }

@@ -150,6 +150,37 @@ describe("the georeferencing puts real buildings where they belong", () => {
     expect(span / q.height).toBeLessThan(0.5);
   });
 
+  it("keeps the whole campus inside L4 with at least 100 ft of margin on every side", () => {
+    // 10b's roof skin (aerial.ts's attachAerialSkin) samples every building's roof against L4's
+    // plate by world position; a building whose roof fell outside the plate's extent would clamp
+    // to an edge texel and smear rather than throw, so this has to be asserted rather than
+    // trusted. Measured: campus.json spans x -551.0..597.5, y -649.6..618.8 against L4's
+    // extentFt of +/-800 ft on both axes, so the tightest margin is 150.4 ft, on the south (the y
+    // minimum).
+    const q = quadOf("L4")!;
+    const minX = q.cx - q.width / 2;
+    const maxX = q.cx + q.width / 2;
+    const minY = q.cy - q.height / 2;
+    const maxY = q.cy + q.height / 2;
+    const MARGIN = 100;
+    let bx0 = Infinity;
+    let bx1 = -Infinity;
+    let by0 = Infinity;
+    let by1 = -Infinity;
+    for (const ring of rings) {
+      for (const [x, y] of ring) {
+        bx0 = Math.min(bx0, x!);
+        bx1 = Math.max(bx1, x!);
+        by0 = Math.min(by0, y!);
+        by1 = Math.max(by1, y!);
+      }
+    }
+    expect(bx0 - minX, "west margin").toBeGreaterThanOrEqual(MARGIN);
+    expect(maxX - bx1, "east margin").toBeGreaterThanOrEqual(MARGIN);
+    expect(by0 - minY, "south margin").toBeGreaterThanOrEqual(MARGIN);
+    expect(maxY - by1, "north margin").toBeGreaterThanOrEqual(MARGIN);
+  });
+
   it("uses the same origin the frames module does", () => {
     // The fetch script copies WELD_ORIGIN rather than importing it, because a plain-node script
     // cannot resolve the "@/" alias. assertFramesAgree() guards that at generation time; this

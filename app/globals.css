@@ -108,17 +108,21 @@ button,
 }
 
 /* Skip control must be reachable on the first tab, per the immersive-experience
-   requirement. Visible when focused, out of the way when not. */
+   requirement. Visible when focused, out of the way when not.
+   CENTRED, so .a11y-alt-dock can sit in the corner it is aligned to. The top-left was
+   reserved for a control that is off-screen until focused, which cost the written
+   description 52 px of misalignment (P10.md 1.2). The centre is free now that the
+   fly-down has moved into the dock. */
 .skip {
   position: fixed;
   top: var(--s2);
-  left: var(--s2);
+  left: 50%;
   z-index: var(--z-toast);
-  transform: translateY(-200%);
+  transform: translateX(-50%) translateY(-200%);
   transition: transform var(--dur-micro) var(--ease-out-quint);
 }
 .skip:focus-visible {
-  transform: translateY(0);
+  transform: translateX(-50%) translateY(0);
 }
 
 /* Digits that line up in columns line up. */
@@ -138,14 +142,44 @@ button,
 
 /* ---------- P2 HUD ---------- */
 
-.hud {
+/* ---------- P10: one dock, top right, at every stage ----------
+
+   WHAT THIS REPLACES, AND THE MEASUREMENT THAT KILLED IT. The HUD was fixed
+   bottom-centre and moved to the top at stage 5 (`.hud.hud-room`, the rule that used to
+   sit here). Measured at 1440 x 900: at stage 3 its box was [451, 989, 541, 886] -- 538 x
+   345 px directly over the base of Weld Hall, the one building the stage exists to show.
+   The stage-5 move was itself a correct fix for a real defect (the fit-out's 29 anchors
+   land at y 589-716 and a bottom HUD sat on every one of them), and it is what made the
+   chrome inconsistent: three positions across six stages, plus the fly-down at a fourth.
+   One column at the right edge answers both. The bottom of the frame is where the model
+   is at every stage; the right edge is where the dimension panel already lived. */
+.dock {
   position: fixed;
-  /* Centred rather than bottom-left: dev-tool badges and browser status chrome
-     both live in that corner and overlap the controls. */
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: var(--s2);
-  z-index: var(--z-hud);
+  top: var(--s2);
+  right: var(--s2);
+  z-index: var(--z-panel);
+  width: min(23rem, calc(100vw - 2 * var(--s2)));
+  /* One scroll container, so two open disclosures cannot push the third off screen. The
+     body is overflow: hidden for the canvas's sake, so anything taller than this would be
+     CLIPPED rather than scrolled -- the same defect .gate records at 375 x 500. */
+  max-height: calc(100dvh - 2 * var(--s2));
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-family: var(--mono);
+  /* The empty column must not eat drags meant for the room behind it. Both
+     .a11y-alt-dock and Panel.module.css's .dock already make this move. */
+  pointer-events: none;
+}
+.dock > * {
+  pointer-events: auto;
+}
+
+/* The card that used to be `.hud`: the same ground, border, radius and padding, carried
+   over unchanged. `align-items: stretch` replaces `center`, because a full-width scrubber
+   is the card's subject now rather than a row of centred stage buttons. */
+.dock-card {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
@@ -155,36 +189,57 @@ button,
   border-radius: 2px;
   font-family: var(--mono);
   color: var(--ink);
-  max-width: calc(100vw - 2 * var(--s2));
-  align-items: center;
+  align-items: stretch;
 }
 
-/* In the room, and now at stage 4 too (P10), the HUD moves to the top.
-   MEASURED, not a preference. At stage 5 the camera stands in bedroom B and looks
-   diagonally down, so the floor -- and every piece of furniture standing on it --
-   projects into the bottom of the frame: the fit-out's 29 anchors land between y 589
-   and y 716 on a 1280 x 720 viewport, and the bottom-centred HUD occupied y 467 to
-   706. Every draggable thing in the suite was behind it. Not "hard to hit": on the
-   far side of an opaque panel, so a press reached an <input> and the pointer never
-   got to the canvas at all.
-   The top is empty at this stage for the same reason the bottom is full -- it holds
-   wall and ceiling, which nothing stands on. So this is not a compromise between the
-   two: it is the only half of the frame the HUD can sit in without covering the
-   thing the stage exists to let you touch.
-   Stage 4 (P10) is the same shape of problem: it is now draggable too, and every
-   capture through the phase showed the panel sitting centre-bottom over the gable's
-   own base at t = 0. Its box measures 369 px wide at 1280 x 720 (x 455 to 825),
-   clear of .a11y-alt-dock's 430 px right edge by 25 px.
-   STAGE 3 IS DELIBERATELY NOT INCLUDED, and that is a measurement too, not an
-   oversight. Stage 3's HUD carries the full orbit control row alongside every other
-   row at once and measures 537 px wide at 1280 x 720 (x 371 to 908) -- 58 px into
-   .a11y-alt-dock's box, which made the stage nav buttons themselves unclickable
-   under Playwright's actionability check. Moving stage 3's HUD to the top would
-   need its own width or layout change to clear that dock, which is a second
-   project and not this one. */
-.hud.hud-room {
-  bottom: auto;
-  top: var(--s2);
+/* MERGE NOTE (P10 integration). `p10-fidelity` extended `.hud.hud-room` to stage 4, for
+   the same measured reason stage 5 already had it: stage 4 became draggable and the
+   bottom-centred panel sat over the gable's own base. That rule is gone here, and with it
+   the reason for it -- `.dock` above is fixed top-right at EVERY stage, so there is no
+   longer a per-stage position for a per-stage override to correct. The measurement that
+   motivated it is preserved in the `.dock` header above; this is the record that the
+   stage-4 case was considered and is answered by the dock, not dropped. */
+
+/* Holds the fly-down and the reset-view button, centred, when either is offered; an empty
+   row costs no visible height of its own when neither is. The gap only shows at stage 0,
+   the one place both buttons can be mounted together. */
+.dock-row {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+/* The sun and the floor area, folded shut by default. Same ground and border as
+   .dock-card, since it is the same column; the summary carries the 44 px target the same
+   way .sources's does. */
+.dock-fold {
+  background: var(--chip-scan);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  font-family: var(--mono);
+  color: var(--ink);
+}
+.dock-fold > summary {
+  cursor: pointer;
+  padding: 0.55rem 0.7rem;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  font-size: 0.8125rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.dock-fold[open] > summary {
+  border-bottom: 1px solid var(--rule-soft);
+}
+.dock-fold > summary:hover,
+.dock-fold > summary:focus-visible {
+  color: var(--ink);
+}
+.dock-fold > label,
+.dock-fold > div {
+  margin: 0 0.7rem 0.7rem;
 }
 
 .hud-stage {
@@ -234,6 +289,69 @@ button,
   font-weight: 600;
 }
 
+/* ---------- P10: the master scrubber (src/ui/JourneyBar.tsx) ---------- */
+
+.jbar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+/* Not inside a `.hud-t`, so the width and the touch-target minimum are restated here
+   rather than assumed from that rule -- `.hud-t input` already covers the sun and area
+   controls, but this bar is not one of them. */
+.jbar input[type="range"] {
+  width: 100%;
+  min-height: 44px;
+  accent-color: var(--mark);
+}
+
+.jbar-ticks {
+  position: relative;
+  height: 44px;
+}
+
+/* 44 px TALL, per MASTER's touch-target minimum -- but NOT 44 px wide, and that is a
+   measured departure rather than a guess. boundaries(params) puts the tightest two ticks
+   (stage 3 to stage 4, the 3-to-4 transit) 8.63% of the bar apart, which at the dock's own
+   23rem cap is 29 px centre to centre: two 44 px squares there would overlap by 15 px, and
+   Playwright's own click on stage-4 landed on stage-5 instead when this was tried at 44.
+   24 px is WCAG 2.5.8's own floor for a touch target ("24px large, or leave sufficient
+   space" -- axe-core's target-size rule, disabled by default and not what caught this, but
+   the same number), and it clears every gap `boundaries()` produces for the shipped params
+   with room to spare: the narrowest, that same 29 px gap, still leaves 5 px between boxes.
+   Height stays 44 for the touch AREA the width alone no longer buys. */
+.jbar-ticks button {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  width: 24px;
+  height: 44px;
+  background: transparent;
+  color: var(--dim);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  font-size: 0.8125rem;
+  transition: color var(--dur-micro) var(--ease-out-quint),
+    border-color var(--dur-micro) var(--ease-out-quint);
+}
+.jbar-ticks button:hover { color: var(--ink); border-color: var(--line); }
+.jbar-ticks button.on {
+  color: var(--ink);
+  border-color: var(--mark);
+  font-weight: 600;
+}
+
+/* The two end ticks sit at 0% and 100%, and `translateX(-50%)` centres a 24 px box on
+   each of those points -- half of it, 12 px, would overhang the card on the outer side.
+   `margin-left` is what clamps it: for an absolutely positioned element, margin applies to
+   the box BEFORE the transform (a paint-only shift) is applied, so first-child's box starts
+   12 px right of `left: 0%` and the transform then slides it back to flush-left; last-child's
+   margin does the same in reverse. Measured, not guessed: without this, stage 0 and stage 5
+   both stood 12 px outside `.dock-card` at every viewport width tried. */
+.jbar-ticks button:first-child { margin-left: 12px; }
+.jbar-ticks button:last-child { margin-left: -12px; }
+
 .hud-t {
   display: flex;
   align-items: center;
@@ -279,9 +397,10 @@ button,
 
 /* ---------- imagery credit ---------- */
 
-/* BOTTOM RIGHT, which is the last free corner: top-left is A11yAlt, top-centre the fly-down,
-   top-right the dimension panel, bottom-left Sources, bottom-centre the HUD. Small, dim, and
-   aria-hidden -- it is a credit, not a control, and Sources.tsx carries the reachable version. */
+/* BOTTOM RIGHT, the one corner P10's dock does not use: top-left is A11yAlt, top-right is
+   the dock (the stage bar, the fly-down, the sun, the panel and Sources, all one column
+   since P10). Small, dim, and aria-hidden -- it is a credit, not a control, and
+   Sources.tsx carries the reachable version. */
 .imagery-chip {
   position: fixed;
   right: var(--s2);
@@ -303,22 +422,16 @@ button,
 
 /* VISIBLE, unlike .skip, and that is the whole difference between them. .skip is an escape
    hatch that lives off-screen until it is focused; this is a feature, and a feature nobody can
-   see is not offered. It sits directly above the HUD and centred on it, because the HUD is what
-   it drives -- it advances the same `t` the scrubber in there moves, and putting the two next to
-   each other is what makes that legible without a label saying so.
+   see is not offered.
 
-   TOP CENTRE, AND IT STARTED AT THE BOTTOM. Placing it above the HUD put it behind the HUD:
-   the HUD's height changes with the stage, at --z-hud they are the same layer so DOM order
-   decided who won, and at stage 1 the label came out reading through the panel. Rather than
-   chase a clearance that has to hold for three different HUD heights, it moved to the top edge,
-   which is empty at stages 0 to 2 -- A11yAlt is top-LEFT and the dimension panel top-RIGHT, and
-   this is narrow enough to sit between them. --z-panel so it is never behind the HUD again. */
+   NO LONGER POSITIONED HERE. It sat top-centre, its own fixed element, from P4 through P9 --
+   first placed above the HUD (behind it: the HUD's height changes with the stage and DOM
+   order decided who won at --z-hud, so at stage 1 the label read through the panel), then
+   moved to the top edge to clear that. P10 folds it into `.dock-row`, a flow child of
+   `.dock-card` in `.dock` below, so it advances the same `t` the master scrubber right above
+   it moves without needing a fixed position of its own to say so. Only the CHROME below
+   survives from this rule; the positioning properties are gone with it. */
 .fly {
-  position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
-  top: var(--s2);
-  z-index: var(--z-panel);
   background: var(--chip-scan);
   color: var(--ink);
   border: 1px solid var(--mark);
@@ -341,6 +454,28 @@ button,
 .fly[aria-pressed="true"] {
   border-color: var(--ink);
   color: var(--mark);
+}
+
+/* ---------- P10 step 8: stage 3 orbit keys, no buttons ---------- */
+
+/* The window handler in Hud.tsx carries the interaction now; this group is only the
+   readout, the hint and the live region -- the six buttons P10 step 5 took off the
+   canvas are gone, not replaced. */
+.dock-orbit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  color: var(--dim);
+}
+
+/* --faint at 0.6875rem: the same pairing Panel.module.css's ledger measures at 5.03:1
+   on --void-deep (its .deflt rule is the identical pair) -- .dock-card is that same
+   opaque ground, so the ratio carries over unchanged, over MASTER's 4.5:1 floor. */
+.dock-hint {
+  margin: 0;
+  font-size: 0.6875rem;
+  color: var(--faint);
 }
 
 /* ---------- stage 3 orbit keys ---------- */
@@ -512,18 +647,14 @@ button,
 
 /* ---------- P8 attribution ---------- */
 
-/* The sources disclosure. Bottom-left, which is the one corner nothing else uses: the
-   HUD is centred (top in the room, bottom elsewhere), the panel is right, and the skip
-   link is top-left only while focused. */
+/* The sources disclosure. NO LONGER FIXED, NO LONGER BOTTOM-LEFT. It was the one corner
+   nothing else used while the HUD sat centred (top in the room, bottom elsewhere) and the
+   panel sat fixed at the right -- that corner accounting is gone with the HUD. Since P10 it
+   is a flow child of `.dock`, last in the column, and `width: 100%` is what the fixed
+   `max-width` above used to do: keep it inside the one column everything else lives in
+   rather than measured against the viewport on its own. */
 .sources {
-  position: fixed;
-  left: var(--s2);
-  bottom: var(--s2);
-  z-index: var(--z-hud);
-  /* Narrow enough to clear the centred HUD when open. Measured at 1440 x 900: the HUD
-     occupies x 575 to 880, and a 30rem box from the left margin ends at 495. The 38rem
-     it was overlapped the stage buttons, which is a disclosure covering a control. */
-  max-width: min(30rem, calc(100vw - 2 * var(--s2)));
+  width: 100%;
   font-family: var(--mono);
   font-size: 0.6875rem;
   color: var(--ink-scan);
@@ -587,9 +718,11 @@ button,
 
 .a11y-alt-dock {
   position: fixed;
-  /* Below where .skip lands when it is focused: that control is fixed at top/left
-     var(--s2) with a 44px minimum, and it must not be covered by anything. */
-  top: calc(var(--s2) + 44px + var(--s1));
+  /* var(--s2), matching its own `left`, below. It used to add 44px + var(--s1) of
+     clearance for .skip, which sat top-left until focused; .skip is centred since P10 (see
+     its own rule), so the corner is this dock's alone now and the clearance is gone with
+     the control it was for. */
+  top: var(--s2);
   left: var(--s2);
   z-index: var(--z-panel);
   /* 26rem and not the 32rem this started at, MEASURED rather than chosen. At stage 5 the
@@ -600,7 +733,12 @@ button,
      x 430: clear by 51 px at 1280 and by 131 at 1440. tests/e2e/a11y.spec.ts asserts the
      two boxes do not intersect, because a comment is not a gate.
      The max-height below is the other half of the same accounting: it puts the open
-     panel's bottom at y 644, above the sources disclosure at y 660. */
+     panel's bottom at y 644, above the sources disclosure at y 660.
+     NOTE, P10: the HUD referred to throughout this comment is now `.dock-card` in the
+     right-hand column, and the numbers above describe the layout this dock was measured
+     against before that column moved. Left as the historical record; step 6 re-measures
+     the two boxes against the new dock and rewrites the assertion, per
+     docs/phases/P10-IMPL.md's own note on that step. */
   width: min(26rem, calc(100vw - 2 * var(--s2)));
   display: flex;
   flex-direction: column;

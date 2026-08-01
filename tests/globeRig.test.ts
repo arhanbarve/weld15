@@ -2,9 +2,11 @@ import { describe, it, expect } from "vitest";
 import { WELD_ORIGIN } from "@/geo/frames";
 import { GLOBE_FAR_RATIO, R_EARTH_FT, globeClipFloor, nearFar } from "@/scene/altitude";
 import {
+  aboveHorizon,
   assertRigVisible,
   geoToSite,
   globeRig,
+  spinPose,
   weldBasis,
   type Vec3,
 } from "@/scene/globeRig";
@@ -221,5 +223,107 @@ describe("the frame rotation", () => {
     expect(b.x).toEqual([-0, 0, -1]);
     expect(b.y[0]).toBeCloseTo(1, 12);
     expect(b.z[1]).toBeCloseTo(-1, 12);
+  });
+});
+
+/**
+ * P10 step 7: spinning the camera about Earth's centre, at stage 0.
+ *
+ * EARTH_CENTRE is spinPose's own pivot and is not exported, so it is recomputed here as
+ * [0, -R_EARTH_FT, 0] -- the same point globeRig()'s `dy = -R_EARTH_FT - cameraPos[1]`
+ * measures from, per spinPose's own docblock.
+ */
+describe("spinPose", () => {
+  const EARTH_CENTRE: Vec3 = [0, -R_EARTH_FT, 0];
+  const dist = (p: Vec3, c: Vec3) => Math.hypot(p[0] - c[0], p[1] - c[1], p[2] - c[2]);
+  const P: Vec3 = [1000, 5_000_000, 2000];
+  const T: Vec3 = [0, 42, 0];
+
+  it("is the identity when the spin is zero, for every k", () => {
+    for (const k of [0, 0.25, 0.6, 1]) {
+      const out = spinPose(P, T, { yawDeg: 0, pitchDeg: 0 }, k);
+      expect(out.position, `k=${k}`).toEqual(P);
+      expect(out.target, `k=${k}`).toEqual(T);
+    }
+  });
+
+  it("is the identity when k is zero, for every spin", () => {
+    const spins = [
+      { yawDeg: 30, pitchDeg: 10 },
+      { yawDeg: -180, pitchDeg: -60 },
+      { yawDeg: 720, pitchDeg: 80 },
+    ];
+    for (const spin of spins) {
+      const out = spinPose(P, T, spin, 0);
+      expect(out.position, JSON.stringify(spin)).toEqual(P);
+      expect(out.target, JSON.stringify(spin)).toEqual(T);
+    }
+  });
+
+  it("preserves |position - centre| to 1e-9 relative, so altitude does not drift", () => {
+    const before = dist(P, EARTH_CENTRE);
+    const spins = [
+      { yawDeg: 12, pitchDeg: 5 },
+      { yawDeg: 200, pitchDeg: -70 },
+      { yawDeg: -400, pitchDeg: 80 },
+    ];
+    for (const spin of spins) {
+      for (const k of [0.3, 1]) {
+        const out = spinPose(P, T, spin, k);
+        const after = dist(out.position, EARTH_CENTRE);
+        expect(
+          Math.abs(after - before) / before,
+          `${JSON.stringify(spin)} k=${k}`,
+        ).toBeLessThan(1e-9);
+      }
+    }
+  });
+
+  it("puts the camera on the far side at yaw 180", () => {
+    // On the site Y axis so the rotation, which is about site +Z, is an exact antipode
+    // rather than a general point that a single-axis flip would not fully invert.
+    const alt = 1.5 * R_EARTH_FT;
+    const p: Vec3 = [0, alt, 0];
+    const before: Vec3 = [p[0] - EARTH_CENTRE[0], p[1] - EARTH_CENTRE[1], p[2] - EARTH_CENTRE[2]];
+    const out = spinPose(p, T, { yawDeg: 180, pitchDeg: 0 }, 1);
+    const after: Vec3 = [
+      out.position[0] - EARTH_CENTRE[0],
+      out.position[1] - EARTH_CENTRE[1],
+      out.position[2] - EARTH_CENTRE[2],
+    ];
+    const cosine =
+      (before[0] * after[0] + before[1] * after[1] + before[2] * after[2]) /
+      (Math.hypot(...before) * Math.hypot(...after));
+    expect(cosine).toBeCloseTo(-1, 9);
+  });
+
+  it("clamps pitchDeg at plus or minus 80 degrees", () => {
+    const atLimit = spinPose(P, T, { yawDeg: 0, pitchDeg: 80 }, 1);
+    const beyond = spinPose(P, T, { yawDeg: 0, pitchDeg: 200 }, 1);
+    expect(beyond.position[0]).toBeCloseTo(atLimit.position[0], 6);
+    expect(beyond.position[1]).toBeCloseTo(atLimit.position[1], 6);
+    expect(beyond.position[2]).toBeCloseTo(atLimit.position[2], 6);
+
+    const atNegLimit = spinPose(P, T, { yawDeg: 0, pitchDeg: -80 }, 1);
+    const beyondNeg = spinPose(P, T, { yawDeg: 0, pitchDeg: -200 }, 1);
+    expect(beyondNeg.position[0]).toBeCloseTo(atNegLimit.position[0], 6);
+    expect(beyondNeg.position[1]).toBeCloseTo(atNegLimit.position[1], 6);
+    expect(beyondNeg.position[2]).toBeCloseTo(atNegLimit.position[2], 6);
+  });
+});
+
+describe("aboveHorizon", () => {
+  it("is true on the sub-camera point and false on the antipode", () => {
+    expect(aboveHorizon(1, 100, 1000)).toBe(true);
+    expect(aboveHorizon(-1, 100, 1000)).toBe(false);
+  });
+
+  it("flips exactly at acos(radius / distance)", () => {
+    const radius = 100;
+    const distance = 1000;
+    const boundary = radius / distance;
+    expect(aboveHorizon(boundary, radius, distance)).toBe(false);
+    expect(aboveHorizon(boundary + 1e-9, radius, distance)).toBe(true);
+    expect(aboveHorizon(boundary - 1e-9, radius, distance)).toBe(false);
   });
 });

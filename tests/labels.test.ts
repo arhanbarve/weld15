@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { latLonToSite, WELD_ORIGIN } from "@/geo/frames";
 import { PLACE_TABLE, chipOpacity } from "@/scene/Labels";
-import { CONTRAST_MASS, HIGH_CONTRAST_GAIN, MASS_CEILING, MASS_OPACITY, massAt } from "@/scene/Campus";
 
 /** The altitudes the descent actually visits, log-spaced from the Yard to well past orbit. */
 const SWEEP = Array.from({ length: 400 }, (_, i) => 150 * Math.pow(10, (i / 399) * 5.4));
@@ -108,68 +107,10 @@ describe("the progressive place labels", () => {
 });
 
 /**
- * The mass opacity ramp, which lives in Campus.tsx but is a pure function of altitude.
- *
- * Tested here rather than in a file of its own because it is the same question this file is about:
- * what the campus looks like at a given height. Campus.tsx exports the function precisely so this
- * can be asserted without a renderer.
+ * THE MASS OPACITY RAMP TEST BLOCK IS DELETED, P10 STEP 10. It asserted massAt(), MASS_OPACITY,
+ * CONTRAST_MASS, MASS_CEILING and HIGH_CONTRAST_GAIN, all of which Campus.tsx no longer exports:
+ * the campus buildings are opaque MeshStandardMaterials now, with aerial.ts's attachAerialSkin
+ * putting the photograph on their roofs, so there is no translucency ramp left to be a pure
+ * function of altitude. See Campus.tsx's own header for why an opaque building achieves the
+ * occlusion this ramp could only ever get partway to.
  */
-describe("the mass opacity ramp", () => {
-  it("sits on MASTER.md's token at the top of the ramp", () => {
-    // --mass is 0.10. Above 40,000 ft the massing band is zero, so the ramp is at its floor and the
-    // campus is exactly as translucent as the design system says.
-    expect(massAt(60_000, false)).toBeCloseTo(MASS_OPACITY, 9);
-    expect(massAt(1e7, false)).toBeCloseTo(MASS_OPACITY, 9);
-  });
-
-  it("reaches its ceiling by the Yard and holds it inward", () => {
-    for (const alt of [3_000, 815, 400, 110, 18]) {
-      expect(massAt(alt, false), `alt ${alt}`).toBeCloseTo(MASS_CEILING, 9);
-    }
-  });
-
-  it("rises monotonically as the camera descends", () => {
-    let prev = -1;
-    for (const alt of [1e6, 100_000, 40_000, 20_000, 16_332, 8_000, 4_000, 815, 110]) {
-      const a = massAt(alt, false);
-      expect(a, `alt ${alt}`).toBeGreaterThanOrEqual(prev);
-      prev = a;
-    }
-  });
-
-  it("is partway up at stage 1 and full at stage 2", () => {
-    // The two stops the ramp actually has to look right at. Stage 1 is alt 16,332, stage 2 is 815.
-    const s1 = massAt(16_332, false);
-    expect(s1).toBeGreaterThan(MASS_OPACITY);
-    expect(s1).toBeLessThan(MASS_CEILING);
-    expect(massAt(815, false)).toBeCloseTo(MASS_CEILING, 9);
-  });
-
-  it("puts the high-contrast floor on MASTER.md's figure exactly", () => {
-    // THE POINT OF DERIVING THE GAIN rather than writing a third literal. Campus.tsx draws 0.12
-    // normally and MASTER specifies 0.22 in high contrast, so the gain is 0.22/0.12 = 1.833 and the
-    // floor lands on 0.22 by construction. tests/e2e/contrast.spec.ts asserts that figure through
-    // window.__campus, so a gain taken from the --mass TOKEN's 0.10 instead would read 0.264 and
-    // fail it -- which is exactly what an earlier version of this ramp did.
-    expect(HIGH_CONTRAST_GAIN).toBeCloseTo(CONTRAST_MASS / MASS_OPACITY, 12);
-    expect(massAt(1e6, true)).toBeCloseTo(CONTRAST_MASS, 12);
-    expect(massAt(1e6, true)).toBeCloseTo(0.22, 12);
-    // And the ceiling rises in the same proportion, which is what section 6.9 asks for.
-    expect(massAt(110, true)).toBeCloseTo(MASS_CEILING * HIGH_CONTRAST_GAIN, 9);
-  });
-
-  it("never exceeds 1, even in high contrast", () => {
-    for (const alt of [1e7, 40_000, 815, 110, 1]) {
-      expect(massAt(alt, true), `alt ${alt}`).toBeLessThanOrEqual(1);
-    }
-  });
-
-  it("stays translucent enough to be a cyanotype", () => {
-    // THE CONSTRAINT THAT STOPS THIS BECOMING SOLID BLOCKS. Section 6.9 asked for full occlusion of
-    // the photographed roof, which needs about 0.81 -- and at 0.81 the campus is not line work over
-    // translucent mass any more. Campus.tsx records the arithmetic; this is the guard rail, so a
-    // later attempt to "finish" the occlusion fails a test instead of quietly changing the look.
-    expect(MASS_CEILING).toBeLessThan(0.5);
-    expect(massAt(110, false)).toBeLessThan(0.5);
-  });
-});

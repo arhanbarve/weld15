@@ -9,7 +9,14 @@ import { useStore } from "@/state/store";
 import { cambridgeInstant } from "./Lighting";
 import { layerOpacity } from "./altitude";
 import { levelUrls, loadTexture } from "./imagery";
-import { assertRigVisible, geoToSite, globeRig, weldBasis, type Vec3 } from "./globeRig";
+import {
+  aboveHorizon,
+  assertRigVisible,
+  geoToSite,
+  globeRig,
+  weldBasis,
+  type Vec3,
+} from "./globeRig";
 
 /**
  * Stage 0's Earth, as a depth-less proxy at whatever scale the far plane allows.
@@ -175,6 +182,40 @@ const RIM_FRAG = /* glsl */ `
  */
 const ORDER = { surface: -3, rim: -2, marker: -1 };
 
+/** Degrees to radians. Every file in this module that needs one writes its own. */
+const DEG = Math.PI / 180;
+
+/**
+ * The marker's angular radius, degrees.
+ *
+ * 0.32 deg is 5.0 px of radius at 900 px tall and a 45 deg vertical fov: the fov spans
+ * 900 px, so one degree is 20 px. DERIVED, and it replaces a fixed 0.022 of the sphere's
+ * radius, which measured 32 x 32 px on the rendered frame -- 87 miles of radius at Earth's
+ * true scale, a disc from Albany to Portland (P10.md 1.4).
+ *
+ * A CONSTANT ANGLE rather than a constant fraction of the globe, because the globe's
+ * angular size barely changes over stage 0's dwell but its proxy radius changes with `far`
+ * at every altitude. Pinning the angle is what makes the pin the same size on screen
+ * wherever the descent has got to.
+ */
+const MARKER_DEG = 0.32;
+
+/** Ring radius, as a multiple of the dot's. 2.6 reads as a target rather than as a blob. */
+const MARKER_RING = 2.6;
+
+/**
+ * Scratch objects for the marker's per-frame sizing, horizon test, and billboard.
+ *
+ * MODULE LEVEL, allocated once, for the same reason the sphere geometry itself is built
+ * once and rescaled rather than rebuilt: this runs sixty times a second, and `new
+ * THREE.Vector3()` in a frame loop is exactly the allocation this file's header already
+ * objects to.
+ */
+const MARKER_WORLD = new THREE.Vector3();
+const N = new THREE.Vector3();
+const V = new THREE.Vector3();
+const RING_Q = new THREE.Quaternion();
+
 /** Weld's outward normal, geocentric. The same vector weldBasis() calls `up`. */
 function markerDirection(): Vec3 {
   const lat = WELD_ORIGIN.lat * (Math.PI / 180);
@@ -193,6 +234,8 @@ export function Globe({ visible }: { visible: boolean }) {
   const group = useRef<THREE.Group>(null);
   const surface = useRef<THREE.ShaderMaterial>(null);
   const rim = useRef<THREE.ShaderMaterial>(null);
+  const markerGroup = useRef<THREE.Group>(null);
+  const ring = useRef<THREE.Mesh>(null);
   const warned = useRef(false);
 
   /**
@@ -225,6 +268,17 @@ export function Globe({ visible }: { visible: boolean }) {
       .transpose();
     return new THREE.Quaternion().setFromRotationMatrix(m);
   }, []);
+
+  /**
+   * `orientation`'s inverse, for billboarding the ring against a rotated parent.
+   *
+   * The ring sits inside the same geocentric-to-site group `orientation` rotates, so its
+   * WORLD quaternion is `orientation` composed with whatever local quaternion is set on the
+   * ring mesh itself. Solving worldQuat = orientation * local = camera.quaternion for
+   * `local` gives orientation's inverse composed with the camera's quaternion -- computed
+   * once here rather than inverted sixty times a second in the frame loop.
+   */
+  const orientationInverse = useMemo(() => orientation.clone().invert(), [orientation]);
 
   /**
    * The direction of the sun in the SITE frame, from the store's own wall clock.
@@ -342,6 +396,35 @@ export function Globe({ visible }: { visible: boolean }) {
     }
     if (rim.current) rim.current.uniforms.uOpacity!.value = 0.55 * o.globe;
 
+    /**
+     * The pin: sized to a constant ANGLE (MARKER_DEG), culled behind the horizon, and its
+     * ring billboarded to face the camera.
+     *
+     * `g.position` -- set two lines up -- IS the proxy sphere's own centre this frame, in
+     * the same proxy-scaled frame `rig.radius` and `rig.distanceToCentre` are measured in.
+     * Earth's TRUE centre is tens of millions of feet away and would swamp this dot product
+     * with the wrong number entirely; aboveHorizon()'s own docstring calls this "the centre"
+     * meaning the proxy's, not Earth's.
+     */
+    const m = markerGroup.current;
+    if (m) {
+      m.getWorldPosition(MARKER_WORLD);
+      const d = MARKER_WORLD.distanceTo(camera.position);
+      // The group sits inside a group scaled by rig.radius, so a local scale s renders as
+      // s * rig.radius feet. Solve for the world radius the angle asks for.
+      m.scale.setScalar((d * Math.tan(MARKER_DEG * DEG)) / rig.radius);
+
+      // Nothing depth-tests against this sphere, so the horizon has to be done by hand.
+      N.copy(MARKER_WORLD).sub(g.position).normalize();
+      V.copy(camera.position).sub(g.position).normalize();
+      m.visible = aboveHorizon(N.dot(V), rig.radius, rig.distanceToCentre);
+
+      if (ring.current) {
+        RING_Q.copy(orientationInverse).multiply(camera.quaternion);
+        ring.current.quaternion.copy(RING_Q);
+      }
+    }
+
     // Development only, and it reports rather than throws: an Earth that is silently absent
     // looks exactly like a texture that failed to load, so the hours go into the wrong file.
     if (process.env.NODE_ENV !== "production" && !warned.current) {
@@ -391,19 +474,57 @@ export function Globe({ visible }: { visible: boolean }) {
 
         {/* Weld, which is the only thing on screen at stage 0 that says where this is going.
             1.004 so it stands proud of the surface; with no depth test what that actually buys
-            is that it is not co-planar and z-fighting is impossible by construction. */}
-        <mesh
+            is that it is not co-planar and z-fighting is impossible by construction.
+
+            A GROUP OF TWO MESHES since step 9: a dot sized to a constant ANGLE (see
+            MARKER_DEG above, sized per frame in useFrame) and a ring billboarded to the
+            camera, so it reads as a pin and a target rather than as a blob. The frame loop
+            also culls the whole group behind the globe's horizon -- with depthTest off,
+            nothing else stops it drawing straight through the Earth once the globe can be
+            turned.
+
+            NO renderOrder ON THIS GROUP. A Group's own renderOrder becomes the `groupOrder`
+            three's WebGLRenderer assigns every descendant, and painterSortStable compares
+            groupOrder BEFORE each mesh's own renderOrder -- so a group here set to
+            ORDER.marker (-1) would put the pin's groupOrder below the surface's inherited 0
+            and draw it BEFORE the surface, which then painted over it every frame. Caught by
+            screenshot: the pin was computed correctly (right position, right size, visible
+            true) and simply never appeared. Only the dot and ring meshes carry renderOrder;
+            the group carries none, leaving groupOrder at its default and the meshes' own
+            renderOrder decide the order, same as before this group existed. */}
+        <group
+          ref={markerGroup}
           position={[marker[0] * 1.004, marker[1] * 1.004, marker[2] * 1.004]}
-          renderOrder={ORDER.marker}
         >
-          <sphereGeometry args={[0.022, 16, 12]} />
-          <meshBasicMaterial
-            color="#e4526f"
-            transparent
-            depthTest={false}
-            depthWrite={false}
-          />
-        </mesh>
+          <mesh renderOrder={ORDER.marker}>
+            <sphereGeometry args={[1, 16, 12]} />
+            <meshBasicMaterial
+              color="#e4526f"
+              transparent
+              depthTest={false}
+              depthWrite={false}
+            />
+          </mesh>
+          {/* FrontSide, not DoubleSide, despite this plane being billboarded rather than
+              built facing any one fixed way. The billboard IS the reason DoubleSide is
+              unneeded -- RING_Q always turns +Z toward the camera, so the back face is
+              never the one on screen. DoubleSide was the first draft and §9's own draw-call
+              budget caught it: three's WebGLRenderer submits a DoubleSide + transparent
+              material as TWO draw calls (back faces, then front, for correct sorting within
+              the one mesh), which silently doubled this ring alone -- 5 calls against a
+              budget of 4, measured via perf.spec.ts, with the extra 64 triangles landing
+              exactly on the ring's own count. FrontSide draws it once, for a mesh that only
+              ever shows its front. */}
+          <mesh ref={ring} renderOrder={ORDER.marker}>
+            <ringGeometry args={[MARKER_RING - 0.25, MARKER_RING, 32]} />
+            <meshBasicMaterial
+              color="#e4526f"
+              transparent
+              depthTest={false}
+              depthWrite={false}
+            />
+          </mesh>
+        </group>
       </group>
     </group>
   );
