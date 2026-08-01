@@ -1,5 +1,17 @@
 import { defineConfig, devices } from "@playwright/test";
 
+/**
+ * The port, 3000 unless told otherwise.
+ *
+ * A LITERAL PORT IS A TRAP WHEN THERE IS MORE THAN ONE CHECKOUT, and this is the second half of
+ * the warning `reuseExistingServer` carries below. P10 ran as four concurrent worktrees; each one
+ * that hard-coded a private port into this file then carried that port into the merge, where it
+ * is wrong. So the port is read from the environment and defaults to 3000: a single checkout
+ * needs no ceremony, and a worktree that must not collide runs `PORT=3020 npx playwright test`
+ * without editing a tracked file to do it.
+ */
+const PORT = Number(process.env.PORT ?? 3000);
+
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: true,
@@ -43,20 +55,15 @@ export default defineConfig({
    */
   timeout: 90_000,
   use: {
-    // 3010, not 3000: this worktree's dev server runs on 3010 for the length of P10 (see
-    // docs/phases/P10-IMPL.md Step 0's working rules) precisely because 3000 belongs to
-    // another session's worktree, and reuseExistingServer below adopts whatever is already
-    // listening on the port with no warning -- which is the exact trap the comment below
-    // describes, just with the two checkouts swapped.
-    baseURL: "http://localhost:3010",
+    baseURL: `http://localhost:${PORT}`,
     trace: "on-first-retry",
   },
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
   ],
   webServer: {
-    command: "npm run dev -- -p 3010",
-    url: "http://localhost:3010",
+    command: `npm run dev -- -p ${PORT}`,
+    url: `http://localhost:${PORT}`,
     /**
      * REUSING AN EXISTING SERVER IS A TRAP WHEN THERE IS MORE THAN ONE CHECKOUT, and it cost a
      * full P9 run before it was noticed. If any dev server is already listening on 3000 --
