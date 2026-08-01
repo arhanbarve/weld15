@@ -44,17 +44,29 @@ async function gotoStage(page: Page, stage: number) {
 /**
  * One wheel notch over the canvas's centre. Chrome's own notch is 100 of deltaY.
  *
- * The wait after is 250 ms, not 50: playwright.config.ts records a 62 ms MEDIAN frame
- * under SwiftShader at three workers, with tails past 200 ms under contention, and
- * window.__cam is only written once a frame actually renders. A wait shorter than a
- * frame reads the PREVIOUS notch's result rather than this one's -- measured directly,
- * a 50 ms wait made ten notches look like nine, the first one silently invisible.
+ * POLLS FOR THE CAMERA TO HAVE ACTUALLY MOVED, not a fixed wait. This was a 250 ms
+ * `waitForTimeout` -- up from 50 ms, because window.__cam is only written once a frame
+ * actually renders and a 50 ms wait made ten notches look like nine, the first one
+ * silently invisible. P10 step 11's full-suite runs turned up the same failure mode one
+ * tier up: playwright.config.ts records tails past 200 ms under SwiftShader contention,
+ * so even 250 ms intermittently reads the PREVIOUS notch's result under load. Polling
+ * for `__cam` to differ from its pre-notch snapshot is the actual claim -- "this notch
+ * was processed" -- rather than a proxy for "waited long enough".
  */
 async function wheelNotch(page: Page, deltaY: number) {
+  const before = await cam(page);
   const box = (await page.locator("canvas").boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.wheel(0, deltaY);
-  await page.waitForTimeout(250);
+  await expect
+    .poll(
+      async () => {
+        const c = await cam(page);
+        return c.u !== before.u || c.position.some((v, i) => v !== before.position[i]);
+      },
+      { timeout: 5_000, message: "wheel notch did not register a new frame" },
+    )
+    .toBe(true);
 }
 
 /** A pointer drag of (dx, dy) px, centred on the canvas. */

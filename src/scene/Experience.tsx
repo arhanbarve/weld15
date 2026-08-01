@@ -172,6 +172,16 @@ export default function Experience() {
             // not are bedroom A's two beds and its other desk and dresser, which project
             // off the left edge, and the whole of bedroom B, which is behind the camera.
             //
+            // RE-CONFIRMED AT P10 STEP 11, SAME 17, DIFFERENT OCCLUDER. The dock (Hud.tsx)
+            // is now a single fixed panel at top right, `x 1058..1426`, every stage, rather
+            // than the roaming per-stage HUD this comment originally measured against --
+            // and it happens to sit clear of all 17 reachable anchors' projected positions,
+            // so the count did not move. Re-run per piece (`window.__drag`, the same probe
+            // `scripts/p10-measure.mjs`'s `reach` section uses) rather than assumed, because
+            // P10 also moved the camera controls onto the window and it was not obvious in
+            // advance that nothing in the top-right corner would clip a piece the old HUD
+            // never stood over.
+            //
             // That test is a projection and not a depth test, which is worth saying: a
             // piece can be "unobstructed" by that criterion and still be behind a wall.
             // What it bounds is which pieces the pointer can be aimed at, which is the

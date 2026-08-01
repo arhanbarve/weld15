@@ -192,13 +192,20 @@ test("ArrowRight while the master scrubber has focus scrubs the journey and does
 
   await page.getByTestId("journey").focus();
   await page.keyboard.press("ArrowRight");
-  // One frame is enough: stage and u come straight from the store every frame, not
-  // from the eased camera, so they are correct as soon as __cam is next written --
-  // unlike position below, which needs the ease to actually converge.
-  await page.waitForTimeout(150);
+
+  // Polled, not a fixed wait: stage and u come straight from the store every frame, not
+  // from the eased camera, but "every frame" still means waiting for a frame to actually
+  // render, and playwright.config.ts records tails past 200 ms under SwiftShader
+  // contention -- long enough that a fixed 150 ms wait intermittently read __cam before
+  // ArrowRight's frame had landed (found by P10 step 11's full-suite reruns).
+  await expect
+    .poll(async () => (await cam(page)).u, {
+      timeout: 5_000,
+      message: "ArrowRight on the focused scrubber did not scrub",
+    })
+    .toBeGreaterThan(before.u);
 
   const after = await cam(page);
-  expect(after.u, "ArrowRight on the focused scrubber did not scrub").toBeGreaterThan(before.u);
   expect(after.stage, "the scrub crossed a stage boundary -- shrink the test's own step").toBe(3);
 
   // The orbit handler must NOT also have fired. Predict the pose the scrub ALONE
