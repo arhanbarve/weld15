@@ -81,6 +81,16 @@ export default function Experience() {
   const vis = visibility(stage);
   const { shell, interior } = thresholdOpacity(stage, t, reduced);
 
+  /**
+   * Weld is masonry from stage 2 onward, which is where its neighbours are.
+   *
+   * CampusMesh crosses out of the scan palette on layerOpacity().massing, which is fully over well
+   * before stage 2's 815 ft. Weld crossing later would leave one blue building in a brick Yard, so
+   * it crosses on the stage instead of on the altitude -- the shell is mounted from stage 2 and
+   * that is exactly when it should already be brick.
+   */
+  const weldPalette = stage >= 2 ? 1 : 0;
+
   // The canvas has no accessible content of its own -- a screen reader gets nothing at
   // all out of WebGL -- so this label is the only thing that can say what is on
   // screen. cutaway.ts's header asks for the active mode to be named here, and this is
@@ -142,7 +152,7 @@ export default function Experience() {
               extra per-frame DOM work was enough to push a11y.spec.ts's throttled-announcement
               measurement past its window. An invisible <Labels> is not free; an unmounted one is. */}
           {vis.campus ? <Labels /> : null}
-          <WeldExterior visible={vis.weld} opacity={shell} />
+          <WeldExterior visible={vis.weld} opacity={shell} palette={weldPalette} />
           <Suite
             visible={vis.interior}
             opacity={interior}

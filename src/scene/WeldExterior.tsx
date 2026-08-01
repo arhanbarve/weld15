@@ -373,12 +373,26 @@ export function WeldExterior({
   params,
   towers = TOWER_DEFAULTS,
   cutaway,
+  palette,
 }: {
   visible: boolean;
   opacity: number;
   params?: SuiteParams;
   towers?: TowerParams;
   cutaway?: CutawayMode;
+  /**
+   * How far across the scan-to-masonry seam the shell is, 0..1, INDEPENDENT OF THE DISSOLVE.
+   *
+   * P10 split this from `opacity`. It used to be `1 - opacity` outright, which tied "is Weld brick
+   * yet" to "is Weld fading yet" and meant the building could not be brick while it was still
+   * solid -- so it stayed cyanotype through the whole of stages 2 and 3 and only crossed during
+   * stage 4's slider. Once CampusMesh.tsx stood real brick neighbours around it at stage 2, Weld
+   * was the one blue building on a street of red ones.
+   *
+   * Defaulted to `1 - opacity` so the old behaviour is what a call site that does not pass it
+   * still gets, which keeps every existing test of this component honest.
+   */
+  palette?: number;
 }) {
   const reduced = useStore((s) => s.reducedMotion);
   const storeParams = useStore((s) => s.params);
@@ -417,8 +431,9 @@ export function WeldExterior({
    * gets a jump cut anyway instead of a dissolve nobody asked for.
    */
   const shell = reduced ? (progress < REDUCED_CUT ? 1 : 0) : opacity;
+  const seam = palette ?? progress;
 
-  const pal = useShellPalette(shell, progress, reduced);
+  const pal = useShellPalette(shell, seam, reduced);
 
   if (shell <= 0.001) return null;
 
