@@ -300,3 +300,187 @@ test("stage 0: dragging right moves the crimson marker's screen-x, in the direct
   // follows the cursor" direction stage 3's orbit drag already establishes.
   expect(after!, `marker cx before=${before} after=${after}`).toBeGreaterThan(before!);
 });
+
+/**
+ * P10 step 9: the marker shrank from a fixed fraction of the sphere to a constant ANGLE
+ * (Globe.tsx's MARKER_DEG), gained a billboarded ring, and started culling itself behind
+ * the globe's own horizon rather than drawing through the Earth. These four tests are the
+ * step's own checklist.
+ */
+
+/**
+ * The crimson pin's DOT, isolated from its ring, as a bounding box in CSS px.
+ *
+ * A plain bounding box over every crimson pixel measures dot-plus-ring together, since both
+ * are the same colour -- scripts/p10-measure.mjs's readMarker() carries the full reasoning;
+ * this is the same fix, duplicated here because a Playwright spec and a standalone script
+ * don't share a runtime. Connected-component labelling, kept only for components too big to
+ * be a stray pixel and then choosing the one with the highest fill ratio, isolates the dot:
+ * a filled disc fills roughly 78% of its own bbox, the ring only a few percent of its
+ * larger one.
+ */
+async function markerDotBox(page: Page): Promise<{ w: number; h: number } | null> {
+  return page.locator("canvas").evaluate((canvasEl) => {
+    const el = canvasEl as HTMLCanvasElement;
+    const off = document.createElement("canvas");
+    off.width = el.width;
+    off.height = el.height;
+    const ctx = off.getContext("2d")!;
+    ctx.drawImage(el, 0, 0);
+    const { data } = ctx.getImageData(0, 0, off.width, off.height);
+    const w = off.width;
+    const h = off.height;
+    const mask = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4;
+        const r = data[i]!, g = data[i + 1]!, b = data[i + 2]!;
+        if (r > 170 && g < 130 && b >= 80 && b <= 160 && r - g > 60) mask[y * w + x] = 1;
+      }
+    }
+    const MIN_AREA = 16;
+    const visited = new Uint8Array(w * h);
+    const stack: number[] = [];
+    let best: { minX: number; maxX: number; minY: number; maxY: number; fill: number } | null =
+      null;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const start = y * w + x;
+        if (!mask[start] || visited[start]) continue;
+        let minX = x, maxX = x, minY = y, maxY = y, area = 0;
+        stack.length = 0;
+        stack.push(start);
+        visited[start] = 1;
+        while (stack.length > 0) {
+          const cur = stack.pop()!;
+          const cx = cur % w;
+          const cy = (cur - cx) / w;
+          area++;
+          if (cx < minX) minX = cx;
+          if (cx > maxX) maxX = cx;
+          if (cy < minY) minY = cy;
+          if (cy > maxY) maxY = cy;
+          if (cx > 0 && mask[cur - 1] && !visited[cur - 1]) {
+            visited[cur - 1] = 1;
+            stack.push(cur - 1);
+          }
+          if (cx < w - 1 && mask[cur + 1] && !visited[cur + 1]) {
+            visited[cur + 1] = 1;
+            stack.push(cur + 1);
+          }
+          if (cur - w >= 0 && mask[cur - w] && !visited[cur - w]) {
+            visited[cur - w] = 1;
+            stack.push(cur - w);
+          }
+          if (cur + w < w * h && mask[cur + w] && !visited[cur + w]) {
+            visited[cur + w] = 1;
+            stack.push(cur + w);
+          }
+        }
+        if (area < MIN_AREA) continue;
+        const bboxW = maxX - minX + 1;
+        const bboxH = maxY - minY + 1;
+        const fill = area / (bboxW * bboxH);
+        if (!best || fill > best.fill) best = { minX, maxX, minY, maxY, fill };
+      }
+    }
+    if (!best) return null;
+    const rect = el.getBoundingClientRect();
+    const scaleX = rect.width / w;
+    const scaleY = rect.height / h;
+    return {
+      w: Math.round((best.maxX - best.minX + 1) * scaleX),
+      h: Math.round((best.maxY - best.minY + 1) * scaleY),
+    };
+  });
+}
+
+/** Every crimson pixel on screen, mean position and count -- the whole pin, dot and ring together. */
+async function markerCentroid(
+  page: Page,
+): Promise<{ count: number; cx: number | null; cy: number | null }> {
+  return page.locator("canvas").evaluate((canvasEl) => {
+    const el = canvasEl as HTMLCanvasElement;
+    const off = document.createElement("canvas");
+    off.width = el.width;
+    off.height = el.height;
+    const ctx = off.getContext("2d")!;
+    ctx.drawImage(el, 0, 0);
+    const { data } = ctx.getImageData(0, 0, off.width, off.height);
+    let count = 0, sumX = 0, sumY = 0;
+    for (let y = 0; y < off.height; y++) {
+      for (let x = 0; x < off.width; x++) {
+        const i = (y * off.width + x) * 4;
+        const r = data[i]!, g = data[i + 1]!, b = data[i + 2]!;
+        if (r > 170 && g < 130 && b >= 80 && b <= 160 && r - g > 60) {
+          count++;
+          sumX += x;
+          sumY += y;
+        }
+      }
+    }
+    const rect = el.getBoundingClientRect();
+    const scaleX = rect.width / off.width;
+    const scaleY = rect.height / off.height;
+    return {
+      count,
+      cx: count > 0 ? (sumX / count) * scaleX : null,
+      cy: count > 0 ? (sumY / count) * scaleY : null,
+    };
+  });
+}
+
+test("stage 0: the pin's dot measures 9-12px, down from the old 32px blob", async ({ page }) => {
+  await open(page);
+  await page.waitForTimeout(1400);
+  const box = await markerDotBox(page);
+  expect(box, "no crimson component large enough to be the dot").not.toBeNull();
+  expect(box!.w, `w=${box!.w}`).toBeGreaterThanOrEqual(9);
+  expect(box!.w, `w=${box!.w}`).toBeLessThanOrEqual(12);
+  expect(box!.h, `h=${box!.h}`).toBeGreaterThanOrEqual(9);
+  expect(box!.h, `h=${box!.h}`).toBeLessThanOrEqual(12);
+});
+
+test("stage 0 spin 0: the marker sits within 2px of the viewport's own centre", async ({
+  page,
+}) => {
+  await open(page);
+  await page.waitForTimeout(1400);
+  const vp = page.viewportSize()!;
+  const c = await markerCentroid(page);
+  expect(c.count, "no crimson pixels found").toBeGreaterThan(0);
+  const dx = Math.abs(c.cx! - vp.width / 2);
+  const dy = Math.abs(c.cy! - vp.height / 2);
+  expect(dx, `marker centre x=${c.cx}, viewport centre x=${vp.width / 2}`).toBeLessThan(2);
+  expect(dy, `marker centre y=${c.cy}, viewport centre y=${vp.height / 2}`).toBeLessThan(2);
+});
+
+test("stage 0: spinning the globe 180 degrees hides the marker entirely", async ({ page }) => {
+  await open(page);
+  await page.waitForTimeout(1400);
+  // 180 deg at DRAG_TURN_DEG=360 per clientHeight (CameraRig.tsx): dx = 180 * clientHeight / 360.
+  const box = (await page.locator("canvas").boundingBox())!;
+  await drag(page, box.height / 2, 0);
+  await page.waitForTimeout(300);
+  const c = await markerCentroid(page);
+  expect(c.count, `found ${c.count} crimson pixels at the antipodal spin`).toBe(0);
+});
+
+test("stage 0: a moderate spin culls at the limb, not at the centre", async ({ page }) => {
+  await open(page);
+  await page.waitForTimeout(1400);
+  // 30 deg -- the same modest drag this file's own sign-check test above uses -- rather than
+  // the 90 deg a first draft of this test reached for. MEASURED, not assumed: at stage 0's
+  // altitude the horizon cap (acos(rig.radius / rig.distanceToCentre), globeRig.ts's
+  // aboveHorizon) works out to roughly 66 deg from the sub-camera point, and a 90 deg spin is
+  // already past it -- indistinguishable from the "hidden entirely" case above, and unable to
+  // tell a marker correctly culled at the limb from one wrongly culled some other way. 30 deg
+  // is comfortably inside the cap, so the marker is still on the near side but well off centre.
+  await drag(page, 60, 0);
+  await page.waitForTimeout(300);
+  const vp = page.viewportSize()!;
+  const c = await markerCentroid(page);
+  expect(c.count, "the marker should still be visible at a 30 degree spin").toBeGreaterThan(0);
+  const dy = Math.abs(c.cy! - vp.height / 2);
+  expect(dy, `marker centre y=${c.cy}, viewport centre y=${vp.height / 2}`).toBeGreaterThan(20);
+});
