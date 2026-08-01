@@ -8,6 +8,7 @@ import { buildCampusGeometry } from "./campusGeometry";
 import { layerOpacity } from "./altitude";
 import { useStore } from "@/state/store";
 import weld from "@/data/weld.json";
+import { CampusMesh } from "./CampusMesh";
 
 const SCAN = {
   mass: "#96c8f5",
@@ -209,6 +210,7 @@ useFrame(({ clock, camera }) => {
 
   return (
     <group visible={visible}>
+      <CampusMesh visible={visible} />
       {/* masses: 35 buildings in one draw call, Weld separate so it stays styleable */}
       <mesh geometry={geo.others}>
         <meshStandardMaterial
