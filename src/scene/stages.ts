@@ -15,7 +15,7 @@ import { suiteToThree, floorLevel, WELD } from "@/geo/place";
 import type { Rect, Suite, SuiteParams } from "@/geo/rooms";
 import type { Vec3 } from "@/geo/frames";
 import type { StageId } from "@/state/store";
-import { HUB, route, standIn } from "./route";
+import { HUB, route, standingPose } from "./route";
 import { EYE } from "./walk";
 import { R_EARTH_FT } from "./altitude";
 
@@ -337,7 +337,6 @@ export function keyframes(params: SuiteParams): Record<StageId, Keyframe> {
 function buildKeyframes(params: SuiteParams): Record<StageId, Keyframe> {
   const suite = buildSuite(params);
   const bedB = suite.rooms.find((r) => r.id === "bedB")!;
-  const hall = suite.rooms.find((r) => r.id === HUB);
   const floor = floorLevel(1);
 
   // Outside the gable, far enough back that Weld reads as a building.
@@ -421,11 +420,9 @@ function buildKeyframes(params: SuiteParams): Record<StageId, Keyframe> {
   // 2 rather than 5 for a live drag gesture, which costs 3. So that gate now reads 41 and
   // fails, and it is a consequence of this shot rather than a flake. It is another owner's
   // file in this phase, so the ceiling is not raised here.
-  const stand = hall ? standIn(hall) : { u: bedB.u + 2.5, v: bedB.v + 2.5 };
-  const inHall = suiteToThree(stand.u, stand.v, floor + EYE, params);
-  const hallTarget = hall
-    ? suiteToThree(hall.u + hall.du / 4, hall.v, floor + EYE - 2, params)
-    : suiteToThree(bedB.u + bedB.du - 2, bedB.v + bedB.dv - 1, floor + EYE - 2, params);
+  const pose = standingPose(suite);
+  const inHall = suiteToThree(pose.p.u, pose.p.v, floor + EYE, params);
+  const hallTarget = suiteToThree(pose.aim.u, pose.aim.v, floor + EYE - pose.drop, params);
 
   const four: Keyframe = { position: gableOutside, target: insideBedB, fov: GABLE_FOV };
   const five: Keyframe = { position: inHall, target: hallTarget, fov: ROOM_FOV };

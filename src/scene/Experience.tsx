@@ -72,9 +72,7 @@ export default function Experience() {
   const cutaway = useStore((s) => s.cutaway);
   const pieces = useStore((s) => s.pieces);
   const selected = useStore((s) => s.selected);
-  // A boolean selector, not the walker: FirstPerson writes the walker sixty times a second
-  // while a key is down and this component mounts the whole scene.
-  const walking = useStore((s) => s.firstPerson !== null);
+  const pointerLocked = useStore((s) => s.pointerLocked);
   const select = useStore((s) => s.select);
   const commit = useStore((s) => s.commit);
 
@@ -201,14 +199,17 @@ export default function Experience() {
             // comment exists to record. `stage >= 3 && cutaway === "section"` is the
             // honest condition, and turning it on wants a look at what the pointer
             // actually hits from an orbiting camera rather than a one-line change here.
-            // AND NOT WHILE SOMEBODY IS WALKING. Editing and walking both want the
-            // pointer and the arrow keys, and in first person the pointer is the look
-            // control -- the click that requests pointer lock would otherwise also land
-            // on DragLayer and pick or deselect a piece, and the arrow keys would nudge a
-            // bed and turn the viewer on the same press. Hud.tsx hands the arrows over
-            // for the same reason, and enterFirstPerson() drops the selection so that no
-            // panel offers to move a piece whose keys have changed owner.
-            edit={stage === LAST_STAGE && !walking}
+            // AND NOT WHILE THE POINTER IS LOCKED, rather than not while walking. The
+            // pointer belongs to look while it is locked and to furniture editing while
+            // it is not -- a walker can stand at stage 5 with the mouse still free
+            // (before the first double-click, or after an Escape), and there is no
+            // reason to refuse editing in that state. The arrow keys follow whatever is
+            // selected regardless (FirstPerson.tsx's arrows-yield-to-selection check):
+            // selection only ever happens by pointer pick, so a keyboard-only viewer
+            // never has one and the walker keeps the arrows throughout. enterFirstPerson()
+            // still drops the selection on arrival, so no panel is left offering to move
+            // a piece the moment editing becomes unreachable.
+            edit={stage === LAST_STAGE && !pointerLocked}
             selected={selected}
             onSelect={select}
             onResult={commit}

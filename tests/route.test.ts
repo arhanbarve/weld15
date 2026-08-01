@@ -51,6 +51,7 @@ import {
   route,
   routeRooms,
   standIn,
+  standingPose,
   thresholds,
   thresholdsIn,
 } from "@/scene/route";
@@ -181,6 +182,36 @@ describe("standIn and the constants", () => {
     // in the walk.
     expect(STANDOFF_MARGIN).toBe(0.25);
     expect(RADIUS + STANDOFF_MARGIN).toBeGreaterThan(RADIUS);
+  });
+});
+
+describe("standingPose: one source for where you stand", () => {
+  it("stands in the hall and aims a quarter of the way across it", () => {
+    const pose = standingPose(suite);
+    const hall = suite.rooms.find((r) => r.id === HUB)!;
+    expect(pose.p).toEqual(standIn(hall));
+    expect(pose.heading).toBeCloseTo(
+      Math.atan2(pose.aim.u - pose.p.u, pose.aim.v - pose.p.v),
+      12,
+    );
+    // -7.965 degrees is the value read off the live keyframe (docs/phases/P10-WALK-IN.md
+    // section 1); checked here to the docs' own three-decimal precision, and to 1e-9
+    // against the pitch/drop/run identity itself, which is the tighter, load-bearing claim.
+    const run = Math.hypot(pose.aim.u - pose.p.u, pose.aim.v - pose.p.v);
+    expect(pose.pitch).toBeCloseTo(-Math.atan2(pose.drop, run), 9);
+    expect((pose.pitch * 180) / Math.PI).toBeCloseTo(-7.965, 3);
+    expect(pose.drop).toBe(2);
+  });
+
+  it("falls back to bedroom B's corner when the suite has no hall", () => {
+    const noHall: Suite = { ...suite, rooms: suite.rooms.filter((r) => r.id !== HUB) };
+    const pose = standingPose(noHall);
+    const bedB = suite.rooms.find((r) => r.id === "bedB")!;
+    expect(pose.p.u).toBeGreaterThanOrEqual(bedB.u);
+    expect(pose.p.u).toBeLessThanOrEqual(bedB.u + bedB.du);
+    expect(pose.p.v).toBeGreaterThanOrEqual(bedB.v);
+    expect(pose.p.v).toBeLessThanOrEqual(bedB.v + bedB.dv);
+    expect(pose.drop).toBe(2);
   });
 });
 

@@ -31,6 +31,9 @@
  * no height can change which side of a vertical face the walker is on -- the same
  * argument cutaway.ts makes for throwing the camera's Y away on the way in. EYE is
  * exported for the renderer to stand the camera at and is used by nothing here.
+ * Pitch is dropped from the same maths for the same reason: a wall band is a
+ * vertical prism whichever way the eye is tilted, so no pitch changes which side
+ * of a vertical face the walker is on either.
  *
  * WHAT COLLISION IS AGAINST. buildWalls(suite) already emits the bands and the
  * openings, exactly once each, and this module invents no geometry of its own: a
@@ -594,6 +597,20 @@ export function step(from: Vec2, to: Vec2, ctx: WalkCtx): Vec2 {
   return at;
 }
 
+/**
+ * How far up or down the walker may look, radians. ASSUMED, 85 degrees.
+ *
+ * Bounded ABOVE by 90 degrees, which is unavailable rather than merely undesirable:
+ * `camera.lookAt` with `up = (0, 1, 0)` is degenerate when the view direction is
+ * parallel to up, so a straight-up or straight-down look has no well-defined camera
+ * basis. Bounded at 85 rather than closer to 90 because the last 5 degrees buys
+ * nothing a viewer can use: at 85 degrees the floor is already
+ * `5.833 / tan(85 deg) = 0.51 ft` ahead of the eye and the ceiling
+ * `4.917 / tan(85 deg) = 0.43 ft` ahead, so the frame is already filled with the
+ * floor or the ceiling and further tilt only pushes that point half an inch closer.
+ */
+export const PITCH_LIMIT = (85 * Math.PI) / 180;
+
 /** Where the walker stands and which way it faces. */
 export type WalkState = {
   p: Vec2;
@@ -610,6 +627,12 @@ export type WalkState = {
    * the sign off suiteToThree()'s own basis rather than assuming either.
    */
   heading: number;
+  /**
+   * How far up or down the walker looks, radians, negative down. Clamped to
+   * +/-PITCH_LIMIT in walk(), never wrapped: see wrap()'s docblock for why a pitch
+   * is not a bearing.
+   */
+  pitch: number;
 };
 
 /** What the keys and the pointer ask for, each component in -1..1. */
@@ -620,11 +643,25 @@ export type WalkInput = {
   strafe: number;
   /** +1 adds to the heading. Radians/s comes from TURN_RATE. */
   turn: number;
+  /**
+   * +1 looks up, -1 looks down. Radians/s comes from TURN_RATE, the same constant
+   * turn uses rather than a second one: levelling out to PITCH_LIMIT at that rate
+   * takes 0.71 s, the same order as the 1.5 s a 180 degree turn takes, so holding
+   * one key never feels faster or slower than holding the other.
+   */
+  pitch: number;
 };
 
-export const NO_INPUT: WalkInput = { forward: 0, strafe: 0, turn: 0 };
+export const NO_INPUT: WalkInput = { forward: 0, strafe: 0, turn: 0, pitch: 0 };
 
-/** Wrap a bearing to (-pi, pi]. */
+/**
+ * Wrap a bearing to (-pi, pi]. Pitch does NOT go through this: a bearing is circular
+ * (facing 179 degrees and facing -179 degrees are one step apart), but a pitch is not
+ * (looking 84 degrees down and 84 degrees up are nowhere near each other, they are
+ * almost opposite). So heading wraps here and pitch is clamped in walk() instead --
+ * a viewer holding the look-down key must stop at the floor, not roll over backwards
+ * into looking at the ceiling.
+ */
 function wrap(a: number): number {
   const t = ((a + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
   return t - Math.PI === -Math.PI ? Math.PI : t - Math.PI;
@@ -650,9 +687,10 @@ function wrap(a: number): number {
  */
 export function walk(state: WalkState, input: WalkInput, dt: number, ctx: WalkCtx): WalkState {
   const heading = wrap(state.heading + input.turn * TURN_RATE * dt);
+  const pitch = Math.min(PITCH_LIMIT, Math.max(-PITCH_LIMIT, state.pitch + input.pitch * TURN_RATE * dt));
 
   const mag = Math.hypot(input.forward, input.strafe);
-  if (!(mag > EPS) || !(dt > 0)) return { p: state.p, heading };
+  if (!(mag > EPS) || !(dt > 0)) return { p: state.p, heading, pitch };
 
   const f = Math.min(1, mag) * (input.forward / mag);
   const s = Math.min(1, mag) * (input.strafe / mag);
@@ -666,5 +704,5 @@ export function walk(state: WalkState, input: WalkInput, dt: number, ctx: WalkCt
     v: state.p.v + (f * cos - s * sin) * d,
   };
 
-  return { p: step(state.p, to, ctx), heading };
+  return { p: step(state.p, to, ctx), heading, pitch };
 }

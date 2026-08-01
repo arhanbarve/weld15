@@ -35,21 +35,27 @@ import {
  * that turns right on one turns left on the other, and the only way to get both is to
  * measure the map rather than to look at a screenshot of the default.
  *
- * THE EYE IS LEVEL, and there is no pitch anywhere in this file. walk.ts's WalkState is a
- * position and a bearing; a pitch would be camera state with no counterpart in the maths,
- * invisible to walk(), to roomAt(), and to anything that describes where the viewer is.
- * What that costs is measured rather than waved away: at EYE = 5 ft 10 in with stage 5's
- * 62 degree vertical field, the frame reaches 31 degrees below level, so the floor enters
- * it 5.83 / tan(31) = 9.7 ft ahead and the 10 ft 9 in ceiling enters it 8.2 ft ahead. Both
- * surfaces are therefore in the frame from about ten feet on, which is less than the length
- * of every room in the suite.
+ * PITCH IS NOW A FIRST-CLASS FEATURE OF THIS FILE. walk.ts's WalkState carries it alongside
+ * the position and the bearing, and a viewer can look anywhere from -85 to +85 degrees, by
+ * `R`/`F` or by dragging with the pointer locked (see PITCH_KEYS and pendingDy below). This
+ * used to read "THE EYE IS LEVEL, and there is no pitch anywhere in this file", and the
+ * measurement that justified it is kept here as the record of why level-only was tried and
+ * found wrong: at EYE = 5 ft 10 in with stage 5's 62 degree vertical field, a level shot
+ * reaches 31 degrees below level, so the floor enters it 5.83 / tan(31) = 9.7 ft ahead and
+ * the 10 ft 9 in ceiling enters it 8.2 ft ahead. Both surfaces are in the frame from about
+ * ten feet on -- less than the length of every room in the suite -- which is a fine shot but
+ * not one a viewer can choose, and choosing to look down at your own feet or up at the
+ * ceiling is exactly what a walk-through is for.
  *
  * POINTER LOCK IS AN ENHANCEMENT AND NOT THE INTERFACE. Everything here is reachable from
- * the keyboard alone -- W A S D or the arrow keys to walk and turn, Q and E to sidestep,
- * Escape to leave -- because pointer lock is a mouse affordance and MASTER.md requires a
- * keyboard equivalent for every canvas interaction. The lock is requested on a click on
- * the canvas, which is a user gesture as the API demands, and its failure is not an error:
- * a browser that refuses it leaves a walker that works.
+ * the keyboard alone -- W A S D or the arrow keys to walk and turn, Q and E to sidestep, R
+ * and F to look up and down -- because pointer lock is a mouse affordance and MASTER.md
+ * requires a keyboard equivalent for every canvas interaction. The lock is requested on a
+ * double-click on the canvas (see the dblclick docblock below for why not a single click),
+ * which is a user gesture as the API demands, and its failure is not an error: a browser
+ * that refuses it leaves a walker that works. Escape releases the lock and gives the mouse
+ * back; it does not leave anything, because standing is a property of stage 5, not a
+ * session you are in (see onLockChange below).
  */
 
 /**
@@ -90,6 +96,16 @@ const MAX_DT = 0.1;
  */
 const LOOK_TURN_DEG = 360;
 
+/**
+ * Degrees of pitch per pixel of locked pointer movement, at a 720 px tall viewport.
+ *
+ * The same convention as LOOK_TURN_DEG and CameraRig's DRAG_TURN_DEG on the axis a vertical
+ * look uses: a full screen height of drag is a full turn's worth of angle. Divided by the
+ * live clientHeight, so at 720 px it is 0.5 deg/px and the whole +-85 degree range is
+ * reachable in about 340 px of mouse movement.
+ */
+const LOOK_PITCH_DEG = 360;
+
 /** Keys, and what each one asks walk() for. Held state, not a stream of events. */
 const FORWARD_KEYS: Record<string, number> = {
   w: 1,
@@ -122,6 +138,9 @@ const TURN_KEYS: Record<string, number> = {
 
 /** Q and E sidestep, in screen terms: +1 is to the viewer's right. */
 const STRAFE_KEYS: Record<string, number> = { q: -1, Q: -1, e: 1, E: 1 };
+
+/** R and F look up and down, for a keyboard-only viewer (D2). */
+const PITCH_KEYS: Record<string, number> = { r: 1, R: 1, f: -1, F: -1 };
 
 /**
  * Which way a rising bearing turns ON SCREEN: +1 to the viewer's right, -1 to the left.
@@ -166,19 +185,28 @@ export function screenTurnSign(params: SuiteParams): 1 | -1 {
  * Exported because CameraRig is the only writer of the camera and this is the conversion
  * it needs. The height is not the walker's business -- walk.ts drops height on the way in
  * and says why -- so it is applied here, once: the first floor's level plus an eye.
+ *
+ * PITCH TILTS THE AHEAD POINT rather than moving the walker: `horiz` is how far ahead of
+ * the walker the look-at point sits in plan, and it shrinks as pitch rises toward vertical
+ * while `rise` grows, so looking straight down is a look-at point almost directly below the
+ * eye rather than one that has walked off ahead. At the +-85 degree limit `horiz` is
+ * LOOK_AHEAD * cos(85 deg) = 0.87 ft -- three orders above float noise at suite scale, so
+ * lookAt() never sees a degenerate (near-zero-length) view direction.
  */
 export function firstPersonPose(
   walker: Walker,
   params: SuiteParams,
 ): { position: Vec3; target: Vec3 } {
   const eye = floorLevel(1) + EYE;
+  const horiz = LOOK_AHEAD * Math.cos(walker.pitch);
+  const rise = LOOK_AHEAD * Math.sin(walker.pitch);
   const ahead = {
-    u: walker.p.u + Math.sin(walker.heading) * LOOK_AHEAD,
-    v: walker.p.v + Math.cos(walker.heading) * LOOK_AHEAD,
+    u: walker.p.u + Math.sin(walker.heading) * horiz,
+    v: walker.p.v + Math.cos(walker.heading) * horiz,
   };
   return {
     position: suiteToThree(walker.p.u, walker.p.v, eye, params),
-    target: suiteToThree(ahead.u, ahead.v, eye, params),
+    target: suiteToThree(ahead.u, ahead.v, eye + rise, params),
   };
 }
 
@@ -198,6 +226,8 @@ type WalkProbe = {
   u: number;
   v: number;
   heading: number;
+  /** radians, negative is down -- the current look angle, so a gate need not recompute it. */
+  pitch: number;
   room: string | null;
   /** ft from the walker's edge to the nearest wall band; negative means inside one. */
   clearance: number;
@@ -220,12 +250,12 @@ export function FirstPerson() {
   // re-render on every one of those writes; `!== null` changes twice per visit.
   const active = useStore((s) => s.firstPerson !== null) && stage === LAST_STAGE;
   const setWalk = useStore((s) => s.setWalk);
-  const leave = useStore((s) => s.leaveFirstPerson);
+  const setPointerLocked = useStore((s) => s.setPointerLocked);
 
   const held = useRef(new Set<string>());
   const pendingDx = useRef(0);
+  const pendingDy = useRef(0);
   const frames = useRef(0);
-  const locked = useRef(false);
   /**
    * One WalkCtx per params, built on demand.
    *
@@ -264,14 +294,20 @@ export function FirstPerson() {
       return tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || !!e?.isContentEditable;
     };
     const onDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        // Not gated on the focus guard: Escape has to work from wherever focus happens to
-        // be, or "Escape leaves first person" is a promise with an exception in it.
-        leave();
-        return;
-      }
+      // Escape has no branch here at all: there is nothing to leave, standing is a
+      // property of being at stage 5, and the browser releases pointer lock on Escape by
+      // itself (see onLockChange below). So Escape falls through to the browser's own
+      // default, unclaimed.
       if (isField(e.target)) return;
-      if (!(e.key in FORWARD_KEYS || e.key in TURN_KEYS || e.key in STRAFE_KEYS)) return;
+      if (
+        !(
+          e.key in FORWARD_KEYS ||
+          e.key in TURN_KEYS ||
+          e.key in STRAFE_KEYS ||
+          e.key in PITCH_KEYS
+        )
+      )
+        return;
       // Ours now. Without this the arrow keys scroll the page on a browser whose body is
       // not the overflow-hidden one this app ships.
       e.preventDefault();
@@ -292,15 +328,20 @@ export function FirstPerson() {
       window.removeEventListener("blur", onBlur);
       held.current.clear();
     };
-  }, [active, leave]);
+  }, [active]);
 
   /**
    * Pointer lock, and the two ways it can go wrong.
    *
-   * REQUESTED FROM A CLICK, because the API requires a user gesture and a component
-   * mounting is not one. A click on the canvas is the conventional "click to look around",
-   * and it is additive: the keys already work, so a browser that refuses the lock -- which
-   * headless Chromium may -- costs the mouse and nothing else.
+   * REQUESTED FROM A DOUBLE-CLICK, not a single click or a pointerdown (D5). A single click
+   * cannot both lock the pointer AND pick a furniture piece: this listener is a raw DOM
+   * listener on the canvas, while DragLayer sees the same DOM event through React-Three-
+   * Fiber's synthetic event system, so calling stopPropagation() in either one does not
+   * suppress the other. If a click both locked and picked, the moment you pressed Escape to
+   * release the lock and then clicked a bed, that same click would silently re-lock the
+   * pointer -- making furniture editing unreachable with zero clicks. `dblclick` is a
+   * gesture DragLayer never listens for, so it is unambiguous: single clicks and drags
+   * always belong to furniture, and a double-click always takes the mouse for looking.
    *
    * THE PROMISE IS CAUGHT. requestPointerLock() returns a promise in current Chrome and
    * rejects when the document is not permitted to lock, and an unhandled rejection is a
@@ -308,16 +349,15 @@ export function FirstPerson() {
    * refusal is swallowed here rather than allowed to become an error somewhere it reads
    * as a bug in the app.
    *
-   * LOSING THE LOCK LEAVES FIRST PERSON, which is the one non-obvious choice. Escape is
-   * how a browser releases a pointer lock, and it does not deliver that keypress to the
-   * page -- so with the two treated separately, Escape would exit the lock and leave the
-   * viewer still walking, and a second Escape would be needed to get out. Two presses is
-   * how "Escape gets you out" becomes folklore. One press, one exit.
+   * ESCAPE JUST GIVES THE MOUSE BACK. Losing the lock used to leave first person entirely;
+   * that action is gone, because the walker is a property of stage 5 now, not a session you
+   * are in. onLockChange below only reflects the browser's own lock state into the store,
+   * so Experience.tsx can hand the pointer to furniture editing instead.
    */
   useEffect(() => {
     if (!active) return;
     const el = gl.domElement;
-    const onPointerDown = () => {
+    const onDoubleClick = () => {
       if (document.pointerLockElement === el) return;
       const r = (el as HTMLCanvasElement).requestPointerLock() as unknown;
       if (r && typeof (r as Promise<void>).catch === "function") {
@@ -329,24 +369,24 @@ export function FirstPerson() {
     const onPointerMove = (e: PointerEvent) => {
       if (document.pointerLockElement !== el) return;
       pendingDx.current += e.movementX;
+      pendingDy.current += e.movementY;
     };
     const onLockChange = () => {
-      const now = document.pointerLockElement === el;
-      if (locked.current && !now) leave();
-      locked.current = now;
+      setPointerLocked(document.pointerLockElement === el);
     };
-    el.addEventListener("pointerdown", onPointerDown);
+    el.addEventListener("dblclick", onDoubleClick);
     window.addEventListener("pointermove", onPointerMove);
     document.addEventListener("pointerlockchange", onLockChange);
     return () => {
-      el.removeEventListener("pointerdown", onPointerDown);
+      el.removeEventListener("dblclick", onDoubleClick);
       window.removeEventListener("pointermove", onPointerMove);
       document.removeEventListener("pointerlockchange", onLockChange);
       if (document.pointerLockElement === el) document.exitPointerLock();
-      locked.current = false;
+      setPointerLocked(false);
       pendingDx.current = 0;
+      pendingDy.current = 0;
     };
-  }, [active, gl, leave]);
+  }, [active, gl, setPointerLocked]);
 
   useEffect(() => {
     if (active) frames.current = 0;
@@ -360,6 +400,7 @@ export function FirstPerson() {
         u: 0,
         v: 0,
         heading: 0,
+        pitch: 0,
         room: null,
         clearance: 0,
         locked: false,
@@ -372,24 +413,41 @@ export function FirstPerson() {
 
     const ctxNow = contextFor(params);
     const keys = [...held.current];
+    /**
+     * Arrows yield to a selection (D6). Selection only ever happens by pointer pick
+     * (DragLayer's onSelect), so a keyboard-only viewer never has one and loses nothing
+     * by this. Read fresh via getState() rather than closed over from render, so a
+     * deselect -- Panel's own control, or a click on empty floor -- hands the arrows back
+     * on the very next frame. w/a/s/d/q/e/r/f are never affected: they are the walker's
+     * alone, whatever is selected.
+     */
+    const selected = useStore.getState().selected;
+    const isArrow = (k: string) =>
+      k === "ArrowUp" || k === "ArrowDown" || k === "ArrowLeft" || k === "ArrowRight";
     let forward = 0;
     let turn = 0;
     let strafe = 0;
+    let pitchKey = 0;
     for (const k of keys) {
+      if (selected !== null && isArrow(k)) continue;
       forward += FORWARD_KEYS[k] ?? 0;
       turn += TURN_KEYS[k] ?? 0;
       strafe += STRAFE_KEYS[k] ?? 0;
+      pitchKey += PITCH_KEYS[k] ?? 0;
     }
     // Both of these are asks for a SCREEN direction, and both cross the same reflection:
     // walk.ts's +turn adds to the bearing and its +strafe walks along bearing + 90, and
-    // the second is the derivative of the first, so one sign converts both.
+    // the second is the derivative of the first, so one sign converts both. pitchKey is
+    // NOT multiplied by turnSign: up is up regardless of which facade you are on, because
+    // the reflection is a plan-frame (east/west) one and cannot change which way is up.
     const input: WalkInput =
-      forward === 0 && turn === 0 && strafe === 0
+      forward === 0 && turn === 0 && strafe === 0 && pitchKey === 0
         ? NO_INPUT
         : {
             forward: Math.max(-1, Math.min(1, forward)),
             turn: Math.max(-1, Math.min(1, turn)) * turnSign,
             strafe: Math.max(-1, Math.min(1, strafe)) * turnSign,
+            pitch: Math.max(-1, Math.min(1, pitchKey)),
           };
 
     // The pointer's contribution is a displacement rather than a rate, so it is applied to
@@ -400,22 +458,35 @@ export function FirstPerson() {
     const perPx = (LOOK_TURN_DEG * Math.PI) / 180 / Math.max(1, gl.domElement.clientWidth);
     const looked = walker.heading + dx * perPx * turnSign;
 
+    // Same displacement treatment on the vertical axis, and NOT multiplied by turnSign
+    // for the reason above -- this is a look, not a plan-frame direction. Sign is
+    // un-inverted: mouse down looks down. The clamp is not applied here; it lives once,
+    // inside walk(), exactly as the yaw clamp does.
+    const dy = pendingDy.current;
+    pendingDy.current = 0;
+    const perPxY = (LOOK_PITCH_DEG * Math.PI) / 180 / Math.max(1, gl.domElement.clientHeight);
+    const lookedPitch = walker.pitch - dy * perPxY;
+
     const dt = Math.min(MAX_DT, Math.max(0, delta));
-    const next = walk({ p: walker.p, heading: looked }, input, dt, ctxNow);
+    const next = walk({ p: walker.p, heading: looked, pitch: lookedPitch }, input, dt, ctxNow);
     frames.current++;
 
     // Written only when something actually changed, so an idle viewer costs no store
     // notifications at all -- the subscription in UrlSync publishes on every one of them.
     const moved =
-      next.p.u !== walker.p.u || next.p.v !== walker.p.v || next.heading !== walker.heading;
+      next.p.u !== walker.p.u ||
+      next.p.v !== walker.p.v ||
+      next.heading !== walker.heading ||
+      next.pitch !== walker.pitch;
     const room = moved ? roomAt(next.p, ctxNow) : walker.room;
-    if (moved) setWalk({ p: next.p, heading: next.heading, room });
+    if (moved) setWalk({ p: next.p, heading: next.heading, pitch: next.pitch, room });
 
     (window as unknown as { __walk?: WalkProbe }).__walk = {
       active: true,
       u: next.p.u,
       v: next.p.v,
       heading: next.heading,
+      pitch: next.pitch,
       room,
       clearance: clearance(next.p, ctxNow),
       locked: document.pointerLockElement === gl.domElement,

@@ -130,6 +130,51 @@ export function standIn(room: Rect): Vec2 {
 }
 
 /**
+ * Where a viewer stands in this suite, what the stage-5 shot aims at, and the
+ * heading/pitch that shot reads as -- one calculation, for the two callers that must
+ * not disagree: stages.ts's kf[5] and store.ts's enterFirstPerson() seed.
+ *
+ * LIVES HERE rather than in either caller because this module already owns every fact
+ * the answer depends on -- standIn() above, HUB, and the reachability graph that says
+ * the hall is what every room in the suite is entered from -- and because it is already
+ * imported by both stages.ts and store.ts, so this adds no new dependency edge; either
+ * of those importing the other would.
+ *
+ * `drop` IS ITS OWN FIELD, NOT FOLDED INTO `pitch`. stages.ts's kf[5].target needs
+ * `aim`'s three.js height as `floor + EYE - drop`, the exact float the shot has always
+ * used. Recovering that from `pitch` alone would mean running the angle back through
+ * `tan()`, and that round trip is not the bit-for-bit identity tests/stages.test.ts's
+ * exact-equality pin depends on.
+ *
+ * MEASURED, at the default params: p = (18.75, 29.75), heading = 184.51 degrees,
+ * pitch = -7.965 degrees.
+ */
+export type StandingPose = {
+  /** where the viewer stands, suite frame */
+  p: Vec2;
+  /** the point the shot -- and the walker's arrival gaze -- aims at, suite frame */
+  aim: Vec2;
+  /** ft below eye height that `aim` sits at */
+  drop: number;
+  /** walk.ts's convention: 0 faces +v, rising turns toward +u */
+  heading: number;
+  /** radians, negative is down */
+  pitch: number;
+};
+
+export function standingPose(suite: Suite): StandingPose {
+  const hall = suite.rooms.find((r) => r.id === HUB);
+  const bedB = suite.rooms.find((r) => r.id === "bedB")!;
+  const p = hall ? standIn(hall) : { u: bedB.u + 2.5, v: bedB.v + 2.5 };
+  const aim = hall
+    ? { u: hall.u + hall.du / 4, v: hall.v }
+    : { u: bedB.u + bedB.du - 2, v: bedB.v + bedB.dv - 1 };
+  const drop = 2;
+  const run = Math.hypot(aim.u - p.u, aim.v - p.v);
+  return { p, aim, drop, heading: Math.atan2(aim.u - p.u, aim.v - p.v), pitch: -Math.atan2(drop, run) };
+}
+
+/**
  * Which axis a band runs along. buildOpenings()'s tie-break, `du > dv`, copied for the
  * reason walk.ts's runsAlongV() and drag.ts's doorZone() both copy it: `offset` is
  * measured along whichever axis that function called long, and for a square band the

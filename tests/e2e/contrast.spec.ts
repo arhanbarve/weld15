@@ -410,21 +410,13 @@ test("the bracket guards: a form field, a modifier, and a walker", async ({ page
   expect(await stageOf(page), "Control+[ moved the camera").toBe(5);
 
   /*
-   * A WALKER. setStage() drops the walker, so an unguarded bracket would eject somebody
-   * mid-stride from a stage they never asked to leave. P7's guard on the piece keys is the
-   * same kind and this is the harder case: the walker is the only state a stage change
-   * destroys.
+   * A WALKER. Before P10 step 5 this guarded against ejecting somebody mid-stride:
+   * setStage() dropped the walker, so an unguarded bracket would surprise them. Since P10
+   * step 3 a walker is seeded automatically the instant stage 5 is reached, and a stage
+   * change simply decides whether one exists rather than destroying one somebody asked
+   * for -- so there is nothing left to guard against, and [ has to step the stage exactly
+   * as it does with nobody standing there, or it would be permanently dead at stage 5.
    */
-  await page.getByTestId("fp-enter").click();
-  await page.getByTestId("fp-leave").waitFor();
-  await blur(page);
-  await page.keyboard.press("BracketLeft");
-  await page.waitForTimeout(500);
-  expect(await stageOf(page), "[ moved the camera while first person was on").toBe(5);
-
-  // And the guard lifts rather than latching: leaving first person gives the keys back.
-  await page.keyboard.press("Escape");
-  await expect(page.getByTestId("fp-enter")).toBeVisible();
   await blur(page);
   await page.keyboard.press("BracketLeft");
   await expect.poll(async () => stageOf(page), { timeout: 5_000 }).toBe(4);
