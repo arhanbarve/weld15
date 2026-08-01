@@ -11,6 +11,50 @@
  * costs no bandwidth.
  *
  * ------------------------------------------------------------------------------------------
+ * WHY P10 STOPPED USING MASSGIS ALONE, AND WHY IT DID NOT SWITCH TO ESRI INSTEAD
+ * ------------------------------------------------------------------------------------------
+ *
+ * Every MassGIS aerial layer -- not just the 2025 flight P9 used, every one of them -- is flown
+ * LEAF-OFF. That is not an accident of scheduling: state orthophotography is flown in early
+ * spring on purpose, because bare canopy is what planimetric mapping wants. It is the wrong
+ * thing for a model whose default instant is a September afternoon and whose trees, before
+ * P10, were bare under a summer sun for no reason a viewer could see without opening this file.
+ *
+ * Measured directly rather than assumed: mean "green excess" (G - (R+B)/2) over Weld at zoom
+ * 19, per source --
+ *
+ *   MassGIS 2025            +3.0
+ *   MassGIS orthos2023      +7.4
+ *   MassGIS orthos2021      +3.9
+ *   USGS 2019               -1.5
+ *   DigitalGlobe 2011/12    +7.7
+ *   USDA NAIP               +9.7
+ *   Esri World Imagery      +11.1
+ *
+ * Every MassGIS vintage clusters low; NAIP and Esri are the only two leaf-on options this
+ * project could use at all, and they are well clear of the rest. Esri measures higher still,
+ * and was rejected anyway: its basemap terms do not permit caching derived plates into a
+ * repository, which is exactly what this script does to every level. NAIP has no such
+ * restriction -- it is a work of the USDA Farm Service Agency, public domain, no permission or
+ * attribution legally required -- so NAIP is what L2 and L3 now source from directly.
+ *
+ * L4 is not that simple, because NAIP's ~1 ft native resolution (see NAIP_NATIVE_FT) is not
+ * enough to hold Weld's roofline at the 1,600 ft frame's density, and MassGIS's 2025 flight,
+ * despite being leaf-off, is still the sharpest thing this project can legally cache at 0.492 ft
+ * native. So L4 is a hybrid, not a straight swap: MassGIS supplies luminance/detail, NAIP
+ * supplies chrominance/colour, recombined per pixel in YCbCr space (see hybridise() and
+ * naipProvenance()/massgisProvenance()/hybridProvenance() below). A flat recombination would
+ * still show MassGIS's bare canopy wherever there is a tree, because the leaf-off plate is
+ * looking at different ground than the leaf-on one is -- not just different-coloured ground, a
+ * different scene, since a leaf-off flight sees soil and roots where a leaf-on flight sees
+ * leaves. So the blend is masked: under a blurred, green-excess-based vegetation mask, NAIP
+ * supplies both luminance and colour instead of just colour, and MassGIS's detail is used only
+ * where the two photographs are actually looking at the same thing. `src/imagery/hybrid.ts`
+ * carries the mask math and the tuning story that arrived at it. The result is two real
+ * photographs, flown two years apart in different seasons, blended into one plate -- which is
+ * why `src/ui/ImageryChip.tsx` names both of them rather than one.
+ *
+ * ------------------------------------------------------------------------------------------
  * WHY THE TILE SERVICE AND NOT THE JP2 ORTHOS -- A DELIBERATE DEPARTURE FROM P9.md SECTION 6.3
  * ------------------------------------------------------------------------------------------
  *

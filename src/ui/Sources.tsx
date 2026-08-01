@@ -63,17 +63,26 @@ export function Sources() {
         </p>
         <p>
           {/* THE IMAGERY IS REDISTRIBUTED, so its attribution is not optional in the way the rest
-              of this panel arguably is. Both licences ask for acknowledgement -- NASA requests it,
-              MassGIS says it "would be appreciated" -- and this is where the app gives it, in front
-              of the person looking at the photograph rather than in a file they will never open.
-              The capture year is here as well as in the viewport chip, because the panel is where
-              someone goes to find out why the trees are bare. */}
+              of this panel arguably is. NASA and USDA's works are public domain and ask nothing;
+              MassGIS says acknowledgement "would be appreciated" -- and this is where the app gives
+              it, in front of the person looking at the photograph rather than in a file they will
+              never open. The capture years are here as well as in the viewport chip, because the
+              panel is where someone goes to find out why the near ground's colour and its detail
+              come from different flights. */}
           <strong>The ground and the globe</strong> — NASA Earth Observatory / Blue Marble Next
-          Generation, August 2004, for the Earth at orbit and the 1,000 km plate; MassGIS (Bureau of
-          Geographic Information), Commonwealth of Massachusetts EOTSS, for the aerial imagery of
-          Cambridge, flown leaf-off in March and April 2025 at 15 cm. Both permit redistribution of
-          derived crops. The imagery is 2025 and the sun is computed for September 2026, so the trees
-          are bare under September light.
+          Generation, August 2004, for the Earth at orbit and the 1,000 km plate; USDA NAIP (Farm
+          Service Agency), flown leaf-on in July 2023, for the aerial imagery of Cambridge at most
+          altitudes; MassGIS (Bureau of Geographic Information), Commonwealth of Massachusetts EOTSS,
+          flown leaf-off in March and April 2025 at 15 cm, for the sharpened detail blended into the
+          closest plate. All three permit redistribution of derived crops.
+        </p>
+        <p>
+          <strong>The campus massing</strong> — Harvard Planning + Project Management’s public ArcGIS{" "}
+          <code>Facilities3D_Facilities/SceneServer</code> (item{" "}
+          <code>d371f09c273e417f907577d92004127b</code>), public. Its geometry has no photographed
+          texture — every node measures as a blank white plate — so the masonry, slate and window
+          openings drawn from it are this project’s own derivation from that geometry, not a
+          photograph of the buildings.
         </p>
         <p className="sources-gap">
           <strong>No source supplied</strong> the ceiling height, the bathroom’s depth, the wall

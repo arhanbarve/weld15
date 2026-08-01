@@ -10,15 +10,19 @@ import { manifest } from "@/scene/imagery";
  * model states dimensions for a building whose floor plan has never been found, so a viewer has to
  * be able to tell what came from a source and what the project worked out. The photograph makes that
  * sharper rather than softer: an aerial image reads as ground truth in a way a drawing does not, and
- * this one is a 2025 photograph under a September 2026 sun.
+ * this one is 2023 NAIP colour, sharpened by a 2025 MassGIS flight at the closest stages, under a
+ * September 2026 sun.
  *
- * THERE IS A REAL DISCREPANCY AND THE CHIP EXISTS TO DISCLOSE IT. The MassGIS plates were flown
- * 18 March to 23 April 2025, leaf-off, so every tree in the Yard is bare; the store's default
- * instant is 15 September 2026 and Lighting.tsx computes the sun for that date. Nothing about that
- * is hidden, and a viewer who notices bare trees in September should be able to find out why without
- * opening the repository. docs/SOURCES.md carries the long version; the Sources panel carries the
- * middle version; this is the one-line version that is on screen whether or not anyone opens
- * anything.
+ * THERE IS A REAL DISCREPANCY AND THE CHIP EXISTS TO DISCLOSE IT, BUT IT IS A DIFFERENT ONE NOW.
+ * P10 made the whole pyramid leaf-on, so the season-of-flight mismatch this chip used to name is
+ * gone. What replaced it: L4, the plate that fills the frame at stages 2-3, is not one photograph
+ * but two -- its colour comes from NAIP (leaf-on, ~1 ft native) and its detail comes from MassGIS's
+ * 2025 flight (leaf-off, 0.492 ft native), blended per pixel because NAIP alone cannot resolve
+ * Weld's roofline and MassGIS alone shows bare canopy where the model wants leaves. A viewer looking
+ * closely enough to wonder why the sharpness and the colour do not quite agree should be able to
+ * find out why without opening the repository. docs/SOURCES.md carries the long version; the
+ * Sources panel carries the middle version; this is the one-line version that is on screen whether
+ * or not anyone opens anything.
  *
  * ONLY WHERE THE IMAGERY IS ACTUALLY THE SUBJECT -- stages 0 to 2. By stage 3 the photograph has
  * been tinted into the scan palette and the massing is what the frame is about; by stages 4 and 5
@@ -38,8 +42,10 @@ export function ImageryChip() {
   if (stage > SHOW_UPTO) return null;
 
   // Read from the manifest rather than written out, so the year cannot drift from the plates. The
-  // fetch script emits `flown` as an ISO range; the chip wants the year.
-  const flown = manifest.levels.L4?.provenance.flown;
+  // fetch script emits `flown` as an ISO range; the chip wants the year. L3 rather than L4 because
+  // L4 is the hybrid and its `flown` describes the detail (MassGIS), not the colour (NAIP) the chip
+  // is naming here -- L3 is NAIP outright.
+  const flown = manifest.levels.L3?.provenance.flown;
   const year = typeof flown === "string" ? flown.slice(0, 4) : null;
 
   return (
@@ -47,7 +53,7 @@ export function ImageryChip() {
       {stage === 0 ? (
         <>NASA Blue Marble · 2004</>
       ) : (
-        <>MassGIS orthoimagery{year ? ` · ${year}` : ""} · leaf-off</>
+        <>USDA NAIP{year ? ` · ${year}` : ""} · MassGIS detail</>
       )}
     </div>
   );
