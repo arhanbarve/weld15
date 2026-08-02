@@ -7,6 +7,7 @@ import { LAST_STAGE, useStore, type StageId } from "@/state/store";
 import { keyframes, cameraKeyframe, REDUCED_CUT, funnel, FUNNEL_START, SHELL_GONE } from "./stages";
 import { firstPersonPose } from "./FirstPerson";
 import {
+  clampForStage,
   clampOrbit,
   orbitKeyframe,
   orbitOf,
@@ -17,14 +18,15 @@ import {
   transitPose,
   MASSING_CENTER,
   type Orbit,
-  type OrbitClamp,
+  type PoseClamp,
 } from "./orbit";
 import { nearFar } from "./altitude";
 import { fromJourney, toJourney } from "./journey";
-import { spinPose } from "./globeRig";
+import { altitudeOf } from "./geo/frame";
 
 /**
- * Drives the camera from the stage machine, and gives stage 3 a free orbit.
+ * Drives the camera from the stage machine, and gives every stage but the last a free
+ * orbit.
  *
  * Reduced motion is a BRANCH, not a shorter duration: it snaps to the keyframe
  * rather than easing toward it. Shortening the fly would still fly, which is what
@@ -39,6 +41,24 @@ import { spinPose } from "./globeRig";
  * see the branch in the frame loop. Two components writing camera.position is the bug
  * that ends in a camera oscillating between two answers on alternate frames, so
  * FirstPerson advances the walker and puts it in the store and this reads it back.
+ *
+ * P11 (task 7): ONE DRAG-AND-WHEEL HANDLER, EVERY STAGE BUT THE LAST, replacing the old
+ * per-stage split (globe spin at 0, no drag at 1-2, an orbit about the keyframe's own
+ * target at 3-4) that docs/phases/P11-PHOTOREAL.md section 0.1/0.2 measures as the source
+ * of the stage-0 black-screen and the stage-1/2 "you should be able to drag" complaint.
+ * `globeRig.ts`'s spinPose() rotated the camera's POSITION about Earth's true centre,
+ * which is a different thing from rotating it about the keyframe's own TARGET at a fixed
+ * range: a rotation about Earth's centre mixes yaw into the camera's site-frame y, and
+ * altitude.ts's OLD definition (`alt = camera.position.y`) read that y directly, so a big
+ * enough yaw sent "altitude" negative -- see the measured table in section 0.1. Orbiting
+ * about the keyframe's own target instead (this file's `composePose`, using orbit.ts's
+ * orbitKeyframe -- the same function stage 3's orbit already used) keeps y a function of
+ * PITCH ALONE (`up = range * sin(pitch)`, independent of heading), and every stage's
+ * pitch clamp (orbit.ts's clampForStage) keeps sin(pitch) comfortably positive, so no
+ * heading drag can ever collapse the camera toward or through the ground. That is the
+ * actual fix; altitude.ts's move to the true ellipsoid height (geo/frame.ts's
+ * altitudeOf) is what makes the CLAIM checkable (this file's window.__cam.alt, and
+ * tests/e2e/drag-safety.spec.ts's gate), not what makes it true.
  */
 
 /**
@@ -49,9 +69,6 @@ import { spinPose } from "./globeRig";
  * Divided by the live clientHeight so the feel does not change with the window.
  */
 const DRAG_TURN_DEG = 360;
-
-/** Radius multiplier per notch of wheel. 100 is one notch of deltaY in Chrome. */
-const ZOOM_PER_NOTCH = 1.08;
 
 /** Share of the whole journey per notch of wheel. 50 notches end to end. */
 const SCRUB_PER_NOTCH = 0.02;
@@ -92,15 +109,15 @@ const MAX_PATH = 240;
  *
  * clampOrbit guarantees the DESTINATION is legal. It says nothing about the path,
  * and the path is a straight line in Cartesian space: lerping between two points at
- * the same radius cuts the chord, so a large polar or azimuth move dips inside the
- * sphere both ends sit on. Measured during the keyboard work -- a 20 degree polar
- * sweep took the radius to 112.8 ft against a minRadius of 114.9, so the camera
+ * the same radius cuts the chord, so a large pitch or heading move dips inside the
+ * sphere both ends sit on. Measured during the keyboard work -- a 20 degree pitch
+ * sweep took the range to 112.8 ft against a minRangeFt of 114.9, so the camera
  * spent a few frames roughly 2 ft inside the envelope that exists to keep it out of
- * the building. Small, but minRadius is precisely the "not inside Weld" guarantee,
+ * the building. Small, but minRangeFt is precisely the "not inside Weld" guarantee,
  * and a guarantee that holds only at the endpoints is not one.
  *
- * Fixed by correcting the radius rather than by lerping in spherical space: the
- * Cartesian lerp is what makes an azimuth wrap take the short way round, and moving
+ * Fixed by correcting the range rather than by lerping in spherical space: the
+ * Cartesian lerp is what makes a heading wrap take the short way round, and moving
  * to spherical to fix a 2 ft error would trade it for a camera that spins the long
  * way through 359 degrees. Direction is left exactly as the ease produced it.
  *
@@ -109,18 +126,18 @@ const MAX_PATH = 240;
  * `center` and `clamp` are now parameters, not stage 3's constants baked in, so
  * stage 4 can reuse this against MASSING_CENTER and STAGE4_CLAMP rather than
  * against the look-at target and STAGE3_CLAMP -- see orbit.ts's STAGE4_CLAMP
- * for why stage 4's radius guarantee has to be measured from MASSING_CENTER
+ * for why stage 4's range guarantee has to be measured from MASSING_CENTER
  * and not from kf[4].target.
  */
 function keepOutsideMassing(
   position: THREE.Vector3,
   center: THREE.Vector3,
-  clamp: OrbitClamp = STAGE3_CLAMP,
+  clamp: PoseClamp = STAGE3_CLAMP,
 ): void {
   const away = position.clone().sub(center);
   const r = away.length();
   if (r < 1e-6) return;
-  const want = Math.min(clamp.maxRadius, Math.max(clamp.minRadius, r));
+  const want = Math.min(clamp.maxRangeFt, Math.max(clamp.minRangeFt, r));
   if (Math.abs(want - r) < 1e-9) return;
   position.copy(center).add(away.multiplyScalar(want / r));
 }
@@ -133,14 +150,17 @@ type CamProbe = {
   target: [number, number, number];
   fov: number;
   /**
-   * Altitude above Weld's grade, ft, and the near and far planes it produced.
+   * Height above the WGS-84 ellipsoid, ft -- geo/frame.ts's altitudeOf(camera.position),
+   * THE definition of altitude from P11 on (docs/phases/P11-PHOTOREAL.md section 2.2).
    *
-   * On the probe because altitude is THE parameter of the descent since P9 -- altitude.ts's
-   * header sets that out -- and a gate that wants to know which ground quad should be up, or
-   * whether the globe should still be visible, needs the number the scene actually used
-   * rather than one recomputed from a keyframe it hopes the camera reached. `alt` is
-   * camera.position.y by definition, and it is published anyway because a reader of
-   * window.__cam should not have to know that.
+   * NO LONGER camera.position.y. That was only ever correct for a camera on Weld's local
+   * vertical (x = z = 0), which is precisely the invariant a heading drag now routinely
+   * breaks -- this field exists so a gate (tests/e2e/drag-safety.spec.ts) can watch the
+   * REAL altitude through a sweep and assert it never goes negative, rather than trusting
+   * a coordinate that stopped meaning altitude the moment dragging worked everywhere.
+   * `near`/`far` below are unaffected: they still come from nearFar(camera.position.y),
+   * unchanged in form -- see that function's own header for why passing `y` alone is
+   * still safe.
    */
   alt: number;
   near: number;
@@ -188,9 +208,8 @@ export function CameraRig() {
   const setReduced = useStore((s) => s.setReducedMotion);
   const setHighContrast = useStore((s) => s.setHighContrast);
   const orbit = useStore((s) => s.orbit);
+  const orbitStage = useStore((s) => s.orbitStage);
   const setOrbit = useStore((s) => s.setOrbit);
-  const globeSpin = useStore((s) => s.globeSpin);
-  const setGlobeSpin = useStore((s) => s.setGlobeSpin);
   const setJourney = useStore((s) => s.setJourney);
   const setScrubbing = useStore((s) => s.setScrubbing);
   const cuts = useStore((s) => s.cuts);
@@ -264,55 +283,62 @@ export function CameraRig() {
   /**
    * Pointer drag and wheel, at every stage but the last.
    *
-   * ONE EFFECT, DISPATCHING ON STAGE, replacing the stage-3-only effect this used to be.
-   * The listeners are still attached and removed with the stage, whatever they do at it, so a
-   * stage change always tears down exactly the right set:
+   * ONE HANDLER FOR EVERY STAGE, replacing the old split (globe spin at 0, no drag at
+   * 1-2, an orbit at 3-4). The rule, per P11-PHOTOREAL.md section 2.4:
    *
-   *   stage 0        drag turns the globe (writes `globeSpin`); wheel scrubs the journey.
-   *   stages 1, 2    no drag; wheel scrubs the journey.
-   *   stages 3, 4    drag orbits (writes `orbit`); wheel changes the orbit radius.
-   *   stage 5        not mounted at all -- the interior is not a zoom, and the walker owns
-   *                  the pointer (FirstPerson.tsx's own pointer-lock handling must not
-   *                  compete with a second listener on the same canvas).
+   *   left-drag horizontal   orbit.headingDeg +-
+   *   left-drag vertical     orbit.pitchDeg -+, clamped per stage (orbit.ts's clampForStage)
+   *   wheel / pinch          advances the journey, the same "down/forward is deeper"
+   *                          direction the master scrubber moves in -- at every stage,
+   *                          replacing the old split (stages 0-2 scrubbed, 3-4 changed the
+   *                          orbit's own radius and left u alone). Zooming in therefore
+   *                          descends, continuously, all the way through the stage 3 -> 4
+   *                          transit and the threshold -- decision 4/5 in the phase spec,
+   *                          and the user's own "you should just be able to zoom in and
+   *                          go to the view".
    *
-   * MERGE NOTE (P10 integration). Two branches wrote this effect. `p10-ux` made the wheel scrub
-   * the whole descent everywhere except stage 3, and gave stage 0 a drag; `p10-fidelity` gave
-   * stage 4 an orbit drag of its own, "just like how in section three you're able to drag".
-   * Both survive, and the rule that reconciles them is one line: A STAGE YOU CAN ORBIT OWNS THE
-   * WHEEL FOR ITS RADIUS, and every other stage scrubs. Stage 4 is therefore the one row that
-   * moved between the two specs -- it was in `p10-ux`'s scrub list and is in the orbit list here,
-   * because a stage that can be dragged round and not zoomed is a half-built control. The master
-   * scrubber (JourneyBar) still drives stage 4's threshold sweep, which is what the wheel gave up.
-   *
-   * The current orbit/spin is read from the store on each event rather than closed over.
+   * The current orbit is read from the store on each event rather than closed over.
    * Several pointermove events land between two React renders, and a closure over the
    * rendered value would apply all of them to the same starting angle -- which reads as a
    * drag that fights back.
    *
    * clampOrbit is applied here and the store is left to hold whatever it is given. orbit.ts
    * derived and brute-force verified those limits; a second clamp anywhere else is a second
-   * thing to keep in step with them. globeSpin has NO clamp on write: spinPose (globeRig.ts)
-   * clamps pitchDeg on read, which is where the lookAt degeneracy actually bites, so the drag
-   * is free to keep accumulating past it rather than needing a matching clamp here.
+   * thing to keep in step with them.
    *
-   * STAGE 4'S SEED IS NOT orbitOf(kf[4]). Stage 4's orbit is about MASSING_CENTER, not about
-   * kf[4].target (insideBedB) -- see orbit.ts's STAGE4_CLAMP and stage4OrbitKeyframe for why
-   * applying MASS_RADIUS-style clamping about the wrong pivot fails to keep the camera outside
-   * the massing at all. So the seed has to be orbitOf() of kf[4]'s own position measured from
-   * MASSING_CENTER, the same seeding tests/orbit.test.ts uses to prove stage4OrbitKeyframe
-   * reproduces kf[4] exactly before any drag.
+   * SEEDED FROM THE CURRENT POSE, NOT FROM THE STAGE'S FIRST KEYFRAME. Stages 0-2 are paths
+   * (kf[stage].path), so the pose at the instant a drag begins is cameraKeyframe(kf, stage,
+   * t, reduced) -- wherever the wheel or the scrubber last left it -- not the stage's t = 0
+   * stop. Stage 3's seed is kf[3] itself (a place, not a path) and stage 4's is kf[4]'s own
+   * orbit about MASSING_CENTER (see orbit.ts's stage4OrbitKeyframe for why that pivot, not
+   * kf[4].target, is the one the range clamp is measured from).
+   *
+   * `orbit && orbitStage === stage` GATES EVERY READ OF THE LIVE ORBIT, not just this
+   * effect's seed. store.ts's orbitAfterStage() only clears `orbit` on an ARRIVAL at stage
+   * 3 or 4 that disagrees with `orbitStage` -- it has no equivalent rule for 0, 1 or 2,
+   * because that store is out of scope for this task and predates every stage but 3/4
+   * being draggable. So a drag at stage 1 (orbitStage = 1) followed by a plain stage
+   * change to stage 2 would otherwise leave stage 1's heading/pitch live at stage 2's
+   * differently-aimed shot. Checking `orbitStage === stage` here, in the one file that
+   * reads `orbit` to build a pose, is what keeps that from happening without touching
+   * store.ts -- and it costs nothing at stages 3/4, where store.ts already guarantees the
+   * two agree whenever `orbit` is non-null.
    */
   useEffect(() => {
     if (stage === LAST_STAGE) return;
     const el = gl.domElement;
     const kf = keyframes(params);
-    const clamp: OrbitClamp = stage === 4 ? STAGE4_CLAMP : STAGE3_CLAMP;
-    const seed = (): Orbit =>
-      stage === 4
-        ? orbitOf({ position: kf[4].position, target: MASSING_CENTER, fov: kf[4].fov })
-        : orbitOf(kf[3]);
-    const currentOrbit = () => useStore.getState().orbit ?? seed();
-    const currentSpin = () => useStore.getState().globeSpin ?? { yawDeg: 0, pitchDeg: 0 };
+
+    const seed = (): Orbit => {
+      if (stage === 4) return orbitOf({ position: kf[4].position, target: MASSING_CENTER, fov: kf[4].fov });
+      if (stage === 3) return orbitOf(kf[3]);
+      const st = useStore.getState();
+      return orbitOf(cameraKeyframe(kf, stage, st.t, st.reducedMotion));
+    };
+    const currentOrbit = (): Orbit => {
+      const st = useStore.getState();
+      return st.orbit && st.orbitStage === stage ? st.orbit : seed();
+    };
 
     let dragging = false;
     let lastX = 0;
@@ -323,9 +349,6 @@ export function CameraRig() {
 
     const onDown = (e: PointerEvent) => {
       if (e.button !== 0) return;
-      // Only stages 0, 3 and 4 have anything for a drag to do; 1 and 2 are fixed shots
-      // that scrub on the wheel alone.
-      if (stage !== 0 && stage !== 3 && stage !== 4) return;
       dragging = true;
       lastX = e.clientX;
       lastY = e.clientY;
@@ -339,30 +362,17 @@ export function CameraRig() {
       const dy = (e.clientY - lastY) * k;
       lastX = e.clientX;
       lastY = e.clientY;
-      if (stage === 3 || stage === 4) {
-        const o = currentOrbit();
-        // Signs are OrbitControls', which is also what "the surface under the cursor
-        // follows the cursor" gives: dragging right walks the camera round to the
-        // west, so azimuth rises; dragging down lifts it toward a plan, and polar is
-        // measured from straight up, so polar falls.
-        setOrbit(
-          clampOrbit(
-            {
-              azimuthDeg: o.azimuthDeg + dx,
-              polarDeg: o.polarDeg - dy,
-              radius: o.radius,
-            },
-            clamp,
-          ),
-        );
-      } else {
-        // stage === 0. Same signs as the orbit drag above, on the same "surface under
-        // the cursor follows the cursor" convention: dragging right turns the globe so
-        // the marker moves right with it, and dragging down tips the near pole toward
-        // the viewer -- see tests/e2e/wheel-and-spin.spec.ts's sign check.
-        const g = currentSpin();
-        setGlobeSpin({ yawDeg: g.yawDeg + dx, pitchDeg: g.pitchDeg - dy });
-      }
+      const o = currentOrbit();
+      // Signs are OrbitControls', which is also what "the surface under the cursor
+      // follows the cursor" gives: dragging right walks the camera round to the
+      // west, so heading rises; dragging down lifts it toward a plan, and pitch is
+      // measured from level, so pitch rises.
+      setOrbit(
+        clampOrbit(
+          { headingDeg: o.headingDeg + dx, pitchDeg: o.pitchDeg + dy, rangeFt: o.rangeFt },
+          clampForStage(stage),
+        ),
+      );
     };
 
     const onUp = (e: PointerEvent) => {
@@ -374,21 +384,6 @@ export function CameraRig() {
       // Not passive, because the page must not scroll under the gesture. The
       // listener is registered with { passive: false } for the same reason.
       e.preventDefault();
-      if (stage === 3 || stage === 4) {
-        const o = currentOrbit();
-        setOrbit(
-          clampOrbit(
-            {
-              ...o,
-              radius: o.radius * Math.pow(ZOOM_PER_NOTCH, e.deltaY / 100),
-            },
-            clamp,
-          ),
-        );
-        return;
-      }
-      // Stages 0, 1 and 2: the wheel scrubs the whole journey instead, in the same
-      // "down/forward is deeper" direction the master scrubber's own slider moves in.
       const s = useStore.getState();
       const u = toJourney(s.stage, s.t, params);
       const next = Math.min(1, Math.max(0, u + (e.deltaY / 100) * SCRUB_PER_NOTCH));
@@ -421,7 +416,7 @@ export function CameraRig() {
       el.removeEventListener("wheel", onWheel);
       if (scrubTimeout !== undefined) clearTimeout(scrubTimeout);
     };
-  }, [stage, gl, params, setOrbit, setGlobeSpin, setJourney, setScrubbing]);
+  }, [stage, gl, params, setOrbit, setJourney, setScrubbing]);
 
   useFrame((_, delta) => {
     const kf = keyframes(params);
@@ -440,6 +435,16 @@ export function CameraRig() {
     // already has, so under reduced motion stage 3 is either exactly the orbit or exactly
     // kf[4] and nothing geometrically between.
     const transit = reduced ? (t < REDUCED_CUT ? 0 : 1) : t;
+
+    // Stages 0-2: the stage's own path pose, orbited (heading/pitch only) if a live drag
+    // belongs to THIS stage. `orbitKeyframe`'s target is `base`'s own -- the path's current
+    // look-at point -- so this is exactly the composition stage 3 always used, just against
+    // a moving base rather than a fixed one.
+    const pathStagePose = (s: 0 | 1 | 2): ReturnType<typeof cameraKeyframe> => {
+      const base = cameraKeyframe(kf, s, t, reduced);
+      return orbit && orbitStage === s ? orbitKeyframe(base, orbit, clampForStage(s)) : base;
+    };
+
     const want =
       walker !== null
         ? { ...firstPersonPose(walker, params), fov: kf[LAST_STAGE].fov }
@@ -452,28 +457,31 @@ export function CameraRig() {
             // (orbit.ts's transitPose), not cartesian: a straight position blend dipped
             // inside MASS_RADIUS at t ~= 0.58 even though both ends clear it, since a chord
             // between two points outside a sphere can still cut through the middle.
-            transitPose(orbitKeyframe(kf[3], orbit ?? orbitOf(kf[3])), kf[4], MASSING_CENTER, transit)
+            transitPose(
+              orbitKeyframe(
+                kf[3],
+                orbit && orbitStage === 3 ? orbit : orbitOf(kf[3]),
+                STAGE3_CLAMP,
+              ),
+              kf[4],
+              MASSING_CENTER,
+              transit,
+            )
           : stage === 4
             ? // stage4Pose is BY IDENTITY cameraKeyframe(kf, 4, t, reduced) when orbit is
               // null -- the regression fence tests/stages.test.ts pins -- so this branch
               // is always taken at stage 4 rather than only when orbit is set.
-              stage4Pose(kf, t, reduced, orbit ? stage4OrbitKeyframe(kf[4], orbit) : null)
-            : cameraKeyframe(kf, stage, t, reduced);
+              stage4Pose(
+                kf,
+                t,
+                reduced,
+                orbit && orbitStage === 4 ? stage4OrbitKeyframe(kf[4], orbit) : null,
+              )
+            : stage === 0 || stage === 1 || stage === 2
+              ? pathStagePose(stage)
+              : cameraKeyframe(kf, stage, t, reduced);
 
-    /**
-     * Stage 0's turn, applied on top of the keyframe/path pose above.
-     *
-     * (1 - t), NOT a constant, because stage 0 is itself a descent (P9a) and this pose is
-     * the top of it. At t = 0 the globe is a place and the full turn shows; at t = 1 the
-     * camera has reached kf[1] -- Cambridge's own top -- and k = 0 collapses the spin to
-     * nothing, so however far the globe was turned, the descent still lands where stages.ts
-     * aimed it rather than wherever the turn last left off. globeRig.ts's spinPose carries
-     * the rest of the reasoning.
-     */
-    const posed =
-      stage === 0 && globeSpin
-        ? { ...want, ...spinPose(want.position, want.target, globeSpin, 1 - t) }
-        : want;
+    const posed = want;
 
     const wantPos = new THREE.Vector3(...posed.position);
     const wantTarget = new THREE.Vector3(...posed.target);
@@ -504,16 +512,16 @@ export function CameraRig() {
       }
       // Only while stage 3 IS a place, i.e. t === 0. Above that the pose is the transit to
       // kf[4], which deliberately leaves STAGE3_CLAMP's envelope on its way to a stand-off
-      // 124 ft out, and forcing the radius back inside it would pin the camera to the orbit
+      // 124 ft out, and forcing the range back inside it would pin the camera to the orbit
       // sphere and stall the move.
       if (stage === 3 && t === 0) keepOutsideMassing(camera.position, target.current);
       // Stage 4's equivalent: only while the funnel has not yet fully resolved onto
       // the path (funnel(t) < 1), and measured from MASSING_CENTER with STAGE4_CLAMP
       // -- not from target.current, which is kf[4].target (insideBedB) and not the
-      // point stage 4's own radius guarantee is centred on. Once funnel(t) reaches 1
+      // point stage 4's own range guarantee is centred on. Once funnel(t) reaches 1
       // the pose is the path's exactly, which is already inside the building by
       // design, and correcting it back outside would fight the crossing itself.
-      else if (stage === 4 && orbit && funnel(t) < 1) {
+      else if (stage === 4 && orbit && orbitStage === 4 && funnel(t) < 1) {
         keepOutsideMassing(camera.position, MASSING_CENTER_V3, STAGE4_CLAMP);
       }
     }
@@ -532,6 +540,13 @@ export function CameraRig() {
      * is the case that matters, since stages.ts:161-177 records a measured clip at 0.40 ft
      * from a wall band at the low end of the hallWidth slider. This must not become a
      * function of anything but altitude, or that guarantee stops being one.
+     *
+     * STILL nearFar(camera.position.y), unchanged in form -- altitude.ts's own header
+     * explains why passing y alone stays safe even now that a camera can be off-vertical:
+     * it turns y into the site-frame point [0, y, 0] before asking geo/frame.ts's altitudeOf,
+     * which is a no-op for a camera actually on the vertical and otherwise just uses the
+     * y a caller already had. window.__cam.alt below is the field that carries the REAL,
+     * off-vertical-aware altitude.
      *
      * updateProjectionMatrix() is called only when a plane actually moves. It is not free --
      * it rebuilds the projection matrix and dirties the frustum -- and during a dwell nothing
@@ -567,7 +582,7 @@ export function CameraRig() {
       position: [camera.position.x, camera.position.y, camera.position.z],
       target: [target.current.x, target.current.y, target.current.z],
       fov: camera.fov,
-      alt: camera.position.y,
+      alt: altitudeOf([camera.position.x, camera.position.y, camera.position.z]),
       near: camera.near,
       far: camera.far,
       firstPerson: walker !== null,

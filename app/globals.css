@@ -572,6 +572,34 @@ button,
   padding: 0.25rem 0.5rem;
 }
 
+/* WeldMarker.tsx's pin + label: NOT .weld-chip, deliberately -- that class is still styled
+   for the scan palette (--chip-scan, --mark) and is what DesktopOnly.tsx's gate locator
+   borrows. The marker is crimson, matching the ground ring below it, and reusing .weld-chip
+   here would have re-coupled two things this phase separates on purpose. */
+.weld-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: #fff;
+  background: rgba(164, 16, 52, 0.85);
+  border: 1px solid #a41034;
+  border-radius: 1px;
+  padding: 0.25rem 0.5rem;
+}
+
+.weld-marker-pin {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #fff;
+  flex: none;
+}
+
 /* ---------- the desktop gate ---------- */
 
 /* Fixed and inset rather than a page flow, because `body` is `overflow: hidden`

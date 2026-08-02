@@ -158,9 +158,9 @@ function randomSnapshot(rnd: Rnd, i = 0): Snapshot {
       rnd() < 0.5
         ? null
         : {
-            azimuthDeg: intIn(rnd, -18_000, 18_000) / 100,
-            polarDeg: intIn(rnd, 0, 18_000) / 100,
-            radius: intIn(rnd, 100, 30_000) / 100,
+            headingDeg: intIn(rnd, -18_000, 18_000) / 100,
+            pitchDeg: intIn(rnd, -9_000, 9_000) / 100,
+            rangeFt: intIn(rnd, 100, 30_000) / 100,
           },
     // The whole legal range, so the property tests below carry every value the
     // panel can produce rather than only the default. See the docblock above for
@@ -195,7 +195,7 @@ const realistic: Snapshot = {
   cutaway: "wallsDown",
   hour: 17.5,
   date: "2026-12-21",
-  orbit: { azimuthDeg: -113.25, polarDeg: 42.5, radius: 121.75 },
+  orbit: { headingDeg: -113.25, pitchDeg: 47.5, rangeFt: 121.75 },
   // Not DEFAULT_OCCUPANCY, for the reason the cutaway above is not "none": a
   // fixture that agrees with the default cannot tell a field that round-trips
   // from a field that is dropped and refilled from the default on the way back.
@@ -561,14 +561,14 @@ describe("-0", () => {
     t: 0,
     hour: 0,
     pieces: [shelf],
-    orbit: { azimuthDeg: 0, polarDeg: 0, radius: 121.75 },
+    orbit: { headingDeg: 0, pitchDeg: 0, rangeFt: 121.75 },
   };
   const minus: Snapshot = {
     ...plus,
     t: -0,
     hour: -0,
     pieces: [{ ...shelf, u: -0, v: -0 }],
-    orbit: { azimuthDeg: -0, polarDeg: -0, radius: 121.75 },
+    orbit: { headingDeg: -0, pitchDeg: -0, rangeFt: 121.75 },
   };
 
   it("is a real difference, which is why it needs guarding at all", () => {
@@ -582,7 +582,7 @@ describe("-0", () => {
     const back = decode(encode(minus))!;
     expect(back).toEqual(plus);
     expect(back).not.toEqual(minus);
-    for (const n of [back.t, back.hour, back.pieces[0]!.u, back.pieces[0]!.v, back.orbit!.azimuthDeg, back.orbit!.polarDeg]) {
+    for (const n of [back.t, back.hour, back.pieces[0]!.u, back.pieces[0]!.v, back.orbit!.headingDeg, back.orbit!.pitchDeg]) {
       expect(Object.is(n, 0)).toBe(true);
     }
   });
@@ -638,6 +638,22 @@ function sign(body: readonly number[]): string {
 const varint = (n: number): number[] => {
   const out: number[] = [];
   let v = n < 0 ? -2 * n - 1 : 2 * n;
+  while (v >= 0x80) {
+    out.push((v % 128) | 0x80);
+    v = Math.floor(v / 128);
+  }
+  out.push(v);
+  return out;
+};
+
+/**
+ * Plain LEB128, no zigzag -- the encoding url.ts's putUint (and the PREV_VERSION
+ * format's `polar`/`radius` fields) use for a value that is never negative. `varint`
+ * above is the zigzag one, for `azimuth`/`heading`/`pitch`, which can be.
+ */
+const uvarint = (n: number): number[] => {
+  const out: number[] = [];
+  let v = n;
   while (v >= 0x80) {
     out.push((v % 128) | 0x80);
     v = Math.floor(v / 128);
@@ -780,14 +796,15 @@ describe("decode is total", () => {
       bad[COUNT_AT + 2] = kind;
       expect(decode(sign(bad)), `kind ${kind}`).toBe(null);
     }
-    // The version byte, either side of the one this file writes. 1 is the load-
-    // bearing half and it is the guarantee VERSION's own docblock makes: a v1
-    // string has no occupancy field, so read as v2 it would take the low byte of
-    // the first length as one and shift every field after it. The trailer would
-    // catch that 65,535 times in 65,536, and the version check makes it exact --
-    // an old link decodes to null, and null means the recipient opens at the
-    // defaults rather than at a suite the sender never had.
-    for (const v of [0, 1, 3, 255]) {
+    // The version byte, either side of the two this file accepts (VERSION = 3,
+    // and PREV_VERSION = 2 -- see decoding-a-v-previous-link below for what THAT
+    // one decodes to). 1 is the load-bearing case and it is the guarantee VERSION's
+    // own docblock makes: a v1 string has no occupancy field, so read as v2 it would
+    // take the low byte of the first length as one and shift every field after it.
+    // The trailer would catch that 65,535 times in 65,536, and the version check
+    // makes it exact -- a v1 link decodes to null, and null means the recipient
+    // opens at the defaults rather than at a suite the sender never had.
+    for (const v of [0, 1, 4, 255]) {
       const badVersion = [...body];
       badVersion[0] = v;
       expect(decode(sign(badVersion)), `version ${v}`).toBe(null);
@@ -861,7 +878,14 @@ describe("decode is total", () => {
           continue;
         }
         accepted++;
-        expect(encode(got), `byte ${i} = ${v}`).toBe(q);
+        // The one exception: byte 0 is the version, and PREV_VERSION (2) is a real
+        // second format this decoder accepts on purpose -- see "decoding a
+        // v-previous (VERSION 2) link" below -- not a hostile string. A VERSION-3
+        // body relabelled 2 decodes through the conversion path (heading/pitch
+        // bytes reread as azimuth/polar), which changes what the numbers MEAN and
+        // so, correctly, what it re-encodes to. Every other byte in the sweep is
+        // still held to the strict byte-for-byte invariant.
+        if (i !== 0) expect(encode(got), `byte ${i} = ${v}`).toBe(q);
         expect(decode(encode(got))).toEqual(got);
       }
     }
@@ -883,6 +907,69 @@ describe("decode is total", () => {
   });
 });
 
+/**
+ * Decision 5 in docs/phases/P11-PHOTOREAL.md: "Keep 6 ids; make 3->4 continuous ...
+ * Old share links keep working." VERSION bumped from 2 to 3 when the orbit block's
+ * fields were renamed azimuth/polar/radius -> heading/pitch/range (store.ts's `Orbit`
+ * type, section 2.3's `pitch = 90 - polar`), but a link this app already shipped
+ * (VERSION 2) must still open at the sender's camera rather than at the defaults.
+ *
+ * This builds a VERSION-2 payload BY HAND -- the encoder only ever writes the current
+ * VERSION, so there is no other way to get one -- reusing bodyOf()'s output for
+ * everything except the orbit block itself, which is re-encoded in the old
+ * azimuth(int)/polar(uint)/radius(uint) layout instead of the new
+ * heading(int)/pitch(int)/range(uint) one.
+ */
+describe("decoding a v-previous (VERSION 2) link", () => {
+  it("converts azimuth/polar/radius into heading/pitch/range, and ignores nothing it didn't ask for", () => {
+    // realistic.orbit is { headingDeg: -113.25, pitchDeg: 47.5, rangeFt: 121.75 }.
+    // Old-format polar is 90 - pitch = 42.5, which is the exact number this fixture
+    // carried before the store's shape changed -- so the round trip below is also a
+    // statement that today's numbers mean what they always did.
+    const noPieces: Snapshot = { ...realistic, pieces: [] };
+    const withOrbit = bodyOf(noPieces);
+
+    // Where the orbit block starts: everything up to it is identical to a variant
+    // with no orbit at all, except the flags byte's VALUE (bit4), never its position
+    // or length -- so bodyOf({ ...noPieces, orbit: null }) minus its own trailing
+    // piece-count byte is exactly that shared prefix length.
+    const withoutOrbit = bodyOf({ ...noPieces, orbit: null });
+    const ORBIT_START = withoutOrbit.length - 1;
+    const prefix = withOrbit.slice(0, ORBIT_START);
+    const pieceCountByte = withOrbit.slice(withOrbit.length - 1);
+
+    const azimuthDeg = noPieces.orbit!.headingDeg;
+    const polarDeg = 90 - noPieces.orbit!.pitchDeg;
+    const radius = noPieces.orbit!.rangeFt;
+    const oldOrbitBytes = [
+      ...varint(Math.round(azimuthDeg * 100)),
+      ...uvarint(Math.round(polarDeg * 100)),
+      ...uvarint(Math.round(radius * 100)),
+    ];
+
+    const body = [...prefix, ...oldOrbitBytes, ...pieceCountByte];
+    body[0] = 2; // PREV_VERSION, url.ts's own name for it -- not exported, so named here.
+
+    const got = decode(sign(body));
+    expect(got).not.toBe(null);
+    expect(got).toEqual(noPieces);
+    expect(got!.orbit).toEqual({ headingDeg: -113.25, pitchDeg: 47.5, rangeFt: 121.75 });
+
+    // Round-trips through THIS app's own encoder from here on: a v2 link decodes
+    // once, into ordinary VERSION-3 state, with nothing left over to carry.
+    expect(decode(encode(got!))).toEqual(got);
+    expect(encode(got!).length).toBeGreaterThan(0);
+  });
+
+  it("still refuses a v1 string, which has no occupancy field at all", () => {
+    // The 1-to-2 bump stays a hard refusal -- see VERSION's own docblock for why
+    // that gap has no conversion, unlike the 2-to-3 one this file adds a path for.
+    const body = bodyOf({ ...realistic, pieces: [] });
+    body[0] = 1;
+    expect(decode(sign(body))).toBe(null);
+  });
+});
+
 describe("what cannot be shared", () => {
   it("refuses NaN and Infinity in any numeric field", () => {
     const p = layout(defaultSuite)[0]!;
@@ -891,7 +978,7 @@ describe("what cannot be shared", () => {
       expect(encode({ ...realistic, hour: bad }), `hour ${bad}`).toBe("");
       expect(encode({ ...realistic, params: { ...DEFAULT_PARAMS, ceiling: bad } })).toBe("");
       expect(encode({ ...realistic, pieces: [{ ...p, u: bad }] })).toBe("");
-      expect(encode({ ...realistic, orbit: { azimuthDeg: bad, polarDeg: 40, radius: 120 } })).toBe("");
+      expect(encode({ ...realistic, orbit: { headingDeg: bad, pitchDeg: 40, rangeFt: 120 } })).toBe("");
     }
     // No byte sequence can carry them either: every number on the wire is an
     // integer count of lattice steps.
@@ -984,8 +1071,8 @@ describe("what cannot be shared", () => {
     expect(encode({ ...realistic, stage: 6 as Snapshot["stage"] })).toBe("");
     expect(encode({ ...realistic, params: { ...DEFAULT_PARAMS, partition: 0 } })).toBe("");
     expect(encode({ ...realistic, params: { ...DEFAULT_PARAMS, ceiling: -10 } })).toBe("");
-    expect(encode({ ...realistic, orbit: { azimuthDeg: 200, polarDeg: 40, radius: 120 } })).toBe("");
-    expect(encode({ ...realistic, orbit: { azimuthDeg: 0, polarDeg: 200, radius: 120 } })).toBe("");
+    expect(encode({ ...realistic, orbit: { headingDeg: 200, pitchDeg: 40, rangeFt: 120 } })).toBe("");
+    expect(encode({ ...realistic, orbit: { headingDeg: 0, pitchDeg: 200, rangeFt: 120 } })).toBe("");
     // Hour 24 is midnight at the end of the day, which store.ts's setHour
     // deliberately allows, so the format has to carry it.
     expect(decode(encode({ ...realistic, hour: 24 }))!.hour).toBe(24);
@@ -995,7 +1082,7 @@ describe("what cannot be shared", () => {
     // store.ts says why the store does not clamp either. A link that came back
     // with the camera somewhere else than it went out would be a worse bug than
     // an out-of-clamp orbit, which clampOrbit fixes on the next frame.
-    const wide: Snapshot = { ...realistic, orbit: { azimuthDeg: 179.99, polarDeg: 3, radius: 500 } };
+    const wide: Snapshot = { ...realistic, orbit: { headingDeg: 179.99, pitchDeg: 3, rangeFt: 500 } };
     expect(decode(encode(wide))).toEqual(wide);
   });
 });

@@ -42,7 +42,7 @@ const MOVE_EPS = 0.01;
  */
 const STEP_DEG = 5;
 const ZOOM_PRESSES = 15;
-const ZOOM_PER_PRESS = (STAGE3_CLAMP.maxRadius / STAGE3_CLAMP.minRadius) ** (1 / ZOOM_PRESSES);
+const ZOOM_PER_PRESS = (STAGE3_CLAMP.maxRangeFt / STAGE3_CLAMP.minRangeFt) ** (1 / ZOOM_PRESSES);
 
 const KF3 = keyframes(DEFAULT_PARAMS)[3]!;
 const KF4 = keyframes(DEFAULT_PARAMS)[4]!;
@@ -79,14 +79,20 @@ function dist(a: [number, number, number], b: [number, number, number]): number 
 /**
  * The ten keys this handler owns, and the orbit each predicts starting from SEED --
  * kf[3]'s own orbit, which is what stage 3 opens on before any key or drag touches it.
+ *
+ * P11: headingDeg/pitchDeg, not azimuthDeg/polarDeg -- and ArrowUp/ArrowDown's SIGN
+ * flips along with the field, because geo/rig.ts's pitchDeg convention (0 level, 90
+ * straight down) runs the opposite way from the old polarDeg-from-straight-up one.
+ * Hud.tsx's own NUDGE_BY_KEY docblock records the same flip; this mirrors it exactly
+ * so the on-screen effect of each arrow is unchanged.
  */
-type Nudge = { az?: number; polar?: number; zoom?: number };
+type Nudge = { heading?: number; pitch?: number; zoom?: number };
 
 const NUDGES: { key: string; nudge: Nudge }[] = [
-  { key: "ArrowLeft", nudge: { az: -STEP_DEG } },
-  { key: "ArrowRight", nudge: { az: STEP_DEG } },
-  { key: "ArrowUp", nudge: { polar: STEP_DEG } },
-  { key: "ArrowDown", nudge: { polar: -STEP_DEG } },
+  { key: "ArrowLeft", nudge: { heading: -STEP_DEG } },
+  { key: "ArrowRight", nudge: { heading: STEP_DEG } },
+  { key: "ArrowUp", nudge: { pitch: -STEP_DEG } },
+  { key: "ArrowDown", nudge: { pitch: STEP_DEG } },
   { key: "PageUp", nudge: { zoom: 1 / ZOOM_PER_PRESS } },
   { key: "+", nudge: { zoom: 1 / ZOOM_PER_PRESS } },
   { key: "=", nudge: { zoom: 1 / ZOOM_PER_PRESS } },
@@ -98,9 +104,9 @@ const NUDGES: { key: string; nudge: Nudge }[] = [
 /** nudgeOrbit's own arithmetic (Hud.tsx), reproduced here so the prediction is independent. */
 function predict(seed: Orbit, n: Nudge): Orbit {
   return clampOrbit({
-    azimuthDeg: seed.azimuthDeg + (n.az ?? 0),
-    polarDeg: seed.polarDeg + (n.polar ?? 0),
-    radius: seed.radius * (n.zoom ?? 1),
+    headingDeg: seed.headingDeg + (n.heading ?? 0),
+    pitchDeg: seed.pitchDeg + (n.pitch ?? 0),
+    rangeFt: seed.rangeFt * (n.zoom ?? 1),
   });
 }
 
@@ -138,7 +144,7 @@ test("a held ArrowLeft (30 keydowns, no keyup) moves 30 steps, not 1", async ({ 
   await gotoStage(page, 3);
 
   const before = await cam(page);
-  const wantOrbit = clampOrbit({ ...SEED, azimuthDeg: SEED.azimuthDeg - 30 * STEP_DEG });
+  const wantOrbit = clampOrbit({ ...SEED, headingDeg: SEED.headingDeg - 30 * STEP_DEG });
   const want = orbitKeyframe(KF3, wantOrbit);
   const wantMove = dist(want.position, before.position);
 
@@ -165,8 +171,8 @@ test("a held ArrowLeft (30 keydowns, no keyup) moves 30 steps, not 1", async ({ 
 
   // And the one-step reading is a real, different place -- ruling out a coincidence
   // where 30 steps and 1 step land close together (they do not: 30 x 5 = 150 degrees of
-  // azimuth against 5).
-  const oneStep = orbitKeyframe(KF3, predict(SEED, { az: -STEP_DEG }));
+  // heading against 5).
+  const oneStep = orbitKeyframe(KF3, predict(SEED, { heading: -STEP_DEG }));
   expect(dist(want.position, oneStep.position)).toBeGreaterThan(wantMove * 0.5);
 });
 

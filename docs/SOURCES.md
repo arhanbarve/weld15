@@ -139,6 +139,51 @@ single photograph.
   masonry, slate and window openings this project draws on it are DERIVED FROM THE GEOMETRY and are
   not photographed. src/scene/CampusMesh.tsx carries the derivation.
 
+## Photorealistic 3D mesh (P11)
+
+**Google Photorealistic 3D Tiles**, served live through the Map Tiles API (Google Maps Platform),
+SKU `C6E1-98B2-DBD0`. This is the source for the globe, the ground and Harvard's own campus
+buildings from P11 on, replacing the drawn globe, the NAIP/MassGIS ground quads and the untextured
+I3S massing mesh (the "3D massing (P10)" section above) at every altitude a live session has a key
+for. `src/scene/Tiles.tsx` mounts it via `3d-tiles-renderer` (NASA-AMMOS)'s
+`GoogleCloudAuthPlugin`; the transform from Google's ECEF frame into this app's site-foot frame is
+`src/scene/geo/frame.ts`'s `ecefToSite`.
+
+**Licence terms, and why this is a different case from the P9 rejection above.** The "Rejected"
+paragraph in the aerial-imagery section above declined Google Maps and Google Earth as a source
+for the *imagery pyramid* precisely because the Google Maps Platform Terms of Service (§3.2.3(a))
+bar exporting, scraping, pre-fetching, storing, resharing, rehosting and bulk tile download of
+Content — which is exactly what baking a static plate into `public/imagery/` would have done.
+Photorealistic 3D Tiles are used here under the opposite discipline, which is what makes them
+permitted rather than a quiet reversal of that decision: **nothing is baked, cached, indexed or
+stored.** Every tile is fetched live, per session, through the Map Tiles API, rendered, and
+discarded — `Tiles.tsx`'s own `TilesRenderer` is constructed fresh on every page load (its
+`window.__tiles.constructions` probe and the gate in `tests/e2e/descent.spec.ts` that reads it
+exist to prove exactly one root tileset request happens per load, not that any request's result
+persists past the session). `docs/phases/P11-PHOTOREAL.md` decision 1 states the rule this
+follows: "No baking — Google's Map Tiles policy forbids pre-fetching, indexing, storing or caching
+Content."
+
+**Attribution is required and is wired into this app's own attribution chrome**: a Google logo at
+or above 16 dp, plus the `copyright` string the tileset itself reports at runtime, both in the
+bottom-right — the same corner `Sources`/`Provenance` already carries "USDA NAIP · 2023 ·
+MASSGIS DETAIL" for the fallback path.
+
+**Cost and quota discipline**, since this is the one source in this document that is billable
+rather than free or public-domain: the billable event is one root tileset request per page load
+(≈ one session), not the individual tile requests it authorises. 1,000 such events are free per
+month, then $6.00/1,000. `docs/phases/P11-PHOTOREAL.md` §6a is the binding budget: a hard ceiling
+of 150 keyed sessions for the whole of P11, a daily quota cap and a $5 budget alert set in Google
+Cloud, and every e2e spec that does not need photoreal pixels running keyless by construction
+(`Experience.tsx`'s `HAS_TILES_KEY` gate mounts `FallbackGround` — L3/L4 NAIP quads plus
+`campus.glb`, both already documented above — whenever no key is present, which is the default for
+this repo's dev server, `vitest`, and the Playwright suite alike).
+
+**No-key fallback**: with `NEXT_PUBLIC_GOOGLE_MAPS_KEY` unset, none of this section's Content is
+requested at all; the app renders the sources already documented above (NAIP L3/L4, Harvard's I3S
+massing) instead. That fallback is decision 10 in the phase document, not an afterthought — CI and
+any session that must not spend a billable request runs this path exclusively.
+
 ## What no source supplied
 
 Recorded here because an absence is a source-level fact and the sliders exist because of it: the

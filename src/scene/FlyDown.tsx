@@ -3,6 +3,7 @@
 import { useFrame } from "@react-three/fiber";
 import { FLY_DOWN_END, useStore } from "@/state/store";
 import { keyframes } from "./stages";
+import { HAS_TILES_KEY, getSettled } from "./Tiles";
 
 /**
  * The automatic descent: advances `t` and steps the stage until the camera reaches Weld Hall.
@@ -88,6 +89,18 @@ export function FlyDown() {
       setFlying(false);
       return;
     }
+
+    // P11 phase 4 step 2 (docs/phases/P11-PHOTOREAL.md decision 11): do not advance the
+    // descent into a view whose tiles have not caught up. This is a SKIP, not a stop --
+    // `flying` stays true, so the very next frame re-checks `getSettled()` and resumes the
+    // instant the current view's downloads catch up (Tiles.tsx's `tiles-load-end`). It does
+    // not touch the rate math below: `delta` is simply not spent this frame, which is the
+    // same shape every other early return in this function already has, so a paused frame
+    // costs nothing and biases nothing -- there is no accumulator here for a skipped frame
+    // to leave stale. `HAS_TILES_KEY` short-circuits the check on the keyless fallback path
+    // (decision 10), where `getSettled()`'s default of `false` would otherwise wedge the
+    // flight forever: FallbackGround has no streaming tiles to wait for.
+    if (HAS_TILES_KEY && !getSettled()) return;
 
     // The stage's own extent, in decades of altitude, read off the path it will actually fly.
     // Derived per frame rather than tabulated because the keyframes depend on the suite params

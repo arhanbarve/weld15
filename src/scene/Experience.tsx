@@ -13,11 +13,15 @@ import { Globe } from "./Globe";
 import { Ground } from "./Ground";
 import { Labels } from "./Labels";
 import { Campus } from "./Campus";
+import { WeldMarker } from "./WeldMarker";
+import { FallbackGround } from "./FallbackGround";
+import { Tiles } from "./Tiles";
 import { WeldExterior } from "./WeldExterior";
 import { Suite } from "./Suite";
 import { Effects } from "./Effects";
 import { Perf } from "./Perf";
 import { Hud } from "@/ui/Hud";
+import { LoadingBar } from "@/ui/LoadingBar";
 import { CUTAWAY_WORDS } from "./cutaway";
 
 /**
@@ -64,6 +68,22 @@ function CanvasLabel({ text }: { text: string }) {
   return null;
 }
 
+/**
+ * Whether a Google Maps key is present, decided once at module scope: Next.js inlines
+ * `NEXT_PUBLIC_*` env vars at build time, so this is a build-time constant either way and
+ * reading it inside the component on every render would just be a slower way to ask the
+ * same question.
+ *
+ * P11 PHASE 1 WIRING, NOT YET THE SWITCH docs/phases/P11-PHOTOREAL.md section 3.1
+ * describes: `<Globe>`/`<Ground>`/`<Campus>` stay mounted exactly as before, unconditionally,
+ * so the only path anyone can currently test (no key exists yet) is pixel-for-pixel what
+ * shipped before this file changed. `<Tiles>` or `<FallbackGround>` mount ALONGSIDE them --
+ * `<FallbackGround>` duplicates Ground/Campus's own content, so with no key both the old
+ * and the new keyless renderer are on screen at once, which is deliberate for this task and
+ * is cleaned up (the old components deleted) in the phase that actually retires them.
+ */
+const HAS_TILES_KEY = Boolean(process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY);
+
 export default function Experience() {
   const stage = useStore((s) => s.stage);
   const t = useStore((s) => s.t);
@@ -78,16 +98,6 @@ export default function Experience() {
 
   const vis = visibility(stage);
   const { shell, interior } = thresholdOpacity(stage, t, reduced);
-
-  /**
-   * Weld is masonry from stage 2 onward, which is where its neighbours are.
-   *
-   * CampusMesh crosses out of the scan palette on layerOpacity().massing, which is fully over well
-   * before stage 2's 815 ft. Weld crossing later would leave one blue building in a brick Yard, so
-   * it crosses on the stage instead of on the altitude -- the shell is mounted from stage 2 and
-   * that is exactly when it should already be brick.
-   */
-  const weldPalette = stage >= 2 ? 1 : 0;
 
   // The canvas has no accessible content of its own -- a screen reader gets nothing at
   // all out of WebGL -- so this label is the only thing that can say what is on
@@ -137,20 +147,52 @@ export default function Experience() {
           <FlyDown />
           <Perf />
 
-          <Globe visible={vis.globe} />
+          {/* GATED ON `!HAS_TILES_KEY`, NOT JUST STAGE -- closing the gap phase 1 deliberately
+              left open and phase 5 flagged rather than fixed (docs/phases/P11-PHOTOREAL.md
+              section 3.1: "Globe.tsx/Ground.tsx/CampusMesh.tsx retired" was the target
+              architecture; until this line, both worlds were mounted at once whenever a key was
+              present). Measured, not assumed: with a real key and no gate, this opaque massing
+              sits at the same site position as Google's real photogrammetry and occludes it from
+              most angles -- confirmed by screenshot diff, hiding this system is what first made
+              the live tiles visible at all during phase 1 verification. `vis.globe`/`vis.tiles`
+              still narrow it by stage; `!HAS_TILES_KEY` narrows it by world-source on top of
+              that, so the keyless fallback path (decision 10) is completely unaffected. */}
+          <Globe visible={vis.globe && !HAS_TILES_KEY} />
           {/* AFTER the globe and BEFORE the campus, which is the order they occlude in: the
               globe is a depth-less backdrop behind everything, the ground is a real depth-tested
-              surface, and the massing stands on the ground. Mounted on the same stages as the
-              campus, because the ground and the buildings on it arrive together. */}
-          <Ground visible={vis.campus} />
-          <Campus visible={vis.campus} highlightWeld={stage >= 2} />
+              surface, and the massing stands on the ground. Mounted on the same stages as
+              `tiles` (docs/phases/P11-PHOTOREAL.md §0.7 -- through stage 4 now, not just 3, which
+              is the fix for the disappearing-yard bug), because the ground and the buildings on
+              it arrive together. */}
+          <Ground visible={vis.tiles && !HAS_TILES_KEY} />
+          <Campus visible={vis.tiles && !HAS_TILES_KEY} highlightWeld={stage >= 2} />
+          {/* Weld's own ground ring + pin. Mounted regardless of HAS_TILES_KEY -- it marks Weld
+              against either world, real tiles or fallback, which is the whole point of it.
+              Capped at stage 4, one stage further than its old unbounded `stage >= 2` (which left
+              it visible at stage 5 with nothing exterior left to mark) -- stage 5 stands inside
+              the hall, behind the walls the ring and pin sit outside of, so there is nothing left
+              for either to mark from in there. */}
+          <WeldMarker visible={stage >= 2 && stage <= 4} />
+          {/* `<Tiles>` has no `visible` prop of its own -- it is unconditionally mounted whenever
+              a key is present, which is already the "real tiles are visible from orbit all the
+              way down" behaviour `tiles`'s own comment in stages.ts argues for, so there is
+              nothing to gate here. `<FallbackGround>` does have one, and takes `vis.tiles` like
+              Ground and Campus, for the same §0.7 fix -- and is the ONLY world-geometry mounted
+              on the keyless path, now that Globe/Ground/Campus are gated off above whenever a key
+              is present. */}
+          {HAS_TILES_KEY ? <Tiles /> : <FallbackGround visible={vis.tiles} />}
           {/* CONDITIONALLY MOUNTED, not merely made invisible, and that is a measured decision.
               drei's <Html> portals a real DOM node and repositions it every frame; five of them
               kept running at stages 4 and 5, where no place label can be on screen at all, and the
               extra per-frame DOM work was enough to push a11y.spec.ts's throttled-announcement
-              measurement past its window. An invisible <Labels> is not free; an unmounted one is. */}
-          {vis.campus ? <Labels /> : null}
-          <WeldExterior visible={vis.weld} opacity={shell} palette={weldPalette} />
+              measurement past its window. An invisible <Labels> is not free; an unmounted one is.
+              NOT `vis.tiles` -- deliberately narrower now that `tiles` extends through stage 4 to
+              fix §0.7. Cambridge/Boston place chips have nothing to label once the camera is
+              inside the fly-through toward Weld, and mounting them there would reopen the exact
+              a11y regression this comment already measured, so this stays the stage window
+              `tiles` used to be (`stage <= 3`) rather than following it to 4. */}
+          {stage <= 3 ? <Labels /> : null}
+          <WeldExterior visible={vis.weld} opacity={shell} />
           <Suite
             visible={vis.interior}
             opacity={interior}
@@ -229,6 +271,7 @@ export default function Experience() {
         </Canvas>
       </div>
       <div className="vignette" aria-hidden="true" />
+      <LoadingBar />
       <Hud />
     </>
   );

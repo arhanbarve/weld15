@@ -706,7 +706,7 @@ describe("setScrubbing", () => {
  * work exactly as it always has.
  */
 describe("orbit survives only a return to its own anchor stage", () => {
-  const SOME_ORBIT = { azimuthDeg: 12, polarDeg: 40, radius: 200 };
+  const SOME_ORBIT = { headingDeg: 12, pitchDeg: 40, rangeFt: 200 };
 
   it("keeps the orbit and its stage across a round trip through a non-anchor stage", () => {
     useStore.getState().setStage(3);
@@ -800,34 +800,8 @@ describe("orbit survives only a return to its own anchor stage", () => {
   });
 });
 
-/**
- * P10 step 7: how far the viewer has turned the globe at stage 0.
- *
- * On the same footing as `orbit`: null means "as stages.ts posed it", not {0, 0}, so a
- * reset button has something to restore to and an untouched view is a distinct state
- * rather than a spin of zero degrees.
- */
-describe("globeSpin", () => {
-  it("writes the field both ways, and opens null", () => {
-    expect(useStore.getState().globeSpin).toBe(null);
-    useStore.getState().setGlobeSpin({ yawDeg: 12, pitchDeg: -4 });
-    expect(useStore.getState().globeSpin).toEqual({ yawDeg: 12, pitchDeg: -4 });
-    useStore.getState().setGlobeSpin(null);
-    expect(useStore.getState().globeSpin).toBe(null);
-  });
-
-  it("is cleared by resetAll, on the same footing as orbit", () => {
-    useStore.getState().setGlobeSpin({ yawDeg: 30, pitchDeg: 10 });
-    useStore.getState().resetAll();
-    expect(useStore.getState().globeSpin).toBe(null);
-  });
-
-  it("is untouched by hydrate, for the reason orbit and firstPerson are: it is where the recipient is looking, not what the model is", () => {
-    useStore.getState().setGlobeSpin({ yawDeg: 45, pitchDeg: 20 });
-    const s = decode(encode({ ...DEFAULT_SNAPSHOT, stage: 3 }))!;
-    useStore.getState().hydrate(s);
-    expect(useStore.getState().stage, "the snapshot did arrive").toBe(3);
-    expect(useStore.getState().globeSpin).toEqual({ yawDeg: 45, pitchDeg: 20 });
-    useStore.getState().setGlobeSpin(null);
-  });
-});
+// globeSpin -- P10 step 7's globe-drag state -- and its store field are removed as
+// part of P11 (docs/phases/P11-PHOTOREAL.md section 2.4: `globeSpin` and `spinPose()`
+// are deleted, the false-altitude bug in section 0.1). The describe block that lived
+// here asserted setGlobeSpin()/resetAll()/hydrate() against a field the store no
+// longer has.

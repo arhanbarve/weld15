@@ -39,6 +39,18 @@ palette; the crossing between them is the payoff, so they must not be blended.
 > readable under the cyanotype, which is what makes the massing look like it is standing on
 > something. `src/scene/Ground.tsx` holds both numbers and the reasoning.
 
+> **Amended in P11 (decision 9).** Live Google Photorealistic 3D Tiles replace the drawn globe,
+> ground and campus mesh, rendering the real world at every altitude rather than resolving into a
+> scan of it. That removes the premise of "Two stages, two palettes" as a rule about the 3D
+> world: there is no photograph left to tint toward `--void`, and no drawn massing for a scan
+> palette to be the truth of. **The cyanotype is retired from the 3D scene and kept only as UI
+> chrome** -- the HUD, panels and other on-screen controls, which is the "Stage: SCAN" token table
+> below, unchanged. Weld's own parametric shell (`src/scene/WeldExterior.tsx`) no longer carries a
+> scan-to-daylight handoff either: it wears `BRICK` / `SLATE` from `materials.ts` unconditionally,
+> at every stage and altitude, and `Threshold.tsx` -- which existed only to draw the seam between
+> the two -- is deleted. The dissolve that crossfades the shell into the interior at the stage
+> 3→4 threshold is untouched; it was never the palette's.
+
 ### Token: the photographic layer
 
 | token | value | meaning |
@@ -52,10 +64,12 @@ palette; the crossing between them is the payoff, so they must not be blended.
 These are design-system values rather than magic numbers in a shader, so the look can be tuned
 without touching GLSL.
 
-### Stage: SCAN (globe, Cambridge, Yard, Weld exterior)
+### Stage: SCAN (chrome only, as of P11 decision 9)
 
 Thin white line work on Prussian blue — the cyanotype process contemporary with Weld's 1872
-construction drawings.
+construction drawings. Through P10 this was also the 3D scene's own palette at long range
+(globe, Cambridge, Yard, Weld's exterior shell); P11 retires it from the 3D world in favour of
+photoreal tiles at every altitude, so these tokens now style UI chrome exclusively.
 
 ```
 --void        #06203F   ground

@@ -1212,7 +1212,10 @@ describe("the cutaway opens the shell", () => {
    * back fresh sets on every call, so anything comparing its answers by identity reports a
    * change every frame and rebuilds 220 triangles with it. The claim was untested while it
    * lived in a component, and it was duplicated into Threshold.tsx for as long as that
-   * component derived its own cut.
+   * component derived its own cut -- P11 decision 9 deletes Threshold.tsx along with the
+   * scan/daylight seam it existed to draw, so WeldExterior.tsx is the one remaining reader
+   * of a cut now, but the comparison predicates stay here rather than moving, since they are
+   * still a fact about WeldCut and not about whichever component happens to consume it.
    *
    * Every case below is a pair that a WEAKER comparison would call equal: same content in
    * different sets, same sets with one member exchanged, same everything but the plane.
@@ -1289,11 +1292,14 @@ describe("the cutaway opens the shell", () => {
   /*
    * WHICH PARTS OF THE SHELL THE PARAMS ACTUALLY REACH, measured rather than assumed.
    *
-   * Threshold.tsx builds its sweep surface from buildWeldCut() and rides only `walls` and
-   * `roof`, and both its header and WeldExterior's assert in prose that those two "take no
-   * params at all". That claim is load-bearing: it is the reason Threshold can leave
-   * `params` out of the memo that builds the surface, and so the reason a dimension slider
-   * does not rebuild and re-merge the shell mid-crossing for an identical result.
+   * Through P10, Threshold.tsx built its sweep surface from buildWeldCut() and rode only
+   * `walls` and `roof`, and both its header and WeldExterior's asserted in prose that those
+   * two "take no params at all" -- load-bearing, because it was the reason Threshold could
+   * leave `params` out of the memo that built the surface, so a dimension slider did not
+   * rebuild and re-merge the shell mid-crossing for an identical result. P11 decision 9
+   * deletes Threshold.tsx along with the seam it rode, so that particular saving is gone
+   * with it, but the underlying claim is a fact about buildWeldCut() and not about the
+   * component that used to lean on it -- it still holds, and is still worth pinning here.
    *
    * A comment is not evidence, so this asserts it on the geometry: two params sets that
    * differ in nine dimensions, and walls and roof come out byte-identical in every

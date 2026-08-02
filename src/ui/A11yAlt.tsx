@@ -240,9 +240,9 @@ function roomAt(suite: Suite, u: number, v: number): Rect | null {
 /** An orbit in words. Hud.tsx's sayOrbit says the same thing; see the note below. */
 function sayOrbit(o: Orbit): string {
   return (
-    `azimuth ${o.azimuthDeg.toFixed(0)} degrees east of north, ` +
-    `polar ${o.polarDeg.toFixed(0)} degrees from vertical, ` +
-    `${ft(o.radius)} out`
+    `heading ${o.headingDeg.toFixed(0)} degrees east of north, ` +
+    `pitch ${o.pitchDeg.toFixed(0)} degrees below level, ` +
+    `${ft(o.rangeFt)} out`
   );
 }
 
