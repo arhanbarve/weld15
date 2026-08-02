@@ -16,12 +16,14 @@ import { Campus } from "./Campus";
 import { WeldMarker } from "./WeldMarker";
 import { FallbackGround } from "./FallbackGround";
 import { Tiles } from "./Tiles";
+import { Preload } from "./Preload";
 import { WeldExterior } from "./WeldExterior";
 import { Suite } from "./Suite";
 import { Effects } from "./Effects";
 import { Perf } from "./Perf";
 import { Hud } from "@/ui/Hud";
 import { LoadingBar } from "@/ui/LoadingBar";
+import { Preloader } from "@/ui/Preloader";
 import { CUTAWAY_WORDS, modelMode } from "./cutaway";
 
 /**
@@ -197,6 +199,11 @@ export default function Experience() {
               on the keyless path, now that Globe/Ground/Campus are gated off above whenever a key
               is present. */}
           {HAS_TILES_KEY ? <Tiles /> : <FallbackGround visible={vis.tiles} />}
+          {/* P13: registers synthetic cameras at every sampled descent pose so their tiles
+              are resident before the app is reachable (docs/phases/P13-PRELOAD.md). A no-op
+              whenever `!HAS_TILES_KEY` or `?preload=0` -- see Preload.tsx's own header --
+              so mounting it unconditionally costs nothing on the keyless path. */}
+          <Preload />
           {/* CONDITIONALLY MOUNTED, not merely made invisible, and that is a measured decision.
               drei's <Html> portals a real DOM node and repositions it every frame; five of them
               kept running at stages 4 and 5, where no place label can be on screen at all, and the
@@ -301,6 +308,7 @@ export default function Experience() {
       <div className="vignette" aria-hidden="true" />
       <LoadingBar />
       <Hud />
+      <Preloader />
     </>
   );
 }

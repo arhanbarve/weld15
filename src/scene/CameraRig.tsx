@@ -4,18 +4,15 @@ import { useEffect, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { LAST_STAGE, useStore, type StageId } from "@/state/store";
-import { keyframes, cameraKeyframe, REDUCED_CUT, funnel, FUNNEL_START, SHELL_GONE } from "./stages";
+import { keyframes, cameraKeyframe, funnel, FUNNEL_START, SHELL_GONE } from "./stages";
 import { firstPersonPose } from "./FirstPerson";
+import { journeyPose } from "./pose";
 import {
   clampForStage,
   clampOrbit,
-  orbitKeyframe,
   orbitOf,
   STAGE3_CLAMP,
   STAGE4_CLAMP,
-  stage4OrbitKeyframe,
-  stage4Pose,
-  transitPose,
   MASSING_CENTER,
   type Orbit,
   type PoseClamp,
@@ -429,59 +426,16 @@ export function CameraRig() {
      * Experience.tsx -- so what is read here was written this frame, not last.
      */
     const walker = stage === LAST_STAGE ? useStore.getState().firstPerson : null;
-    // Reduced motion for the stage 3 -> 4 transit below: cameraKeyframe's own reduced
-    // branch does not fire for stage 3, since stage 3 has no path of its own to jump
-    // within. This gives the transit the same jump-at-midpoint shape stage 4's crossing
-    // already has, so under reduced motion stage 3 is either exactly the orbit or exactly
-    // kf[4] and nothing geometrically between.
-    const transit = reduced ? (t < REDUCED_CUT ? 0 : 1) : t;
 
-    // Stages 0-2: the stage's own path pose, orbited (heading/pitch only) if a live drag
-    // belongs to THIS stage. `orbitKeyframe`'s target is `base`'s own -- the path's current
-    // look-at point -- so this is exactly the composition stage 3 always used, just against
-    // a moving base rather than a fixed one.
-    const pathStagePose = (s: 0 | 1 | 2): ReturnType<typeof cameraKeyframe> => {
-      const base = cameraKeyframe(kf, s, t, reduced);
-      return orbit && orbitStage === s ? orbitKeyframe(base, orbit, clampForStage(s)) : base;
-    };
-
-    const want =
+    // Everything but the walker is journeyPose's (scene/pose.ts) job now -- lifted verbatim
+    // from this branch, see that file's own header for why and tests/pose.test.ts for the
+    // equivalence fence. `orbit`/`orbitStage` pass straight through: journeyPose reads the
+    // exact gate this component always applied (a live orbit only counts when it belongs to
+    // the CURRENT stage).
+    const posed =
       walker !== null
         ? { ...firstPersonPose(walker, params), fov: kf[LAST_STAGE].fov }
-        : stage === 3
-          ? // Stage 3 is a PLACE at t = 0 and a TRANSIT above it. The transit starts from
-            // whatever the viewer orbited to rather than from a fixed pose, so scrubbing on
-            // from stage 3 leaves from where they were standing; at t = 1 it is kf[4]
-            // exactly, the first stop of stage 4's own path, so the next boundary is not a
-            // cut either. Interpolated in SPHERICAL coordinates about MASSING_CENTER
-            // (orbit.ts's transitPose), not cartesian: a straight position blend dipped
-            // inside MASS_RADIUS at t ~= 0.58 even though both ends clear it, since a chord
-            // between two points outside a sphere can still cut through the middle.
-            transitPose(
-              orbitKeyframe(
-                kf[3],
-                orbit && orbitStage === 3 ? orbit : orbitOf(kf[3]),
-                STAGE3_CLAMP,
-              ),
-              kf[4],
-              MASSING_CENTER,
-              transit,
-            )
-          : stage === 4
-            ? // stage4Pose is BY IDENTITY cameraKeyframe(kf, 4, t, reduced) when orbit is
-              // null -- the regression fence tests/stages.test.ts pins -- so this branch
-              // is always taken at stage 4 rather than only when orbit is set.
-              stage4Pose(
-                kf,
-                t,
-                reduced,
-                orbit && orbitStage === 4 ? stage4OrbitKeyframe(kf[4], orbit) : null,
-              )
-            : stage === 0 || stage === 1 || stage === 2
-              ? pathStagePose(stage)
-              : cameraKeyframe(kf, stage, t, reduced);
-
-    const posed = want;
+        : journeyPose(kf, stage, t, reduced, orbit, orbitStage);
 
     const wantPos = new THREE.Vector3(...posed.position);
     const wantTarget = new THREE.Vector3(...posed.target);

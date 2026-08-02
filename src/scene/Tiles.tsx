@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useRef } from "react";
-import { useFrame } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { TilesRenderer as TilesRendererR3F, TilesPlugin } from "3d-tiles-renderer/r3f";
 import { GoogleCloudAuthPlugin } from "3d-tiles-renderer/plugins";
@@ -206,6 +206,30 @@ export function getSettled(): boolean {
   return settled;
 }
 
+/**
+ * The live TilesRendererImpl, for P13's preloader (Preload.tsx) -- the same instance
+ * `window.__tilesImpl` exposes in development, but available in every build: the preloader
+ * has to register and later remove synthetic cameras on the ONE renderer this file ever
+ * constructs (see this file's own header on why exactly one), which is a production
+ * behaviour, not a debug one. `null` before `<Tiles>`'s ref callback has fired.
+ */
+export function getTiles(): TilesRendererImpl | null {
+  return currentTiles;
+}
+
+/**
+ * `TilesRendererBase.lruCache.cachedBytes` -- like `stats` above, a real runtime field
+ * (LRUCache.js's own constructor) the package's hand-written `.d.ts` omits (it declares
+ * `minSize`/`maxSize`/`minBytesSize`/`maxBytesSize` but not the live counter). P13's
+ * preloader needs this to decide, and later to size, its retention byte cap
+ * (docs/phases/P13-PRELOAD.md section 2.2/5 step 0) -- the one number nothing in this app
+ * currently reports.
+ */
+export function getCachedBytes(): number | null {
+  if (!currentTiles) return null;
+  return (currentTiles.lruCache as unknown as { cachedBytes: number }).cachedBytes;
+}
+
 /** Placeholder snapshot for `getProbe()` before `<Tiles>` has ever constructed a renderer -- `phase: "boot"` is the true state then, and every count is genuinely zero. */
 const BOOT_PROBE: TilesProbe = {
   constructions: 0,
@@ -266,6 +290,7 @@ function ecefToSiteMatrix(): THREE.Matrix4 {
 }
 
 export function Tiles() {
+  const gl = useThree((s) => s.gl);
   const matrixRef = useRef<THREE.Matrix4 | null>(null);
   if (matrixRef.current === null) matrixRef.current = ecefToSiteMatrix();
 
@@ -485,6 +510,25 @@ export function Tiles() {
             applyWeldCarve(shader, carveRef.current!);
           };
           m.needsUpdate = true;
+
+          /**
+           * P13 step 6 (docs/phases/P13-PRELOAD.md): GPU texture upload, paid here rather
+           * than on this material's first real draw. `gl.initTexture` is three's own
+           * documented preload path ("Useful for preloading a texture rather than waiting
+           * until first render, which can cause noticeable lags due to decode and GPU
+           * upload overhead" -- WebGLRenderer.js's own comment on the method).
+           *
+           * GENERIC OVER MATERIAL TYPE, NOT A HAND-ENUMERATED SLOT LIST. glTF content
+           * loaded through different tile formats can carry different material classes
+           * (MeshStandardMaterial is typical, but nothing here assumes it); a fixed list of
+           * slot names (`map`, `normalMap`, `roughnessMap`, ...) would silently miss
+           * whatever slot a future material type adds. Every texture-valued OWN property is
+           * exactly what three.js's own material disposal code (Material.dispose) also
+           * walks generically for the same reason -- there is no narrower correct set.
+           */
+          for (const val of Object.values(m as unknown as Record<string, unknown>)) {
+            if (val instanceof THREE.Texture) gl.initTexture(val);
+          }
         }
       });
     };

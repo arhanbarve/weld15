@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type CSSProperties } from "react";
 import { HAS_TILES_KEY, subscribeProgress, getProbe, type TilesPhase } from "@/scene/Tiles";
+import { subscribePreload, getPreloadProbe } from "@/scene/Preload";
 
 /**
  * First-paint progress against tiles settling. P11 phase 4/5
@@ -88,6 +89,7 @@ const FADE_MS = 400;
 
 export function LoadingBar() {
   const [probe, setProbe] = useState(getProbe);
+  const [preload, setPreload] = useState(getPreloadProbe);
   const [now, setNow] = useState<number | null>(null);
   const [mounted, setMounted] = useState(false);
   const [opaque, setOpaque] = useState(false);
@@ -96,6 +98,13 @@ export function LoadingBar() {
     if (!HAS_TILES_KEY) return;
     return subscribeProgress(setProbe);
   }, []);
+
+  // P13: this bar covers ordinary in-app streaming (a heading drag off the preloaded set,
+  // docs/phases/P13-PRELOAD.md section 1 decision 1's own accepted gap) -- not first load,
+  // which is Preloader.tsx's blocking overlay. Showing both at once would be two progress
+  // UIs arguing about the same wait, so this one stays hidden until the preloader's own
+  // `done` flips (or never applies at all, `!HAS_TILES_KEY`/`?preload=0`).
+  useEffect(() => subscribePreload(setPreload), []);
 
   // The creep floor's clock. Only ticks while there is a real episode in flight -- boot,
   // auth and settled all have a fixed displayed value (see `displayedProgress`) that does
@@ -123,7 +132,7 @@ export function LoadingBar() {
    * flip to 0 immediately on hide (so the transition has something to animate) while
    * `mounted` only flips false once `FADE_MS` has actually elapsed.
    */
-  const shouldShow = HAS_TILES_KEY && probe.phase !== "settled";
+  const shouldShow = HAS_TILES_KEY && probe.phase !== "settled" && preload.done;
   useEffect(() => {
     if (shouldShow) {
       const id = setTimeout(() => {

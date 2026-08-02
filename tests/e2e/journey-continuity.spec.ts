@@ -40,7 +40,7 @@ const weld = (page: Page) => page.evaluate(() => (window as unknown as { __weld:
 
 /** The app, booted, with the descent settled at stage 0. */
 async function open(page: Page) {
-  await page.goto("/");
+  await page.goto("/?preload=0");
   await page.locator("canvas").waitFor();
   await expect.poll(async () => (await weld(page)).stage, { timeout: 15_000 }).toBe(0);
 }

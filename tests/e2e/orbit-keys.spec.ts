@@ -49,7 +49,7 @@ const KF4 = keyframes(DEFAULT_PARAMS)[4]!;
 const SEED: Orbit = orbitOf(KF3);
 
 async function open(page: Page) {
-  await page.goto("/");
+  await page.goto("/?preload=0");
   await expect(page.locator("canvas")).toBeVisible({ timeout: 30_000 });
 }
 

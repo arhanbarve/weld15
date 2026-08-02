@@ -70,7 +70,7 @@ type Cam = {
 const cam = (page: Page) => page.evaluate(() => (window as unknown as { __cam: Cam }).__cam);
 
 async function open(page: Page): Promise<void> {
-  await page.goto("/");
+  await page.goto("/?preload=0");
   await expect(page.locator("canvas")).toBeVisible({ timeout: 30_000 });
   await page.waitForFunction(() => (window as unknown as { __cam?: unknown }).__cam !== undefined, undefined, {
     timeout: 30_000,
@@ -398,7 +398,7 @@ test("tiles: exactly one root request per page load, and tiles settle within a r
    * discloses rather than papers over, matching §4.1's own "flagged here rather than tuned
    * away" framing for the identical frame-time residual.
    */
-  await page.goto("/");
+  await page.goto("/?preload=0");
   await expect(page.locator("canvas")).toBeVisible({ timeout: 30_000 });
   await page.waitForTimeout(1500);
 
@@ -453,7 +453,7 @@ test("orbit itself settles now, and loads real tile content -- the far-plane reg
 }) => {
   test.skip(!HAS_KEY, "keyed-only -- see the test above for why.");
 
-  await page.goto("/");
+  await page.goto("/?preload=0");
   await expect(page.locator("canvas")).toBeVisible({ timeout: 30_000 });
 
   // MEASURED, this build, real key: settled at 1,836ms, 396/396 tiles, zero console

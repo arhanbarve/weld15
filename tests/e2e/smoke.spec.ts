@@ -7,7 +7,7 @@ test("page loads with a live WebGL canvas and no console errors", async ({ page 
   });
   page.on("pageerror", (err) => errors.push(err.message));
 
-  await page.goto("/");
+  await page.goto("/?preload=0");
 
   const canvas = page.locator("canvas");
   await expect(canvas).toBeVisible({ timeout: 30_000 });
@@ -43,7 +43,7 @@ test("actually draws lit geometry, not just a cleared background", async ({ page
   // lit cube faces 420-580. Requiring pixels above 300 therefore means the cube
   // specifically is on screen, and cannot be satisfied by the grid or the clear
   // colour. Measured value with the cube present: 5.3% of samples.
-  await page.goto("/");
+  await page.goto("/?preload=0");
   await expect(page.locator("canvas")).toBeVisible({ timeout: 30_000 });
   await page.waitForTimeout(1200); // let the damped controls settle
 
@@ -85,7 +85,7 @@ test("actually draws lit geometry, not just a cleared background", async ({ page
 });
 
 test("applies the design tokens and the self-hosted fonts", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?preload=0");
 
   const styles = await page.evaluate(() => {
     const root = getComputedStyle(document.documentElement);

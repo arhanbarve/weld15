@@ -55,7 +55,7 @@ const cam = (page: Page) => page.evaluate(() => (window as unknown as { __cam: C
 async function open(page: Page): Promise<void> {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto("/");
+  await page.goto("/?preload=0");
   await expect(page.locator("canvas")).toBeVisible({ timeout: 30_000 });
   await page.waitForTimeout(1000); // first paint settles
   expect(errors, `page errors on load: ${errors.join("; ")}`).toEqual([]);

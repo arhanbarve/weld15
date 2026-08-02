@@ -87,7 +87,7 @@ async function settled(page: Page, what: string, floor = 0): Promise<Perf> {
 }
 
 async function openAt(page: Page, stage: number) {
-  await page.goto("/");
+  await page.goto("/?preload=0");
   await expect(page.locator("canvas")).toBeVisible({ timeout: 30_000 });
   await page.getByTestId(`stage-${stage}`).click();
   await page.waitForTimeout(2400);
@@ -224,7 +224,7 @@ test("tile cache stays under its configured item ceiling", async ({ page }) => {
     "keyed-only -- set NEXT_PUBLIC_GOOGLE_MAPS_KEY on the process running Playwright to " +
       "exercise this gate; skipped by default per docs/phases/P11-PHOTOREAL.md §6a.",
   );
-  await page.goto("/");
+  await page.goto("/?preload=0");
   await expect(page.locator("canvas")).toBeVisible({ timeout: 30_000 });
   await page.waitForTimeout(1500);
 

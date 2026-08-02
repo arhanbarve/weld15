@@ -20,7 +20,7 @@ type Cam = {
 const cam = (page: Page) => page.evaluate(() => (window as unknown as { __cam: Cam }).__cam);
 
 async function atStage4(page: Page): Promise<void> {
-  await page.goto("/");
+  await page.goto("/?preload=0");
   await expect(page.locator("canvas")).toBeVisible({ timeout: 30_000 });
   await page.getByTestId("stage-4").click();
   await page.waitForTimeout(1400);

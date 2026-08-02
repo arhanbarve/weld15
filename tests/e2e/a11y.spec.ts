@@ -151,7 +151,7 @@ async function walkToward(page: Page, target: { u: number; v: number }, tol = 0.
 
 /** The app, booted and hydrated, with the description mounted. */
 async function open(page: Page) {
-  await page.goto("/");
+  await page.goto("/?preload=0");
   await page.locator("canvas").waitFor();
   // The toggle rather than the canvas is what proves the HUD has hydrated, and the
   // description with it.

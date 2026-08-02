@@ -125,7 +125,7 @@ test("every stage renders real, non-flat imagery, and there are no console error
   page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
   page.on("pageerror", (e) => errors.push(e.message));
 
-  await page.goto("/");
+  await page.goto("/?preload=0");
   await expect(page.locator("canvas")).toBeVisible({ timeout: 30_000 });
 
   const report: string[] = [];
@@ -166,7 +166,7 @@ test("every stage renders real, non-flat imagery, and there are no console error
 test("the threshold never shows an empty frame as it crosses", async ({ page }) => {
   // The failure this guards against is a flicker: a few frames where the shell
   // has gone and the interior has not arrived.
-  await page.goto("/");
+  await page.goto("/?preload=0");
   await expect(page.locator("canvas")).toBeVisible({ timeout: 30_000 });
   await gotoStage(page, 4);
 
@@ -212,7 +212,7 @@ test("the threshold never shows an empty frame as it crosses", async ({ page }) 
 test("the skip control is the first thing you reach by keyboard", async ({ page }) => {
   // An immersive intro needs an escape hatch, and one you must tab past six stage
   // buttons to reach is not an escape hatch.
-  await page.goto("/");
+  await page.goto("/?preload=0");
   await expect(page.locator("canvas")).toBeVisible({ timeout: 30_000 });
   await page.keyboard.press("Tab");
   await expect(page.getByTestId("skip")).toBeFocused();
@@ -239,7 +239,7 @@ test("reduced motion jump-cuts instead of flying", async ({ browser }) => {
   // Must not merely shorten the fly. A shortened fly is still a fly.
   const ctx = await browser.newContext({ reducedMotion: "reduce" });
   const page = await ctx.newPage();
-  await page.goto("/");
+  await page.goto("/?preload=0");
   await expect(page.locator("canvas")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("stage-name")).toContainText("reduced motion");
 

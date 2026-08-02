@@ -27,7 +27,7 @@ const LATE_MOUNT_MS = 2500;
 async function open(browser: Browser, opts: Parameters<Browser["newContext"]>[0]) {
   const ctx = await browser.newContext(opts);
   const page = await ctx.newPage();
-  await page.goto("/");
+  await page.goto("/?preload=0");
   return { ctx, page };
 }
 
@@ -42,7 +42,7 @@ test("a phone gets the message and no canvas at all", async ({ browser }) => {
 });
 
 test("a desktop gets the canvas and never sees the message", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?preload=0");
   await expect(page.locator("canvas")).toBeVisible({ timeout: 30_000 });
   expect(await gate(page).count()).toBe(0);
 });

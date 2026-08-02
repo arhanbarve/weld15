@@ -135,7 +135,7 @@ async function openInTheRoom(page: Page): Promise<string[]> {
   const errors: string[] = [];
   page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto("/");
+  await page.goto("/?preload=0");
   await page.locator("canvas").waitFor();
   await page.getByTestId("stage-5").click();
   await page.waitForTimeout(1400); // the camera settles; journey.spec.ts's own wait
@@ -682,7 +682,7 @@ test.describe("P7 -- somebody can stand in Weld 15 and walk it", () => {
     const errors: string[] = [];
     page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
     page.on("pageerror", (e) => errors.push(e.message));
-    await page.goto("/");
+    await page.goto("/?preload=0");
     await page.locator("canvas").waitFor();
     await page.getByTestId("stage-5").click();
 

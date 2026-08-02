@@ -126,7 +126,10 @@ async function openInTheRoom(page: Page, query = "") {
   page.on("console", (m) => {
     if (m.type() === "error") errors.push(m.text());
   });
-  await page.goto(`/${query}`);
+  // `?preload=0` bypasses P13's blocking preloader (docs/phases/P13-PRELOAD.md section 1
+  // decision 4) -- appended rather than assumed absent, since `query` sometimes already
+  // carries its own `?s=...`.
+  await page.goto(`/${query}${query.includes("?") ? "&" : "?"}preload=0`);
   await page.locator("canvas").waitFor();
   // The stage button, not the skip link. `.skip` sits at translateY(-200%) until it is
   // focused -- that is the whole point of a skip link -- so Playwright reports it as
@@ -323,9 +326,12 @@ test.describe("P6 -- the suite is changeable", () => {
     // encoding, and a URL that never changed would satisfy everything above.
     expect(new URL(link).searchParams.get("s")).not.toBe(opening);
 
-    // Reopen the link in a clean page and find the bed where it was left.
+    // Reopen the link in a clean page and find the bed where it was left. `?preload=0` is
+    // added on top of the link's own `?s=...` -- see openInTheRoom's own comment.
     await page.goto("about:blank");
-    await page.goto(link);
+    const reopenUrl = new URL(link);
+    reopenUrl.searchParams.set("preload", "0");
+    await page.goto(reopenUrl.toString());
     await page.locator("canvas").waitFor();
     await expect.poll(async () => (await weld(page)).stage, { timeout: 15_000 }).toBe(5);
     // And wait for the drag layer's probe, which is a SEPARATE publisher: __weld comes
