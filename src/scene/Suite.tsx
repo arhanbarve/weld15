@@ -8,7 +8,7 @@ import { mergeBufferGeometries } from "three-stdlib";
 import { buildSuite, type Rect, type SuiteParams } from "@/geo/rooms";
 import { buildWalls, suiteFootprint, type Opening, type Wall } from "@/geo/walls";
 import { sashParts } from "@/geo/sash";
-import { trimParts, RAIL_H } from "@/geo/trim";
+import { trimParts, RAIL_H, doorCasingParts, doorLeafParts, thresholdParts } from "@/geo/trim";
 import { suiteToThree, floorLevel } from "@/geo/place";
 import type { Piece } from "@/geo/furniture";
 import type { DragResult } from "@/geo/drag";
@@ -133,7 +133,7 @@ export function rectCentre(r: Rect | Wall, z: number, params: SuiteParams): THRE
  * unknown room's diagonal mark. `boards` asks for the oak grain to be scaled to
  * this box's real size -- see slabGeometry().
  */
-type Slab = {
+export type Slab = {
   u: number;
   v: number;
   du: number;
@@ -352,12 +352,17 @@ function sashSlabs(
 }
 
 /**
- * Baseboard, picture rail and cornice for one band, on every room-facing
- * side of it. An exterior band has exactly one: the room it encloses. A
- * partition, in this suite's layout, always has a real room on both sides
- * -- rooms.ts never leaves a partition's far side open -- so both faces get
- * trim, each proud in the opposite direction, at the SAME across-axis
- * mirror sashSlabs() uses.
+ * Baseboard, picture rail, cornice and door casing for one band, on every
+ * room-facing side of it. An exterior band has exactly one: the room it
+ * encloses. A partition, in this suite's layout, always has a real room on
+ * both sides -- rooms.ts never leaves a partition's far side open -- so both
+ * faces get trim, each proud in the opposite direction, at the SAME
+ * across-axis mirror sashSlabs() uses.
+ *
+ * Door casing is symmetric -- unlike the leaf, it has no `turn` and no
+ * opinion about which room is which -- so it is placed here, by the same
+ * per-face mirror as the baseboard, rather than beside the leaf in
+ * doorLeafSlabs() below.
  */
 function roomTrimSlabs(
   w: Wall,
@@ -368,7 +373,8 @@ function roomTrimSlabs(
 ): { joinery: Slab[]; plaster: Slab[] } {
   const { alongV, along, thick } = bandAxis(w);
   const low = alongV ? w.u : w.v;
-  const doorSpans = solidSpans(cuts.filter((c) => c.y0 <= EPS), along);
+  const doorCuts = cuts.filter((c) => c.y0 <= EPS);
+  const doorSpans = solidSpans(doorCuts, along);
   const railSpans = solidSpans(cuts.filter((c) => c.y1 > RAIL_H + EPS), along);
   const faces = w.kind === "exterior" ? [roomFaceIsLow(w, rooms)] : [true, false];
 
@@ -382,8 +388,166 @@ function roomTrimSlabs(
         : { u: w.u + p.u, v: across, du: p.du, dv: p.dv, y0: floor + p.y0, y1: floor + p.y1 };
       (p.material === "plaster" ? plaster : joinery).push(slab);
     }
+    for (const c of doorCuts) {
+      for (const p of doorCasingParts(c.hi - c.lo, c.y1)) {
+        const localU = p.u + c.lo;
+        const across = roomLow ? low + p.v : low + thick - p.v - p.dv;
+        const slab: Slab = alongV
+          ? { u: across, v: w.v + localU, du: p.dv, dv: p.du, y0: floor + p.y0, y1: floor + p.y1 }
+          : { u: w.u + localU, v: across, du: p.du, dv: p.dv, y0: floor + p.y0, y1: floor + p.y1 };
+        joinery.push(slab);
+      }
+    }
   }
   return { joinery, plaster };
+}
+
+/**
+ * One oak threshold strip per door, spanning the wall's own thickness --
+ * placed ONCE per doorway rather than per face, since it is the strip in the
+ * gap itself, not a room-facing surface. Pushed by the caller into the same
+ * merged geometry as the room floors, so it costs zero draw calls of its own.
+ */
+function thresholdSlabs(w: Wall, cuts: Cut[], floor: number): Slab[] {
+  const { alongV, thick } = bandAxis(w);
+  const low = alongV ? w.u : w.v;
+  const out: Slab[] = [];
+  for (const c of cuts) {
+    if (c.y0 > EPS) continue; // only a door reaches the floor
+    for (const p of thresholdParts(c.hi - c.lo, thick)) {
+      const localU = p.u + c.lo;
+      const across = low + p.v;
+      out.push(
+        alongV
+          ? { u: across, v: w.v + localU, du: p.dv, dv: p.du, y0: floor + p.y0, y1: floor + p.y1 }
+          : { u: w.u + localU, v: across, du: p.du, dv: p.dv, y0: floor + p.y0, y1: floor + p.y1 },
+      );
+    }
+  }
+  return out;
+}
+
+/**
+ * Which side of a wall band one specific room sits on, along the band's
+ * across (thickness) axis.
+ *
+ * roomFaceIsLow() above answers a related but different question -- "is the
+ * ROOM FACE this band draws trim toward, on average, its low or high edge" --
+ * averaged over every room `w.between` names, which is the right question
+ * for a symmetric part drawn on both faces. A door leaf is chiral: it swings
+ * into ONE specific room, named by the opening's own `connects[1]`, and that
+ * room's side has to be asked for directly rather than averaged with
+ * whatever else happens to touch the same band.
+ */
+function roomIsOnLowSide(w: Wall, room: Rect): boolean {
+  const { alongV } = bandAxis(w);
+  const mid = alongV ? w.u + w.du / 2 : w.v + w.dv / 2;
+  const centre = alongV ? room.u + room.du / 2 : room.v + room.dv / 2;
+  return centre <= mid;
+}
+
+/**
+ * The hung-open leaf for every door opening whose swing target is a real,
+ * modelled room -- which today is every interior door; the suite's own entry
+ * (P14 row 3) hangs a leaf too, but closed, and is handled by its caller
+ * passing a near-zero `openDeg` rather than by a branch in here.
+ *
+ * WHY THIS IS SEPARATE FROM roomTrimSlabs()'S PER-FACE LOOP
+ * A leaf is chiral -- see doorLeafParts()'s own header -- so placing it via
+ * the same mirror formula the casing above uses would flip its swing
+ * direction on the face it was not computed for, which is wrong rather than
+ * merely reversed: a leaf only physically exists on the one side of the wall
+ * it swings into. This function places it directly against ITS room, once,
+ * negating `turn` (and only `turn`; the along-axis mapping never changes)
+ * when that room is on the wall's high side -- the axis flip on `across`
+ * that the high-side placement needs inverts handedness, and a rotation
+ * composed with a single-axis reflection is that same rotation negated. See
+ * geo/trim.ts's own header for the swing geometry this starts from.
+ *
+ * A SECOND CORRECTION, AND IT IS THE ONE THAT MATTERS FOR MOST OF THIS SUITE'S
+ * DOORS. For an alongV band (dv >= du, the shape of the long partition every
+ * hall door pierces), this file's own convention swaps du/dv AND swaps which
+ * of (along, across) becomes suite u versus suite v -- across maps to suite u
+ * there, along to suite v, the opposite of a !alongV band. Swapping which
+ * axis is first and which is second is a REFLECTION (determinant -1), not a
+ * rotation, and a symmetric part never shows it -- every other Slab in this
+ * file has no `turn`, so a mirrored box is indistinguishable from an
+ * unmirrored one. `doorLeafParts()`'s `turn` is not symmetric: it was derived
+ * in the (along, across) frame assuming no such mirror, and a rotation seen
+ * through a mirror is that rotation negated. So the alongV case needs `turn`
+ * negated to compensate, on top of (not instead of) the roomLow reflection
+ * above.
+ *
+ * NOT DERIVED FROM FIRST PRINCIPLES ALONE -- CALIBRATED AGAINST THE REAL
+ * TRANSFORM. An earlier version of this function guessed the compensation
+ * was a fixed -90 degree ROTATION rather than a SIGN FLIP, reasoning from
+ * "which suite axis does a box's local +X land on" rather than "which axis
+ * is this suite's actual long dimension for THIS box" -- both true facts, but
+ * the wrong one to reason from, and it passed no test because none existed
+ * yet. tests/suite-transform.test.ts's door-leaf block runs
+ * slabGeometry()'s own position+rotation transform on one real door of each
+ * kind this suite has (alongV true and false, target room on the low and
+ * high side of its band) and checks in WORLD space, which is the one frame
+ * every quantity here is unambiguously already in -- no inverse transform,
+ * which is its own trap (see that file's header for the one this exposed).
+ *
+ * `openings` is walked directly rather than through the merged `Cut[]`
+ * cutsFor() builds, because a Cut has already lost the one thing a leaf
+ * needs and casing does not: which two rooms this specific opening connects.
+ */
+export function doorLeafSlabs(
+  walls: Wall[],
+  openings: Opening[],
+  rooms: Rect[],
+  floor: number,
+  wallH: number,
+  hidden: ReadonlySet<string>,
+  openDeg?: number,
+): Slab[] {
+  const byId = new Map(rooms.map((r) => [r.id, r]));
+  const out: Slab[] = [];
+  for (const o of openings) {
+    if (o.kind !== "door") continue;
+    const target = byId.get(o.connects[1] ?? "");
+    if (!target) continue; // "outside", or any id this suite has not modelled
+    const w = walls.find((x) => x.id === o.wallId);
+    // A hidden wall is not drawn -- see the note on the main wall loop in
+    // buildSuiteGeometry() -- and its leaf goes with it, for the same reason:
+    // a leaf hanging in a doorway whose jamb has been cut away is a leaf with
+    // nothing to hinge from.
+    if (!w || hidden.has(w.id)) continue;
+    const { alongV, thick } = bandAxis(w);
+    const low = alongV ? w.u : w.v;
+    const doorH = Math.min(wallH, DOOR_H);
+    const roomLow = roomIsOnLowSide(w, target);
+    for (const p of doorLeafParts(o.width, doorH, "low", openDeg)) {
+      const localU = p.u + o.offset;
+      // Same reflection sashSlabs()/roomTrimSlabs() use for the high-side face:
+      // `low+thick-p.v-p.dv`, not `low+thick-p.v` -- the box's own local extent
+      // has to come out of the reflection too, or the leaf's CENTRE lands a
+      // half-thickness off (checked numerically, not just derived).
+      const across = roomLow ? low + p.v : low + thick - p.v - p.dv;
+      // `alongV` swaps not just du/dv but WHICH of (along, across) maps to
+      // (suite v, suite u) versus (suite u, suite v) -- a swap of which axis
+      // is first and which is second, which is a reflection (determinant -1),
+      // not a rotation. A rotation viewed through a mirror is that rotation
+      // negated, and `turn` was derived in the (along, across) frame assuming
+      // no such mirror -- so the alongV case needs it negated to compensate,
+      // on top of (not instead of) the roomLow face-reflection above. Found by
+      // calibration (tests/suite-transform.test.ts's door-leaf describe block
+      // runs the real transform end to end for one case of each kind), not by
+      // a derivation that could be trusted alone -- this is the second time
+      // today the algebra alone gave the wrong sign.
+      const faced = roomLow ? p.turn : -p.turn;
+      const turn = alongV ? faced : -faced;
+      out.push(
+        alongV
+          ? { u: across, v: w.v + localU, du: p.dv, dv: p.du, y0: floor + p.y0, y1: floor + p.y1, turn }
+          : { u: w.u + localU, v: across, du: p.du, dv: p.dv, y0: floor + p.y0, y1: floor + p.y1, turn },
+      );
+    }
+  }
+  return out;
 }
 
 /**
@@ -487,7 +651,15 @@ function buildSuiteGeometry(params: SuiteParams, hidden: ReadonlySet<string>): S
     const trim = roomTrimSlabs(w, cuts, suite.rooms, floor, wallH);
     sashJoinery.push(...trim.joinery);
     cornice.push(...trim.plaster);
+    // Threshold boards are oak, same as the floor either side of them, so they
+    // join the SAME merged geometry rather than opening a mesh of their own --
+    // the doorway reads as two rooms without costing a draw call for it.
+    oak.push(...thresholdSlabs(w, cuts, floor));
   }
+  // Walked once over every opening rather than inside the per-wall loop above:
+  // a leaf is chiral and needs the specific room it swings into, which a Cut
+  // no longer carries -- see doorLeafSlabs()'s own header.
+  sashJoinery.push(...doorLeafSlabs(walls, openings, suite.rooms, floor, wallH, hidden));
 
   /**
    * The ceiling sits at params.ceiling, which IS weld.json's
