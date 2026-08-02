@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { buildSuite, DEFAULT_PARAMS, type Rect } from "@/geo/rooms";
 import { buildWalls } from "@/geo/walls";
 import { suiteToThree, floorLevel } from "@/geo/place";
-import { suiteBasis, rectCentre, doorLeafSlabs, type Slab } from "@/scene/Suite";
+import { suiteBasis, rectCentre, doorLeafSlabs, cutsFor, bathWainscotSlab, type Slab } from "@/scene/Suite";
 import { pointInPolygon } from "@/geo/collide";
 import { fromThree } from "@/geo/frames";
 import weld from "@/data/weld.json";
@@ -301,3 +301,103 @@ describe("door leaf placement in the world", () => {
     });
   }
 });
+
+/**
+ * bathWainscotSlab() places an axis-aligned, non-rotated proud box -- unlike
+ * the leaf above, there is no chirality here to get wrong, but the placement
+ * formula was still wrong once: an earlier version added WAINSCOT_PROUD a
+ * second time on the high-side (far) face, which stood the whole dado a
+ * half-inch clear of the wall instead of flush against it. Checked against
+ * every wall the bathroom actually touches, both sides represented.
+ */
+describe("bathroom wainscot placement", () => {
+  const params = DEFAULT_PARAMS;
+  const suite = buildSuite(params);
+  const { walls, openings } = buildWalls(suite);
+  const floor = floorLevel(1);
+  const wallH = params.ceiling;
+  const bath = suite.rooms.find((r) => r.kind === "bath")!;
+
+  function slabsForWall(w: (typeof walls)[number]): Slab[] {
+    const cuts = cutsFor(w, openings, wallH);
+    return bathWainscotSlab(w, cuts, bath, floor);
+  }
+
+  const bathWalls = walls.filter((w) => w.between.includes("bath"));
+
+  it("touches at least one wall on the bathroom's low side and one on its high side", () => {
+    // The bath is an interior room with walls on all four sides (rooms.ts:
+    // no windows, entered from the hall) -- confirms this fixture exercises
+    // both branches of the mirror formula, not just one.
+    const sides = bathWalls.map((w) => {
+      const alongV = w.dv >= w.du;
+      const mid = alongV ? w.u + w.du / 2 : w.v + w.dv / 2;
+      const centre = alongV ? bath.u + bath.du / 2 : bath.v + bath.dv / 2;
+      return centre <= mid;
+    });
+    expect(sides.some((s) => s), "no wall with the bath on its low side").toBe(true);
+    expect(sides.some((s) => !s), "no wall with the bath on its high side").toBe(true);
+  });
+
+  it("stands every board flush with its wall face and proud into the bathroom, never into the wall or past it", () => {
+    for (const w of bathWalls) {
+      const { alongV, thick } = bandAxis_forTest(w);
+      const low = alongV ? w.u : w.v;
+      for (const s of slabsForWall(w)) {
+        const acrossExtent = alongV ? s.du : s.dv;
+        const acrossLo = alongV ? s.u : s.v;
+        expect(acrossExtent).toBeCloseTo(WAINSCOT_PROUD_forTest, 9);
+        // Flush with one of the band's two faces (low or low+thick), not
+        // offset from it -- this is exactly the bug that shipped once.
+        const flushLow = Math.abs(acrossLo + acrossExtent - low) < 1e-9;
+        const flushHigh = Math.abs(acrossLo - (low + thick)) < 1e-9;
+        expect(flushLow || flushHigh, `wall ${w.id}: board not flush (across ${acrossLo})`).toBe(true);
+        expect(s.y1 - s.y0).toBeCloseTo(4.0, 9); // WAINSCOT_H
+        expect(s.y0).toBe(floor);
+        expect(s.du).toBeGreaterThan(0);
+        expect(s.dv).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("breaks for the doorway, the same way the baseboard does", () => {
+    const doorWall = bathWalls.find((w) =>
+      openings.some((o) => o.kind === "door" && o.wallId === w.id),
+    );
+    expect(doorWall, "no door found on a bathroom wall").toBeDefined();
+    const slabs = slabsForWall(doorWall!);
+    const { alongV, along } = bandAxis_forTest(doorWall!);
+    const covered = slabs.reduce((sum, s) => sum + (alongV ? s.dv : s.du), 0);
+    expect(covered, "wainscot ran the full wall, ignoring the door").toBeLessThan(along);
+  });
+
+  it("touches no other room's floor", () => {
+    // Every board's across-position must sit within [low - eps, low+thick +
+    // eps] plus the WAINSCOT_PROUD it stands proud by -- i.e. it never
+    // reaches more than WAINSCOT_PROUD past either wall face.
+    for (const w of bathWalls) {
+      const { alongV, thick } = bandAxis_forTest(w);
+      const low = alongV ? w.u : w.v;
+      for (const s of slabsForWall(w)) {
+        const acrossLo = alongV ? s.u : s.v;
+        const acrossExtent = alongV ? s.du : s.dv;
+        expect(acrossLo).toBeGreaterThanOrEqual(low - WAINSCOT_PROUD_forTest - 1e-9);
+        expect(acrossLo + acrossExtent).toBeLessThanOrEqual(low + thick + WAINSCOT_PROUD_forTest + 1e-9);
+      }
+    }
+  });
+});
+
+/** Local re-derivation of bandAxis()'s two fields this test needs -- that
+ *  function is Suite.tsx's own private helper and not worth exporting for a
+ *  test that only reads two of its outputs off the same Wall shape. */
+function bandAxis_forTest(w: { u: number; v: number; du: number; dv: number }) {
+  const alongV = w.dv >= w.du;
+  return { alongV, along: alongV ? w.dv : w.du, thick: alongV ? w.du : w.dv };
+}
+
+/** Matches Suite.tsx's own WAINSCOT_PROUD -- duplicated for the same reason
+ *  furniture.ts's DOOR_CLEARANCE note gives: a value this test checks against
+ *  is not a dependency it should import, since the whole point is to catch a
+ *  drift between the implementation and what the number is supposed to be. */
+const WAINSCOT_PROUD_forTest = 0.05;

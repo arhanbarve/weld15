@@ -196,7 +196,7 @@ function mergeSlabs(
 }
 
 /** A void cut through a wall band: a span along its length and a vertical range. */
-type Cut = { lo: number; hi: number; y0: number; y1: number };
+export type Cut = { lo: number; hi: number; y0: number; y1: number };
 
 /**
  * Which way a band runs, how long it is, and how thick.
@@ -227,7 +227,7 @@ function spanRect(w: Wall, lo: number, hi: number, alongV: boolean) {
  * Doors and windows are merged separately -- they have different heads, and a
  * door merged into a window would acquire a sill.
  */
-function cutsFor(w: Wall, openings: Opening[], wallH: number): Cut[] {
+export function cutsFor(w: Wall, openings: Opening[], wallH: number): Cut[] {
   const { along } = bandAxis(w);
   const raw: (Cut & { kind: Opening["kind"] })[] = [];
 
@@ -446,6 +446,46 @@ function roomIsOnLowSide(w: Wall, room: Rect): boolean {
   return centre <= mid;
 }
 
+/** Wainscot height, ft: an ordinary tile dado. ASSUMED, no source. */
+const WAINSCOT_H = 4.0;
+const WAINSCOT_PROUD = 0.05;
+
+/**
+ * A porcelain dado on one wall band's bathroom-facing side, floor to
+ * WAINSCOT_H, broken at the doorway exactly like the baseboard it stands in
+ * front of -- reusing the SAME door-cut solid spans, since a wainscot that
+ * ran across the opening would be tile floating in the doorway.
+ *
+ * Called once per wall FROM the main loop, with that wall's own already-built
+ * `cuts`, rather than as a second pass over every wall: the bathroom is one
+ * room, so this is one extra `if` in a loop that already runs, not a second
+ * loop that mostly finds nothing.
+ */
+export function bathWainscotSlab(w: Wall, cuts: Cut[], bath: Rect, floor: number): Slab[] {
+  if (!w.between.includes(bath.id)) return [];
+  const { alongV, along, thick } = bandAxis(w);
+  const low = alongV ? w.u : w.v;
+  const doorSpans = solidSpans(
+    cuts.filter((c) => c.y0 <= EPS),
+    along,
+  );
+  const roomLow = roomIsOnLowSide(w, bath);
+  // Same mirror as roomTrimSlabs()'s trimParts() placement: a proud part's low
+  // corner sits at `low - proud` on the room's own side, or flush at
+  // `low + thick` (NOT + proud again) on the far side -- checked numerically
+  // against that existing, already-shipped formula rather than re-derived.
+  const across = roomLow ? low - WAINSCOT_PROUD : low + thick;
+  const out: Slab[] = [];
+  for (const [lo, hi] of doorSpans) {
+    out.push(
+      alongV
+        ? { u: across, v: w.v + lo, du: WAINSCOT_PROUD, dv: hi - lo, y0: floor, y1: floor + WAINSCOT_H }
+        : { u: w.u + lo, v: across, du: hi - lo, dv: WAINSCOT_PROUD, y0: floor, y1: floor + WAINSCOT_H },
+    );
+  }
+  return out;
+}
+
 /**
  * The hung-open leaf for every door opening whose swing target is a real,
  * modelled room -- which today is every interior door; the suite's own entry
@@ -617,6 +657,8 @@ type SuiteGeometry = {
   glazing: THREE.BufferGeometry | null;
   cornice: THREE.BufferGeometry | null;
   ceiling: THREE.BufferGeometry | null;
+  /** The bathroom's tile floor and porcelain wainscot, merged as one mesh. */
+  tile: THREE.BufferGeometry | null;
   yaw: number;
 };
 
@@ -634,6 +676,7 @@ function buildSuiteGeometry(params: SuiteParams, hidden: ReadonlySet<string>): S
   const oak: Slab[] = [];
   const bare: Slab[] = [];
   const mark: Slab[] = [];
+  const tile: Slab[] = [];
   for (const r of suite.rooms) {
     const slab: Slab = {
       u: r.u,
@@ -646,11 +689,17 @@ function buildSuiteGeometry(params: SuiteParams, hidden: ReadonlySet<string>): S
     if (r.kind === "unknown") {
       bare.push(slab);
       mark.push(...unknownMarkSlabs(r, floor));
+    } else if (r.kind === "bath") {
+      // Ceramic, not oak boards -- no `boards: true`, since scaleFloorUv()'s
+      // per-face grain scaling is an oak-floor concern and porcelain has no
+      // grain map to scale.
+      tile.push(slab);
     } else {
       oak.push({ ...slab, boards: true });
     }
   }
 
+  const bath = suite.rooms.find((r) => r.kind === "bath");
   const partitions: Slab[] = [];
   const masonry: Slab[] = [];
   const sashJoinery: Slab[] = [];
@@ -676,6 +725,7 @@ function buildSuiteGeometry(params: SuiteParams, hidden: ReadonlySet<string>): S
     // join the SAME merged geometry rather than opening a mesh of their own --
     // the doorway reads as two rooms without costing a draw call for it.
     oak.push(...thresholdSlabs(w, cuts, floor));
+    if (bath) tile.push(...bathWainscotSlab(w, cuts, bath, floor));
   }
   // Walked once over every opening rather than inside the per-wall loop above:
   // a leaf is chiral and needs the specific room it swings into, which a Cut
@@ -723,6 +773,7 @@ function buildSuiteGeometry(params: SuiteParams, hidden: ReadonlySet<string>): S
     glazing: mergeSlabs(glazing, yaw, params, "glazing"),
     cornice: mergeSlabs(cornice, yaw, params, "cornice"),
     ceiling: mergeSlabs(ceiling, yaw, params, "ceiling"),
+    tile: mergeSlabs(tile, yaw, params, "bathroom tile"),
     yaw,
   };
 }
@@ -753,6 +804,7 @@ function useSuitePalette(opacity: number) {
       masonry: m.masonry.clone(),
       glazing: m.glazing.clone(),
       slate: m.slate.clone(),
+      porcelain: m.porcelain.clone(),
     };
     // Every face here is seen from inside a room. FrontSide culls all of them.
     for (const x of Object.values(p)) x.side = THREE.DoubleSide;
@@ -946,6 +998,7 @@ export function Suite({
         <mesh geometry={geo.unknownFloor} material={pal.masonry} receiveShadow={solid} />
       ) : null}
       {geo.unknownMark ? <mesh geometry={geo.unknownMark} material={pal.slate} /> : null}
+      {geo.tile ? <mesh geometry={geo.tile} material={pal.porcelain} receiveShadow={solid} /> : null}
       {geo.partitions ? (
         <mesh geometry={geo.partitions} material={pal.plaster} receiveShadow={solid} />
       ) : null}

@@ -93,6 +93,18 @@ const GRANITE = scale(DAY.edge, 0.55);
 export const MASONRY = { brick: BRICK, slate: SLATE, sandstone: SANDSTONE, granite: GRANITE } as const;
 
 /**
+ * Bathroom tile and sanitary ware (P14). No source gives Weld 15's bathroom a
+ * single fact -- rooms.ts's own header calls it interior and windowless and
+ * leaves the rest unstated -- so this is one documented operation on two DAY
+ * tokens, the same convention BRICK/SLATE/SANDSTONE/GRANITE already use
+ * rather than an invented hex: `plaster` cooled a fifth of the way toward
+ * `edge`, the palette's only mineral grey. Ceramic reads cooler and harder
+ * than a trowelled wall; the low roughness below (0.2 against plaster's 0.88)
+ * carries the rest of that difference.
+ */
+const PORCELAIN = mix(DAY.plaster, DAY.edge, 0.2);
+
+/**
  * Nominal oak board width, ft.
  *
  * No source in the project gives one: not weld.json, not the 1875 specification,
@@ -407,6 +419,7 @@ export type Palette = {
   slate: THREE.MeshStandardMaterial;
   brick: THREE.MeshStandardMaterial;
   hardware: THREE.MeshStandardMaterial;
+  porcelain: THREE.MeshStandardMaterial;
 };
 
 let cache: Palette | null = null;
@@ -535,7 +548,17 @@ export function materials(): Palette {
     metalness: 0.85,
   });
 
-  cache = { plaster, oak, masonry, glazing, crimson, oakDeep, slate, brick, hardware };
+  // Glazed tile and sanitary porcelain: smooth enough to hold a highlight,
+  // nowhere near glass. No normal map -- ceramic's own tooth is finer than
+  // this project's texel budget can usefully carry, unlike plaster's trowel
+  // marks or oak's grain, both of which are the point of their own surface.
+  const porcelain = new THREE.MeshStandardMaterial({
+    color: PORCELAIN,
+    roughness: 0.2,
+    metalness: 0,
+  });
+
+  cache = { plaster, oak, masonry, glazing, crimson, oakDeep, slate, brick, hardware, porcelain };
   return cache;
 }
 

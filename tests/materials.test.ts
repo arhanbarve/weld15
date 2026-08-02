@@ -456,7 +456,7 @@ describe("headless, where vitest and any SSR pass live", () => {
 // ------------------------------------------------------------------- palette
 
 describe("palette", () => {
-  it("returns exactly the nine keys in the contract", () => {
+  it("returns exactly the ten keys in the contract", () => {
     expect(Object.keys(materials()).sort()).toEqual([
       "brick",
       "crimson",
@@ -466,6 +466,7 @@ describe("palette", () => {
       "oak",
       "oakDeep",
       "plaster",
+      "porcelain",
       "slate",
     ]);
   });
@@ -581,6 +582,21 @@ describe("palette", () => {
     }
   });
 
+  it("makes porcelain darker and glossier than plaster, not a copy of it", () => {
+    const m = materials();
+    expect(hexOf(m.porcelain.color)).not.toBe(hexOf(m.plaster.color));
+    // Pulled toward `edge`, the palette's only mineral grey and darker than
+    // plaster, so porcelain reads as cooler ceramic rather than more wall.
+    const lum = (c: THREE.Color) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+    expect(lum(m.porcelain.color)).toBeLessThan(lum(m.plaster.color));
+    // Glazed tile holds a highlight; trowelled plaster does not.
+    expect(m.porcelain.roughness).toBeLessThan(m.plaster.roughness);
+    expect(m.porcelain.metalness).toBe(0);
+    for (const [k, v] of Object.entries(SCAN)) {
+      expect(hexOf(m.porcelain.color), `porcelain took the ${k} token`).not.toBe(v.toLowerCase());
+    }
+  });
+
   it("disposes every material, the grain texture and the plaster tooth, then rebuilds fresh", () => {
     const first = withStubCanvas(() => materials()).value;
     const grain = oakNormalMap();
@@ -604,6 +620,7 @@ describe("palette", () => {
       "oak",
       "oakDeep",
       "plaster",
+      "porcelain",
       "slate",
       "tooth",
     ]);
