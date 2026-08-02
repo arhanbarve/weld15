@@ -3,7 +3,18 @@ import * as THREE from "three";
 import { buildSuite, DEFAULT_PARAMS, type Rect } from "@/geo/rooms";
 import { buildWalls } from "@/geo/walls";
 import { suiteToThree, floorLevel } from "@/geo/place";
-import { suiteBasis, rectCentre, doorLeafSlabs, cutsFor, bathWainscotSlab, type Slab } from "@/scene/Suite";
+import {
+  suiteBasis,
+  rectCentre,
+  doorLeafSlabs,
+  cutsFor,
+  bathWainscotSlab,
+  applyAoColor,
+  aoSegments,
+  AO_DEPTH_FT,
+  AO_MIN,
+  type Slab,
+} from "@/scene/Suite";
 import { pointInPolygon } from "@/geo/collide";
 import { fromThree } from "@/geo/frames";
 import weld from "@/data/weld.json";
@@ -385,6 +396,97 @@ describe("bathroom wainscot placement", () => {
         expect(acrossLo + acrossExtent).toBeLessThanOrEqual(low + thick + WAINSCOT_PROUD_forTest + 1e-9);
       }
     }
+  });
+});
+
+describe("baked ambient occlusion (applyAoColor)", () => {
+  /** Exactly what slabGeometry() builds, segments included -- BoxGeometry's plain
+   *  24-vertex form has every vertex at a corner (all three local coordinates
+   *  pinned to that axis's own half-extent), so a distance-to-edge read off it is
+   *  zero everywhere; aoSegments() is what gives an interior vertex to read a
+   *  gradient from at all, and building it any other way here would test a shape
+   *  slabGeometry() never actually produces. */
+  const boxFor = (s: Slab) => {
+    const height = s.y1 - s.y0;
+    return new THREE.BoxGeometry(s.du, height, s.dv, aoSegments(s.du), aoSegments(height), aoSegments(s.dv));
+  };
+
+  const colorsOf = (g: THREE.BufferGeometry) => Array.from({ length: g.getAttribute("color").count }, (_, i) => g.getAttribute("color").getX(i));
+
+  it("adds a color attribute sized to match position", () => {
+    const s: Slab = { u: 0, v: 0, du: 4, dv: 3, y0: 0, y1: 1 };
+    const g = boxFor(s);
+    expect(g.hasAttribute("color")).toBe(false);
+    applyAoColor(g, s);
+    expect(g.hasAttribute("color")).toBe(true);
+    expect(g.getAttribute("color").count).toBe(g.getAttribute("position").count);
+  });
+
+  it("stays within [AO_MIN, 1] and is grayscale (r = g = b)", () => {
+    const s: Slab = { u: 0, v: 0, du: 4, dv: 3, y0: 0, y1: 8 };
+    const g = boxFor(s);
+    applyAoColor(g, s);
+    const color = g.getAttribute("color");
+    for (let i = 0; i < color.count; i++) {
+      const r = color.getX(i);
+      expect(r).toBeGreaterThanOrEqual(AO_MIN - 1e-9);
+      expect(r).toBeLessThanOrEqual(1 + 1e-9);
+      expect(color.getY(i)).toBeCloseTo(r, 9);
+      expect(color.getZ(i)).toBeCloseTo(r, 9);
+    }
+  });
+
+  it("darkens a small box (every axis at or under AO_SEG_MIN_FT) toward AO_MIN uniformly", () => {
+    // Every axis this small gets exactly 1 segment (aoSegments()'s own threshold),
+    // so the box is 8 plain corner vertices with no interior point on any axis --
+    // the degenerate case the header's own comment on thin trim/casing predicts,
+    // and the reason a "small box" needs no segments at all to render correctly.
+    const thin = AO_DEPTH_FT * 1.5;
+    const s: Slab = { u: 0, v: 0, du: thin, dv: thin, y0: 0, y1: thin };
+    expect(aoSegments(thin)).toBe(1);
+    const g = boxFor(s);
+    applyAoColor(g, s);
+    for (const c of colorsOf(g)) expect(c).toBeCloseTo(AO_MIN, 6);
+  });
+
+  it("brightens toward the interior of a large box, away from every edge", () => {
+    const big = 10;
+    const s: Slab = { u: 0, v: 0, du: big, dv: big, y0: 0, y1: big };
+    expect(aoSegments(big)).toBeGreaterThan(1);
+    const g = boxFor(s);
+    applyAoColor(g, s);
+    const colors = colorsOf(g);
+    // Every box has at least one true corner (AO_MIN, exactly) and, once its axes
+    // clear AO_SEG_MIN_FT, at least one interior vertex genuinely brighter than
+    // that -- the two ends of the range this function promises, read off the
+    // built geometry rather than assumed.
+    expect(Math.min(...colors)).toBeCloseTo(AO_MIN, 6);
+    expect(Math.max(...colors)).toBeGreaterThan(AO_MIN + (1 - AO_MIN) * 0.9);
+  });
+
+  it("excludes a box's own thinnest axis, so a large thin floor still brightens toward its middle", () => {
+    // A floor slab: thin in height (a few inches), wide in u and v. Folding height
+    // into the same min() as u/v would pin every vertex to the top or bottom face
+    // regardless of where it sits in the room and zero the gradient everywhere --
+    // this is the test that would have caught that mistake.
+    const s: Slab = { u: 0, v: 0, du: 12, dv: 12, y0: 0, y1: 0.3 };
+    const g = boxFor(s);
+    applyAoColor(g, s);
+    expect(Math.max(...colorsOf(g))).toBeCloseTo(1, 6);
+  });
+
+  it("is not idempotent, matching scaleFloorUv()'s own contract -- called exactly once, before merge", () => {
+    // A second call sees the SAME position attribute (applyAoColor reads position,
+    // not the previous color), so it recomputes an identical result rather than
+    // compounding -- unlike scaleFloorUv's multiply-in-place, but still a function
+    // whose contract is "once, on a fresh geometry", per its own header.
+    const s: Slab = { u: 0, v: 0, du: 4, dv: 3, y0: 0, y1: 2 };
+    const g = boxFor(s);
+    applyAoColor(g, s);
+    const first = colorsOf(g);
+    applyAoColor(g, s);
+    const second = colorsOf(g);
+    expect(second).toEqual(first);
   });
 });
 
