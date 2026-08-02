@@ -23,11 +23,12 @@ import {
   type Orbit,
 } from "@/scene/orbit";
 import { pointInPolygon } from "@/geo/collide";
-import { fromThree } from "@/geo/frames";
+import { fromThree, siteToBuilding, type Building } from "@/geo/frames";
 import { cameraInSuite } from "@/scene/cutaway";
 import { clearance, insideSuite, walkContext, EYE, type Vec2 } from "@/scene/walk";
 import { HUB, standingPose } from "@/scene/route";
 import { floorLevel, suiteToThree, WELD } from "@/geo/place";
+import { loggiaFootprint, suiteEntryStandingPositions } from "@/geo/common";
 import weld from "@/data/weld.json";
 import type { StageId } from "@/state/store";
 import { paramsSweep } from "./journey.test";
@@ -103,15 +104,35 @@ describe("keyframes", () => {
     expect(kf[5].target[2]).toBe(target[2]);
   });
 
-  it("moves the threshold keyframe when the room it aims at moves", () => {
-    // Proves stages.ts is parametric rather than holding baked numbers.
-    //
-    // Note which param: NOT sectionLength. The threshold is anchored to the
-    // gable, and the gable does not move when the section gets longer -- the
-    // section extends southward instead. An earlier version of this test used
-    // sectionLength and was asserting a bug rather than a feature.
-    const deeper = keyframes({ ...DEFAULT_PARAMS, bedDepth: 20 });
-    expect(dist(deeper[4].position, kf[4].position)).toBeGreaterThan(1);
+  it("holds kf[4]'s own position fixed against every suite param -- it is the building's loggia, not a suite room", () => {
+    // P14 row 7 moved kf[4] from bedroom B's own centreline (a suite room,
+    // hence parametric in the room's own dimensions) to the loggia's west
+    // wall (fixed building geometry, geo/common.ts, no suite param at all).
+    // The OLD version of this test asserted the opposite -- that kf[4] DID
+    // move with a room dimension -- which was the right check for the OLD
+    // anchor and is now exactly backwards for the new one.
+    for (const patch of [{ bedDepth: 20 }, { sectionLength: 50 }, { commonAlong: 18 }, { hallWidth: 3 }]) {
+      const moved = keyframes({ ...DEFAULT_PARAMS, ...patch });
+      expect(dist(moved[4].position, kf[4].position), JSON.stringify(patch)).toBeLessThan(0.01);
+    }
+  });
+
+  it("still moves the LATER stops of kf[4]'s own path when the entry's position moves", () => {
+    // The exterior anchor is fixed (see above), but the path's own approach
+    // into the suite is not decoration: its last two stops (just outside,
+    // then just inside, the suite's real entry door) have to track wherever
+    // that door actually is, or the flight would land in the wrong place
+    // relative to what P14 row 6 built there. commonAlong shifts the hall's
+    // own v (hallV0 = commonAlong + partition), which is what buildOpenings()
+    // measures the entry's offset from.
+    const moved = keyframes({ ...DEFAULT_PARAMS, commonAlong: 18 });
+    const a = kf[4].path!;
+    const b = moved[4].path!;
+    expect(a.length).toBe(b.length);
+    const lastTwo = [a.length - 1, a.length - 2];
+    for (const i of lastTwo) {
+      expect(dist(a[i]!.frame.position, b[i]!.frame.position), `stop ${i}`).toBeGreaterThan(1);
+    }
   });
 
   it("leaves the threshold keyframe alone when the section lengthens", () => {
@@ -396,6 +417,11 @@ describe("the threshold path", () => {
   /** A world position back in the suite's own frame. cutaway.ts's inverse, not a second one. */
   const inSuite = (p: readonly number[]): Vec2 =>
     cameraInSuite([p[0]!, p[1]!, p[2]!], params);
+  /** A world position back in the BUILDING frame -- frames.ts's own two-step inverse of
+   * buildingToThree(), for waypoints (the loggia, the stair hall, the corridor) that have
+   * no suite-frame meaning at all. */
+  const inBuilding = (p: readonly number[]): Building =>
+    siteToBuilding(fromThree([p[0]!, p[1]!, p[2]!]));
   const roomAt = (p: Vec2) =>
     suite.rooms.find(
       (r) => p.u >= r.u && p.u <= r.u + r.du && p.v >= r.v && p.v <= r.v + r.dv,
@@ -423,8 +449,10 @@ describe("the threshold path", () => {
       expect(kf[s].path, `stage ${s} must be a place, not a path`).toBeUndefined();
     }
     const stops = kf[4].path!;
-    // Outside the gable, the crossing, and route()'s four interior waypoints.
-    expect(stops.length).toBe(6);
+    // four, the loggia's own outer arch, the loggia's centre, the stair hall's centre
+    // (where the climb happens), the corridor's two ends, just inside the suite's own
+    // entry, and five -- 8 stops in total.
+    expect(stops.length).toBe(8);
     expect(stops[0]!.at).toBe(0);
     expect(stops[stops.length - 1]!.at).toBe(1);
     for (let i = 1; i < stops.length; i++) {
@@ -438,19 +466,23 @@ describe("the threshold path", () => {
     expect(cameraKeyframe(kf, 4, 1).position).toEqual(kf[5].position);
   });
 
-  it("crosses the plane of the gable exactly when the brick has gone", () => {
+  it("crosses the plane of the loggia's own outer arch exactly when the brick has gone", () => {
     // One number, two things: thresholdOpacity's shell ramp reaches zero at SHELL_GONE
-    // and the path's second waypoint sits on the gable's interior face. A camera on the
-    // far side of masonry that is still being drawn reads as a glitch.
+    // and the path's second waypoint sits on the loggia's own outer (west) wall -- the
+    // BUILDING-frame equivalent of the old gable-face crossing, since the loggia is a
+    // building fixture with no suite-frame meaning at all. A camera on the far side of
+    // masonry that is still being drawn reads as a glitch.
     expect(thresholdOpacity(4, SHELL_GONE).shell).toBeCloseTo(0, 9);
-    const here = inSuite(cameraKeyframe(kf, 4, SHELL_GONE).position);
-    expect(here.v).toBeCloseTo(params.sectionLength, 6);
-    // Before it, outside the suite; after it, inside.
-    expect(insideSuite(inSuite(cameraKeyframe(kf, 4, SHELL_GONE - 0.01).position), ctx)).toBe(
-      false,
+    const loggia = loggiaFootprint(0);
+    const here = inBuilding(cameraKeyframe(kf, 4, SHELL_GONE).position);
+    expect(here.u).toBeCloseTo(loggia.u, 6);
+    // Before it, still outside the loggia's own footprint; after it, inside (in u --
+    // the crossing is a west-facing wall, so u is the axis that moves across it).
+    expect(inBuilding(cameraKeyframe(kf, 4, SHELL_GONE - 0.01).position).u).toBeLessThan(
+      loggia.u,
     );
-    expect(insideSuite(inSuite(cameraKeyframe(kf, 4, SHELL_GONE + 0.01).position), ctx)).toBe(
-      true,
+    expect(inBuilding(cameraKeyframe(kf, 4, SHELL_GONE + 0.01).position).u).toBeGreaterThan(
+      loggia.u,
     );
   });
 
@@ -458,17 +490,19 @@ describe("the threshold path", () => {
     /*
      * The gate the whole phase is for, and the sampling is deliberate on both ends.
      *
-     * FROM the third stop, which is route()'s first waypoint -- the centre of bedroom B.
-     * Everything before it is the crossing itself: the camera is coming through the
-     * gable masonry on purpose, and inside a 1.5 ft band a clearance is negative by
-     * definition. So what is asserted is the part of the path that is a WALK.
+     * FROM the seventh stop (index 6), "insideEntry" -- the first waypoint that is
+     * actually back inside the suite's own collision-modelled footprint. Everything
+     * before it is the loggia, the stair hall and the corridor, all building-frame
+     * fixtures with no suite wall-clearance data of their own, so insideSuite()/
+     * clearance() have nothing meaningful to say about them. So what is asserted is the
+     * part of the path that is a WALK through the suite's own hall.
      *
      * Every 0.0002 of t, which is 1,190 samples over that stretch, because the failure
      * being guarded against is a couple of frames wide -- the recorded one was at a
      * single value of the slider.
      */
     const stops = kf[4].path!;
-    const from = stops[2]!.at;
+    const from = stops[6]!.at;
     let worst = Infinity;
     let worstAt = { t: 0, p: { u: 0, v: 0 } as Vec2 };
     for (let t = from; t <= 1.0001; t += 0.0002) {
@@ -480,10 +514,11 @@ describe("the threshold path", () => {
         worstAt = { t, p };
       }
     }
-    // MEASURED: +0.442 ft at (17.68, 37.66), which is the doorway crossing -- the camera
-    // centre passes 1.19 ft from the nearer jamb of a 3 ft door. The bound is 0 rather
-    // than the measured figure so that a slider that narrows the door does not fail this
-    // for being a different suite, and the number is in the message when it does.
+    // MEASURED: +0.250 ft at (20.00, 18.10), which is the suite's own entry doorway --
+    // the last stretch of the corridor-to-hall leg passes close by the jamb on the way
+    // in. The bound is 0 rather than the measured figure so that a slider that narrows
+    // the door does not fail this for being a different suite, and the number is in the
+    // message when it does.
     expect(
       worst,
       `worst clearance ${worst.toFixed(3)} ft at t=${worstAt.t.toFixed(4)}, ` +
@@ -505,9 +540,10 @@ describe("the threshold path", () => {
      * centre passes 0.396 ft from that band, inside the 0.5 near plane, which is the
      * defect stages.ts recorded, reproduced from a shipped control.
      *
-     * Measured over the part of the line more than a foot south of the gable's interior
-     * face, so that what is being measured is a partition and not the wall the camera is
-     * deliberately coming through.
+     * Measured over the part of the straight line that is actually inside the suite's
+     * own footprint at all -- insideSuite() itself is the filter now, rather than a
+     * sectionLength-based heuristic, since kf[4] sits out at the loggia, nowhere near
+     * suite-frame v at all, and a v-based cutoff no longer has anything to anchor to.
      */
     const narrow = { ...DEFAULT_PARAMS, hallWidth: 3 };
     const nkf = keyframes(narrow);
@@ -517,17 +553,18 @@ describe("the threshold path", () => {
       for (let t = 0; t <= 1.0001; t += 0.0002) {
         const at = blend(k[4], k[5], t).position;
         const q = cameraInSuite([at[0]!, at[1]!, at[2]!], p);
-        if (!insideSuite(q, c) || q.v > p.sectionLength - 1) continue;
+        if (!insideSuite(q, c)) continue;
         worst = Math.min(worst, clearance(q, c));
       }
       return worst;
     };
     expect(straightWorst(narrow, nkf, nctx), "the straight line still fails").toBeLessThan(0);
     // The routed path at the same params does not, so what changed is the path and not
-    // the suite.
+    // the suite. Sampled from stop 6 ("insideEntry") onward, matching the previous
+    // test's own start point -- the first stop actually back inside the suite.
     const stops = nkf[4].path!;
     let routed = Infinity;
-    for (let t = stops[2]!.at; t <= 1.0001; t += 0.0002) {
+    for (let t = stops[6]!.at; t <= 1.0001; t += 0.0002) {
       const at = cameraKeyframe(nkf, 4, Math.min(1, t)).position;
       routed = Math.min(routed, clearance(cameraInSuite([at[0]!, at[1]!, at[2]!], narrow), nctx));
     }

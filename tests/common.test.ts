@@ -10,11 +10,12 @@ import {
   stairSteps,
   corridorFootprint,
   suiteEntryBuildingV,
+  suiteEntryStandingPositions,
   FLOOR_TO_FLOOR_FT,
 } from "@/geo/common";
 import { DEFAULT_PARAMS, buildSuite } from "@/geo/rooms";
 import { buildWalls } from "@/geo/walls";
-import { GABLE_INNER_V } from "@/geo/place";
+import { GABLE_INNER_V, CLEAR_HALF_U } from "@/geo/place";
 import weld from "@/data/weld.json";
 
 const EPS = 1e-6;
@@ -196,5 +197,45 @@ describe("the spine corridor", () => {
     const corridor = corridorFootprint(suiteEntryBuildingV(DEFAULT_PARAMS), 12);
     expect(corridor.dv).toBeGreaterThan(5);
     expect(corridor.dv).toBeLessThan(40);
+  });
+});
+
+describe("the entry's standing positions", () => {
+  it("puts the hall side and corridor side one standoff clear of each of the wall's own two faces", () => {
+    const { hallSide, corridorSide } = suiteEntryStandingPositions(DEFAULT_PARAMS);
+    // hallSide is suite-frame; convert corridorSide (building-frame) back
+    // through suiteToBuilding's own inverse (place.ts's formula, re-derived
+    // here rather than imported, so this checks the actual relationship
+    // rather than reusing the same code path suiteEntryStandingPositions()
+    // itself used) to compare both sides in ONE frame.
+    const east = DEFAULT_PARAMS.facade === "east";
+    const corridorAsSuiteU = east ? CLEAR_HALF_U - corridorSide.u : corridorSide.u + CLEAR_HALF_U;
+    // The two standoffs are measured from the wall's own two faces, which
+    // are the wall's thickness (0.5 ft here) apart -- so the u distance
+    // between the two standing positions is 2 * standoff (1 ft) PLUS that
+    // thickness, not 2 ft on its own. The suite's own wall thickness is a
+    // param (params.partition), so it is read from the suite's own wall
+    // rather than assumed.
+    const suite = buildSuite(DEFAULT_PARAMS);
+    const { walls, openings } = buildWalls(suite);
+    const entry = openings.find((o) => o.kind === "door" && o.connects[1] === "outside")!;
+    const wall = walls.find((w) => w.id === entry.wallId)!;
+    expect(Math.abs(corridorAsSuiteU - hallSide.u)).toBeCloseTo(2 + wall.du, 6);
+  });
+
+  it("agrees with corridorFootprint()'s own entryV on where the corridor side sits", () => {
+    const { corridorSide } = suiteEntryStandingPositions(DEFAULT_PARAMS);
+    const entryV = suiteEntryBuildingV(DEFAULT_PARAMS);
+    expect(corridorSide.v).toBeCloseTo(entryV, 6);
+  });
+
+  it("puts the hall side inside the hall's own footprint", () => {
+    const suite = buildSuite(DEFAULT_PARAMS);
+    const hall = suite.rooms.find((r) => r.id === "hall")!;
+    const { hallSide } = suiteEntryStandingPositions(DEFAULT_PARAMS);
+    expect(hallSide.u).toBeGreaterThanOrEqual(hall.u);
+    expect(hallSide.u).toBeLessThanOrEqual(hall.u + hall.du);
+    expect(hallSide.v).toBeGreaterThanOrEqual(hall.v);
+    expect(hallSide.v).toBeLessThanOrEqual(hall.v + hall.dv);
   });
 });

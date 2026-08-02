@@ -37,7 +37,7 @@
 import weld from "@/data/weld.json";
 import type { Building } from "./frames";
 import { siteToBuilding } from "./frames";
-import { GABLE_INNER_V, WELD } from "./place";
+import { GABLE_INNER_V, CLEAR_HALF_U, WELD } from "./place";
 import type { SuiteParams } from "./rooms";
 import { buildSuite } from "./rooms";
 import { buildWalls } from "./walls";
@@ -215,28 +215,77 @@ export function corridorFootprint(entryV: number, floor: number): Box {
 }
 
 /**
- * The building-v of the suite's own entry door, for corridorFootprint()'s
- * `entryV`. Rebuilds the suite and its walls to find d4 -- the one opening
- * `buildOpenings()` (walls.ts) connects to "outside" -- and converts its
- * along-band position to a suite-v, then to building-v via suiteToBuilding()'s
- * own v formula (place.ts): `GABLE_INNER_V - (sectionLength - sv)`.
- *
- * NOT exported as a constant: it depends on params (hallWidth, sectionLength,
- * legDepth all move it), and the whole point of measuring it here rather than
- * assuming the section boundary is that a slider can move it.
+ * The suite's own entry opening (d4), and the wall it sits in. Rebuilds the
+ * suite and its walls to find it -- the one opening `buildOpenings()`
+ * (walls.ts) connects to "outside" -- shared by suiteEntryBuildingV() and
+ * suiteEntryStandingPositions() below so the lookup exists in one place.
  */
-export function suiteEntryBuildingV(params: SuiteParams): number {
+function findSuiteEntry(params: SuiteParams) {
   const suite = buildSuite(params);
   const { walls, openings } = buildWalls(suite);
   const entry = openings.find((o) => o.kind === "door" && o.connects[1] === "outside");
   if (!entry) throw new Error("common: no suite entry (hall -> outside) opening found");
   const wall = walls.find((w) => w.id === entry.wallId);
   if (!wall) throw new Error("common: entry opening names a wall that does not exist");
+  return { entry, wall };
+}
+
+/**
+ * The building-v of the suite's own entry door, for corridorFootprint()'s
+ * `entryV`. Converts the opening's along-band position to a suite-v, then to
+ * building-v via suiteToBuilding()'s own v formula (place.ts):
+ * `GABLE_INNER_V - (sectionLength - sv)`.
+ *
+ * NOT exported as a constant: it depends on params (hallWidth, sectionLength,
+ * legDepth all move it), and the whole point of measuring it here rather than
+ * assuming the section boundary is that a slider can move it.
+ */
+export function suiteEntryBuildingV(params: SuiteParams): number {
+  const { entry, wall } = findSuiteEntry(params);
   // The entry's wall is the hall's inner (party) wall, which runs along v (its
   // own dv is its length) -- so the opening's along-axis offset maps directly
   // onto suite v, the same way buildOpenings() itself measured it.
   const sv = wall.v + entry.offset + entry.width / 2;
   return GABLE_INNER_V - (params.sectionLength - sv);
+}
+
+/**
+ * Two standing positions either side of the suite's own entry door, one foot
+ * (RADIUS + STANDOFF_MARGIN, route.ts's own figures) clear of the jamb on
+ * each side -- the same construction route.ts's thresholdOf() uses for
+ * every OTHER doorway's standing positions, applied to the one doorway that
+ * function itself excludes ("the suite entry is excluded because 'outside'
+ * is not a room this model has"). `hallSide` is in the SUITE frame (it is
+ * standIn()-compatible with every other point stages.ts's threshold path
+ * already uses); `corridorSide` is in the BUILDING frame, since P14's
+ * corridor is modelled there and has no suite frame of its own.
+ */
+export function suiteEntryStandingPositions(params: SuiteParams): {
+  hallSide: { u: number; v: number };
+  corridorSide: Building;
+} {
+  const { entry, wall } = findSuiteEntry(params);
+  const standoff = 0.75 + 0.25; // RADIUS + STANDOFF_MARGIN, route.ts's own figures, duplicated for the reason this project's own DOOR_CLEARANCE note gives
+  const alongV = wall.dv >= wall.du;
+  const thinLo = alongV ? wall.u : wall.v;
+  const thinHi = alongV ? wall.u + wall.du : wall.v + wall.dv;
+  const along = (alongV ? wall.v : wall.u) + entry.offset + entry.width / 2;
+
+  // suite u is the across-axis here (alongV is true for this wall, per the
+  // earlier data dump: p12 runs along v, thin in u) -- the hall sits on the
+  // LOW side (suite u < the wall), "outside" on the high side.
+  const hallSide = alongV ? { u: thinLo - standoff, v: along } : { u: along, v: thinLo - standoff };
+  const outsideSuite = alongV ? { u: thinHi + standoff, v: along } : { u: along, v: thinHi + standoff };
+
+  const sv = along; // same quantity buildOpenings() and suiteEntryBuildingV() call `sv`
+  const buildingV = GABLE_INNER_V - (params.sectionLength - sv);
+  // outsideSuite.u is suite u, one unit outboard of the party wall -- convert
+  // through suiteToBuilding()'s own u formula (place.ts) so this point is
+  // exactly consistent with wherever the suite's own facade sits.
+  const east = params.facade === "east";
+  const buildingU = east ? CLEAR_HALF_U - outsideSuite.u : -CLEAR_HALF_U + outsideSuite.u;
+
+  return { hallSide, corridorSide: { u: buildingU, v: buildingV } };
 }
 
 /** Storeys above grade the stair hall's own floor sits at -- ground floor door hardware, one flight up. */
