@@ -342,7 +342,7 @@ type TilesProbe = {
   constructions: number;
   rootRequests: number;
   settled: boolean;
-  stats: { inCache: number } | null;
+  stats: { inCache: number; loaded: number } | null;
 };
 const tilesProbe = (page: Page) =>
   page.evaluate(() => (window as unknown as { __tiles?: TilesProbe }).__tiles);
@@ -361,9 +361,19 @@ test("tiles: exactly one root request per page load, and tiles settle within a r
   /**
    * MEASURED, ONE SESSION, THIS BUILD, real key, 2026-08-01, 1280x720:
    *
+   * THE ORIGINAL STAGE-0 LINE BELOW WAS A MISDIAGNOSIS, CORRECTED HERE RATHER THAN
+   * SILENTLY REWRITTEN. It read "no traffic yet -- correct, orbit altitude selects no
+   * tile content" -- which was not a design decision, it was altitude.ts's near/far
+   * schedule holding its 99,000 ft row's `far = 4,000,000 ft` flat all the way up through
+   * orbit (33,443,570 ft). At orbit the camera sits `R_EARTH_FT + alt` ≈ 54,345,801 ft
+   * from Earth's centre -- past that far plane -- so 3d-tiles-renderer frustum-culled the
+   * ENTIRE tileset before requesting any content, every session, forever: `settled` never
+   * became true and the fly-down button (FlyDown.tsx's own settle gate) did nothing. That
+   * is not "no traffic yet"; it is the bug this phase's altitude.ts fix (constraint 5,
+   * `NEAR_FAR_STOPS`'s new top row) closes. See the dedicated regression test below --
+   * "orbit itself settles now" -- for the corrected, measured figure.
+   *
    *   teleport pattern (stage buttons, like the P11 spec doc's own §4.1 stress table):
-   *     stage 0: rootRequests 1, never settles within 20s (no traffic yet -- correct, orbit
-   *              altitude selects no tile content)
    *     stage 1: rootRequests 1, settled at +14,649ms
    *     stage 2: rootRequests 1, never settles within 20s (295-963 tiles still parsing)
    *     stage 3: rootRequests 1, never settles within 20s (735-944 tiles still parsing)
@@ -426,4 +436,40 @@ test("tiles: exactly one root request per page load, and tiles settle within a r
     `rootRequests changed across the sweep: ${rootRequestSamples.join(", ")}`,
   ).toBe(1);
   expect(rootRequestSamples[0]).toBe(1);
+});
+
+// ---------------------------------------------------------------------------------------
+// P11 phase 5 regression: orbit (stage 0, the app's first paint) actually settles now.
+// This is the gate the far-plane bug would have failed -- before altitude.ts's fix, the
+// keyed suite never caught it because the test above never asserts stage 0 settles (it
+// moves to stage 1 for its settle-time claim, on purpose -- see its own comment). This is
+// a SEPARATE page load (a second billable root request) rather than folded into the test
+// above, because that test's whole point is one page load covering several stages; this
+// one is specifically about what the FIRST paint does, untouched by any stage change.
+// ---------------------------------------------------------------------------------------
+
+test("orbit itself settles now, and loads real tile content -- the far-plane regression", async ({
+  page,
+}) => {
+  test.skip(!HAS_KEY, "keyed-only -- see the test above for why.");
+
+  await page.goto("/");
+  await expect(page.locator("canvas")).toBeVisible({ timeout: 30_000 });
+
+  // MEASURED, this build, real key: settled at 1,836ms, 396/396 tiles, zero console
+  // errors. 15s is a generous multiple of that, not a tight bound -- this gate exists to
+  // catch "never settles at all" (the actual historical failure), not to police exact
+  // timing session to session.
+  const deadline = Date.now() + 15_000;
+  let last = await tilesProbe(page);
+  while (Date.now() < deadline && !last?.settled) {
+    await page.waitForTimeout(300);
+    last = await tilesProbe(page);
+  }
+  expect(
+    last?.settled,
+    `orbit never settled within 15s -- stats: ${JSON.stringify(last?.stats)}`,
+  ).toBe(true);
+  expect(last?.stats?.loaded ?? 0, "settled with zero tiles loaded -- suspicious").toBeGreaterThan(0);
+  expect(last?.rootRequests).toBe(1);
 });

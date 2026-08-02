@@ -55,6 +55,22 @@ type TilesStatsSnapshot = {
   inCache: number;
 };
 
+/**
+ * P11 phase 5 (docs/phases/P11-PHOTOREAL.md, LoadingBar rewrite): which leg of the load
+ * LoadingBar.tsx is rendering against. A DERIVED read of the same state `settled` and
+ * `rootRequests` already track -- not a separate state machine that could drift out of
+ * step with them -- computed once in `publishProbe()` below.
+ *
+ *   boot    no `TilesRendererImpl` yet (the ref callback has not fired).
+ *   auth    constructed, but `load-root-tileset` has not fired -- GoogleCloudAuthPlugin is
+ *           still exchanging the API key for a session.
+ *   stream  the root tileset is in and content tiles are downloading/parsing.
+ *   settled the current view has caught up. LoadingBar renders nothing in this phase; it
+ *           is here so a probe reading `window.__tiles.phase` mid-flight can tell a
+ *           finished view from one still streaming without checking `settled` twice.
+ */
+export type TilesPhase = "boot" | "auth" | "stream" | "settled";
+
 type TilesProbe = {
   constructions: number;
   rootRequests: number;
@@ -72,6 +88,25 @@ type TilesProbe = {
   stats: TilesStatsSnapshot | null;
   /** The current `errorTarget`, for measurement -- what quality setting produced a given frame. */
   errorTarget: number | null;
+  /** See `TilesPhase` above. */
+  phase: TilesPhase;
+  /**
+   * `TilesRendererImpl.loadProgress` (TilesRendererBase.js's own getter): the fraction of
+   * this load episode's tiles that have finished, 0 to 1. Real, not estimated -- LoadingBar
+   * blends this with a time-based floor of its own rather than this file inventing one,
+   * since a per-frame float belongs next to the frame loop that already produces it.
+   */
+  loadProgress: number;
+  /**
+   * Increments once per `tiles-load-start`, i.e. once per view LoadingBar has to describe.
+   * LoadingBar keys its own creep-floor timer on this so a NEW stall (the camera arriving
+   * somewhere new) does not inherit the previous view's elapsed time.
+   */
+  episode: number;
+  /** `performance.now()` when the current episode began. LoadingBar derives elapsed time from it rather than this file pushing a ticking number every frame. */
+  episodeStartMs: number;
+  /** The store's own `stage`, so LoadingBar can name what is loading without importing the store itself (state/store.ts is out of scope for this task -- see LoadingBar.tsx's header). */
+  stage: number;
 };
 
 /**
@@ -86,8 +121,16 @@ let constructions = 0;
 let rootRequests = 0;
 let settled = false;
 let currentTiles: TilesRendererImpl | null = null;
+let episode = 0;
+let episodeStartMs = 0;
+let currentStage = 0;
 
 const settledListeners = new Set<(settled: boolean) => void>();
+/** P11 phase 5: fires on every probe publish, not only on a settled transition -- LoadingBar's progress bar needs the in-between values `settledListeners` was never meant to carry. */
+const progressListeners = new Set<(probe: TilesProbe) => void>();
+/** Throttles `progressListeners` to ~10 Hz (see `publishProbe()`) -- `useFrame` calls it up to 60x/s, and a progress bar has no use for more re-renders than that. */
+let lastProgressNotifyMs = 0;
+let lastProbe: TilesProbe | null = null;
 
 /**
  * `TilesRendererBase.stats` is a real runtime field (see the constructor in
@@ -100,7 +143,14 @@ type WithStats = { stats: TilesStatsSnapshot };
 
 function publishProbe() {
   const stats = currentTiles ? (currentTiles as unknown as WithStats).stats : undefined;
-  (window as unknown as { __tiles?: TilesProbe }).__tiles = {
+  const phase: TilesPhase = !currentTiles
+    ? "boot"
+    : rootRequests === 0
+      ? "auth"
+      : settled
+        ? "settled"
+        : "stream";
+  const probe: TilesProbe = {
     constructions,
     rootRequests,
     settled,
@@ -115,7 +165,20 @@ function publishProbe() {
         }
       : null,
     errorTarget: currentTiles?.errorTarget ?? null,
+    phase,
+    loadProgress: currentTiles?.loadProgress ?? 0,
+    episode,
+    episodeStartMs,
+    stage: currentStage,
   };
+  lastProbe = probe;
+  (window as unknown as { __tiles?: TilesProbe }).__tiles = probe;
+
+  const now = performance.now();
+  if (now - lastProgressNotifyMs >= 100) {
+    lastProgressNotifyMs = now;
+    progressListeners.forEach((cb) => cb(probe));
+  }
 }
 
 function setSettled(next: boolean) {
@@ -140,6 +203,31 @@ export function subscribeSettled(cb: (settled: boolean) => void): () => void {
 /** Current settle state, read imperatively -- FlyDown.tsx's `useFrame` and LoadingBar's initial snapshot both want this rather than a subscription. */
 export function getSettled(): boolean {
   return settled;
+}
+
+/** Placeholder snapshot for `getProbe()` before `<Tiles>` has ever constructed a renderer -- `phase: "boot"` is the true state then, and every count is genuinely zero. */
+const BOOT_PROBE: TilesProbe = {
+  constructions: 0,
+  rootRequests: 0,
+  settled: false,
+  stats: null,
+  errorTarget: null,
+  phase: "boot",
+  loadProgress: 0,
+  episode: 0,
+  episodeStartMs: 0,
+  stage: 0,
+};
+
+/** `useSyncExternalStore`-compatible subscribe for LoadingBar's progress UI -- see `progressListeners`' own comment for why this is separate from `subscribeSettled`. */
+export function subscribeProgress(cb: (probe: TilesProbe) => void): () => void {
+  progressListeners.add(cb);
+  return () => progressListeners.delete(cb);
+}
+
+/** Current probe snapshot, read imperatively -- `useSyncExternalStore`'s required getSnapshot, and LoadingBar's own initial render before any publish has happened. */
+export function getProbe(): TilesProbe {
+  return lastProbe ?? BOOT_PROBE;
 }
 
 /**
@@ -210,6 +298,11 @@ export function Tiles() {
   useFrame(() => {
     const { shell } = thresholdOpacity(stage, t, reducedMotion);
     carveRef.current!.uCarve.value = 1 - shell;
+
+    // P11 phase 5: the store's own `stage`, read here (this component already subscribes
+    // to it above) rather than LoadingBar importing the store itself -- see TilesProbe's
+    // own field comment for why.
+    currentStage = stage;
 
     // Live stats snapshot for measurement (phase 4 step 3) and for anything reading
     // `window.__tiles.stats` off a running session -- cheap (a handful of number copies)
@@ -316,7 +409,18 @@ export function Tiles() {
      * it is the real signal, not a guess (the diagnosis in section 0.3 is a resolution
      * hole, not a missing tileset, and only tile CONTENT settling closes it).
      */
-    const onLoadStart = () => setSettled(false);
+    const onLoadStart = () => {
+      // P11 phase 5: a new load episode, for LoadingBar's creep-floor timer -- see
+      // TilesProbe's own field comments. Set BEFORE `setSettled`, which only calls
+      // `publishProbe()` when `settled` actually changes (it does not on the very first
+      // call: `settled` starts `false`, so `setSettled(false)` here is a no-op) -- the
+      // explicit `publishProbe()` below is what guarantees `episode`/`episodeStartMs`
+      // reach `window.__tiles` on every episode, including the first.
+      episode += 1;
+      episodeStartMs = performance.now();
+      setSettled(false);
+      publishProbe();
+    };
     const onLoadEnd = () => setSettled(true);
     tiles.addEventListener("tiles-load-start", onLoadStart);
     tiles.addEventListener("tiles-load-end", onLoadEnd);

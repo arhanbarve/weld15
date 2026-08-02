@@ -106,8 +106,13 @@ describe("the rig fits inside the frustum wherever the globe is drawn", () => {
   });
 
   it("reproduces the surface distances printed in P9.md section 3.3", () => {
+    // The orbit row is NOT P9.md's figure -- 20,000,000 ft, not 799,915. P11 raises `far`
+    // at orbit from 4,000,000 to 100,000,000 ft (altitude.ts constraint 5: the old value
+    // left Google's real-scale tileset entirely behind the far plane), and this proxy
+    // sphere's own radius is tied to `far` (far/GLOBE_FAR_RATIO), so the surface distance
+    // scales with it -- 25x further out, matching the far plane's own 25x increase.
     const rows: [number, number][] = [
-      [3.344e7, 799_915],
+      [3.344e7, 20_000_000],
       [99_000, 2_368],
       [60_000, 890],
       [40_000, 403],

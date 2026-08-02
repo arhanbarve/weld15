@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { FLY_DOWN_END, useStore } from "@/state/store";
 import { keyframes } from "./stages";
@@ -62,6 +63,21 @@ const SECONDS_PER_DECADE = 1.6;
 /** Never divide by a decade count of zero, whatever a params set does to the keyframes. */
 const MIN_DECADES = 0.2;
 
+/**
+ * How long the settle gate is allowed to hold a single stall before the flight moves on
+ * anyway, seconds. P11 phase 5 (docs/phases/P11-PHOTOREAL.md decision 11's own gap, closed
+ * here): the gate as written had no escape -- a session that never settles (bad network, a
+ * stall on the parse queue, a future regression) held `flying` true with `t` frozen
+ * forever, same shape as the far-plane bug altitude.ts just fixed, but reachable by ANY
+ * cause that keeps `settled` false rather than only that one. Measured against a real
+ * session: mid-flight settle gaps ran up to several seconds as new tiles streamed in per
+ * stage, so this has to be longer than a normal gap or it fights the gate on every stage
+ * change; it has to be finite or a genuinely stuck session freezes the descent exactly as
+ * before. 4 s is longer than every settle gap this file's own probe measured in a live run
+ * and short enough that "flies through blur" reads as a hiccup, not a hang.
+ */
+const MAX_STALL_SECONDS = 4;
+
 export function FlyDown() {
   const flying = useStore((s) => s.flying);
   const stage = useStore((s) => s.stage);
@@ -70,6 +86,15 @@ export function FlyDown() {
   const setT = useStore((s) => s.setT);
   const flyStep = useStore((s) => s.flyStep);
   const setFlying = useStore((s) => s.setFlying);
+
+  /**
+   * Seconds of continuous stall accumulated since the settle gate last released. A `ref`,
+   * not store state: this is bookkeeping for one `useFrame` loop, not something any other
+   * component reads, and a store write every stalled frame would be a render for nothing.
+   * Reset to 0 the instant `getSettled()` is true again, so a stall never carries over into
+   * the NEXT stage's own legitimate settle gap.
+   */
+  const stalledFor = useRef(0);
 
   useFrame((_, delta) => {
     if (!flying) return;
@@ -100,7 +125,22 @@ export function FlyDown() {
     // to leave stale. `HAS_TILES_KEY` short-circuits the check on the keyless fallback path
     // (decision 10), where `getSettled()`'s default of `false` would otherwise wedge the
     // flight forever: FallbackGround has no streaming tiles to wait for.
-    if (HAS_TILES_KEY && !getSettled()) return;
+    //
+    // BOUNDED, NOT UNCONDITIONAL -- P11 phase 5. `stalledFor` accumulates real elapsed time
+    // (this frame's own `delta`, not a frame count, so it is exposure-time-correct on a slow
+    // machine same as the rate math below) across every consecutive stalled frame, and
+    // resets to 0 the moment `getSettled()` next reports true. Once it exceeds
+    // MAX_STALL_SECONDS the flight advances through the still-loading view rather than
+    // waiting on it again -- degrading to "flies through blur" instead of "the descent is
+    // stuck", which is the failure this exists to close off: a session that never settles
+    // (bad network, a stalled parse queue, any future regression) used to hold `t` frozen
+    // and the fly-down button doing nothing, indefinitely.
+    if (HAS_TILES_KEY && !getSettled()) {
+      stalledFor.current += delta;
+      if (stalledFor.current < MAX_STALL_SECONDS) return;
+    } else {
+      stalledFor.current = 0;
+    }
 
     // The stage's own extent, in decades of altitude, read off the path it will actually fly.
     // Derived per frame rather than tabulated because the keyframes depend on the suite params

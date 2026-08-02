@@ -31,8 +31,13 @@ describe("the near/far schedule", () => {
   it("reproduces the table in P9.md section 3.3 to the figures printed there", () => {
     // These six rows are quoted in the spec as the proof that GLOBE_R = far/8 survives the
     // whole descent. If the schedule moves, the spec's table is wrong and has to move too.
+    //
+    // The top row is NOT the P9.md figure any more. P9.md's 4,000,000 ft at orbit is the
+    // schedule bug P11 fixes (see altitude.ts constraint 5): it held the 99,000 ft row's
+    // values flat all the way to orbit, so Google's real-scale tileset sat entirely behind
+    // the far plane and no tile was ever in frustum. This row now reads the new top stop.
     const rows: [number, number, number][] = [
-      [33_443_570, 100, 4_000_000],
+      [33_443_570, 1_200, 100_000_000],
       [99_000, 100, 4_000_000],
       [60_000, 62, 2_481_569],
       [40_000, 42, 1_685_985],
@@ -43,6 +48,23 @@ describe("the near/far schedule", () => {
       expect(nearFar(alt).near, `near at ${alt}`).toBeCloseTo(near, 0);
       // Relative, because these run to seven figures and the spec rounded them.
       expect(nearFar(alt).far / far, `far at ${alt}`).toBeCloseTo(1, 3);
+    }
+  });
+
+  it("keeps the far plane past Earth's own centre at orbit (P11 regression)", () => {
+    // The exact defect this locks down: below this fix, `far` held at 4,000,000 ft all the
+    // way up, so at orbit (alt = 33,443,570 ft, stage 0's own altitude and the highest this
+    // app's camera ever reaches) the camera -- R_EARTH_FT + alt ≈ 54,345,801 ft from Earth's
+    // centre -- could see no part of a real-scale tileset at all: every tile sat behind the
+    // far plane and 3d-tiles-renderer frustum-culled the entire tileset before requesting
+    // any content (measured: `stats.inFrustum === 0`, `settled` never true, the fly-down
+    // button did nothing). Checked at orbit and just below it -- NOT far above, because
+    // above the top stop the schedule deliberately holds flat (this file's own "flat below
+    // the first stop and above the last" test) and no camera in this app ever climbs past
+    // orbit, so asserting the invariant out there would fight the flat-cap design rather
+    // than catch a real regression.
+    for (const alt of [33_443_570 * 0.9, 33_443_570]) {
+      expect(nearFar(alt).far, `far at ${alt}`).toBeGreaterThan(R_EARTH_FT + alt);
     }
   });
 

@@ -64,6 +64,22 @@ export const R_EARTH_FT = 20_902_231;
  *    can improve as you descend and then get worse again, and z-fighting that appears,
  *    disappears and reappears is far harder to diagnose than z-fighting that just sits
  *    there. tests/altitude.test.ts asserts it across the whole range.
+ * 5. `far` MUST reach past Earth's own centre at and above orbit altitude. This is the P11
+ *    correction: the schedule used to hold its 99,000 ft row's values (far = 4,000,000 ft)
+ *    flat all the way up through orbit (33,443,570 ft, stage 0's own altitude), which was
+ *    harmless while Globe.tsx drew a small proxy sphere near the camera -- P9's whole design
+ *    move (see globeRig.ts) was making `far` irrelevant to the real Earth's scale. P11
+ *    mounts Google's photorealistic tileset at REAL ECEF scale instead (Tiles.tsx), and at
+ *    orbit the camera sits `R_EARTH_FT + alt` ≈ 54,345,801 ft from Earth's centre -- past a
+ *    far plane of 4,000,000 ft, so every tile is behind the far plane and none is ever
+ *    requested (3d-tiles-renderer frustum-culls before requesting content). Measured, not
+ *    guessed: a live session sat at `stats.inFrustum === 0` and `__tiles.settled === false`
+ *    indefinitely at stage 0, which also means FlyDown.tsx's settle gate never released and
+ *    the fly-down button did nothing -- this is the "loads forever above t ≈ 0.28" bug.
+ *    The new top row's `far` clears `R_EARTH_FT + alt` with 1.84x margin (a live run with
+ *    it settled in 4.8 s, 396/396 tiles, orbit through descent). `near` rises to 1,200 to
+ *    keep `far/near` under this file's own 1e5 depth-precision budget (constraint 3) --
+ *    nothing is 1,200 ft from the camera at orbit to clip.
  *
  * Values between rows are interpolated logarithmically in all three of alt, near and far.
  * Below the first row and above the last, the endpoint is held -- so stages 3, 4 and 5 all
@@ -75,6 +91,7 @@ export const NEAR_FAR_STOPS: readonly { alt: number; near: number; far: number }
   { alt: 1_600, near: 2, far: 60_000 },
   { alt: 28_000, near: 30, far: 1_200_000 },
   { alt: 99_000, near: 100, far: 4_000_000 },
+  { alt: 33_443_570, near: 1_200, far: 100_000_000 },
 ];
 
 /**
