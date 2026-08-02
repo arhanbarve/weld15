@@ -244,6 +244,36 @@ export function ceilingVisible(mode: CutawayMode): boolean {
   return mode !== "roofOff";
 }
 
+/**
+ * Whether the viewer has asked to look at the MODEL rather than at the world.
+ *
+ * P12's rule, and the one place it is written down. Google's Photorealistic 3D Tiles are
+ * the world from orbit to the Yard, and the parametric Weld -- an 1872 building rendered as
+ * brick-coloured massing -- has no business standing beside the photogrammetry OF THE SAME
+ * BUILDING: through P11 both were drawn at stages 2 and 3, one inside the other, and the
+ * massing won because it was opaque. So the shell is not an exterior any more. It appears
+ * when, and only when, somebody opens the building up on purpose.
+ *
+ * WHY IT ALSO GOVERNS THE TILES. Three things have to agree the moment a cutaway is
+ * picked: the shell mounts (Experience.tsx), the interior comes up to full opacity even
+ * though the threshold ramp has not started (Experience.tsx again), and Google's own Weld
+ * is carved out of the tiles (Tiles.tsx's uCarve) -- because a cut model standing inside an
+ * uncut photogrammetric Weld is the same double-building bug in a different costume. One
+ * predicate, three call sites, so they cannot drift.
+ *
+ * STAGE 3 IS THE FLOOR because that is where visibility() first mounts the interior and
+ * where Hud.tsx first enables the control (`cutawayEnabled={visibility(stage).interior}`).
+ * There is no upper bound: at stage 4 the threshold's own ramps take over the opacities,
+ * and at stage 5 the shell is not mounted at all -- the camera is standing inside it.
+ *
+ * `stage: number` rather than StageId, to keep this module's import list free of the store
+ * (state/store.ts value-imports THIS file, and a type-only import back would be erased but
+ * still read as a cycle by anyone skimming the graph). Every caller passes a StageId.
+ */
+export function modelMode(stage: number, mode: CutawayMode): boolean {
+  return mode !== "none" && stage >= 3;
+}
+
 /** The outward-facing plane of a perimeter band: a unit axis normal and its offset. */
 type OuterFace = {
   /** unit outward normal in the suite frame. Exactly one component is non-zero. */

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { STAGES, type StageId } from "@/state/store";
+import { LAST_STAGE, STAGES, type StageId } from "@/state/store";
 import type { SuiteParams } from "@/geo/rooms";
 import { boundaries, legs, toJourney } from "@/scene/journey";
 
@@ -22,6 +22,22 @@ type Props = {
   onScrubbing: (v: boolean) => void;
   onPickStage: (s: StageId) => void;
 };
+
+/**
+ * Where the handle is on the STAGE scale, 0 at orbit to 5 in the hall.
+ *
+ * stage + t, and not the slider's own u: u is the bar's geometry (journey.ts weights the
+ * descent legs by decades of altitude, so it is deliberately non-linear in stage), while
+ * the ticks the viewer reads are the stage numbers. This is the number under the handle.
+ *
+ * CLAMPED AT LAST_STAGE because stage 5 carries a real t: skipToSuite() sets `{ stage: 5,
+ * t: 1 }`, and 5 + 1 would put a "6.00" under a bar whose last tick is 5. Stage 5 is a
+ * place rather than a leg -- stages.ts's cameraKeyframe ignores t there, and toJourney()
+ * already maps every stage-5 t to u = 1 -- so the whole stage is one point on this scale.
+ */
+function position(stage: StageId, t: number): number {
+  return Math.min(LAST_STAGE, stage + Math.min(1, Math.max(0, t)));
+}
 
 /**
  * window.__journey, for the e2e gates.
@@ -59,14 +75,20 @@ export function JourneyBar({ stage, t, params, onScrub, onScrubbing, onPickStage
         onPointerCancel={() => onScrubbing(false)}
         data-testid="journey"
         aria-label="Descend from orbit to the room"
-        aria-valuetext={`${STAGES[stage].name}, ${(t * 100).toFixed(0)} per cent`}
+        aria-valuetext={`${STAGES[stage].name}, ${position(stage, t).toFixed(2)} of ${LAST_STAGE}`}
         aria-describedby="journey-ticks"
       />
-      {/* Kept as the input's next sibling and formatted to two places, because
-          threshold.spec.ts polls `slider.locator("+ span.tabular")` for t.toFixed(2). That
-          selector is an interface; the testid changed, the shape did not. */}
+      {/* THE STAGE'S NAME AND THE POSITION ON THE STAGE SCALE, which is a fix and not a
+          dressing-up. This read `t.toFixed(2)` -- progress WITHIN the current stage, 0 to 1
+          -- directly beneath ticks labelled 0 to 5, so two thirds of the way through Harvard
+          Yard it showed "0.67" while the tick under the handle said 2. One handle, two
+          different numbers, and the one on display was the one nothing else in the interface
+          uses. position() below is the scale the ticks are already drawn on.
+
+          Kept as the input's next sibling: a gate polling `slider.locator("+ span.tabular")`
+          is reading a shape this component promises, and the shape has not moved. */}
       <span className="tabular" data-testid="journey-read">
-        {t.toFixed(2)}
+        {STAGES[stage].name} · {position(stage, t).toFixed(2)}
       </span>
 
       <div className="jbar-ticks" id="journey-ticks">

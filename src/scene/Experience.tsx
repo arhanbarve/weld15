@@ -22,7 +22,7 @@ import { Effects } from "./Effects";
 import { Perf } from "./Perf";
 import { Hud } from "@/ui/Hud";
 import { LoadingBar } from "@/ui/LoadingBar";
-import { CUTAWAY_WORDS } from "./cutaway";
+import { CUTAWAY_WORDS, modelMode } from "./cutaway";
 
 /**
  * The whole journey, from orbit to a bedroom in Weld 15.
@@ -98,6 +98,22 @@ export default function Experience() {
 
   const vis = visibility(stage);
   const { shell, interior } = thresholdOpacity(stage, t, reduced);
+
+  /**
+   * Has the viewer asked for the MODEL rather than the world? cutaway.ts's modelMode() owns
+   * the rule and its docblock owns the argument; this file owns the two consequences.
+   *
+   * WHAT IT CHANGES HERE, AND WHY THE SECOND ONE IS NOT OPTIONAL. It mounts <WeldExterior>,
+   * which is otherwise never drawn from outside now. And it takes the interior to full
+   * opacity, because thresholdOpacity() returns `interior: 0` at every stage below 4 and
+   * <Suite> returns null below 0.001 -- so until this line, a cutaway at stage 3 cut the
+   * shell open onto an EMPTY building. That was live from P6 and nothing caught it: the
+   * modes were checked against the geometry they drop rather than against the view they
+   * produce. Stage 4 is deliberately not included: its own ramps own the opacities there,
+   * and overriding them would break the dissolve the threshold IS.
+   */
+  const model = modelMode(stage, cutaway);
+  const interiorOpacity = model && stage === 3 ? 1 : interior;
 
   // The canvas has no accessible content of its own -- a screen reader gets nothing at
   // all out of WebGL -- so this label is the only thing that can say what is on
@@ -192,10 +208,22 @@ export default function Experience() {
               a11y regression this comment already measured, so this stays the stage window
               `tiles` used to be (`stage <= 3`) rather than following it to 4. */}
           {stage <= 3 ? <Labels /> : null}
-          <WeldExterior visible={vis.weld} opacity={shell} />
+          {/* NOT AN EXTERIOR ANY MORE, which is P12's headline change and the reason this
+              line reads `model &&` rather than `vis.weld` alone. Google's photogrammetric
+              Weld is the building the viewer sees from orbit down to the Yard; this shell
+              is the same building drawn as brick-coloured massing, and through P11 BOTH
+              were mounted at stages 2 and 3 -- measured in the browser as an opaque red
+              mass standing over (and, before the datum fix in geo/frame.ts, 64 ft above)
+              the real photogrammetry. So the shell now appears only when somebody opens
+              the building on purpose, and at the threshold it does not appear at all: the
+              crossing is Google's own Weld dissolving under Tiles.tsx's carve while the
+              interior comes up, which is one building becoming its own inside rather than
+              two buildings trading places. `vis.weld` is kept as the stage window it has
+              always been; `model` narrows it. */}
+          <WeldExterior visible={vis.weld && model} opacity={shell} />
           <Suite
             visible={vis.interior}
-            opacity={interior}
+            opacity={interiorOpacity}
             params={params}
             pieces={pieces}
             cutaway={cutaway}

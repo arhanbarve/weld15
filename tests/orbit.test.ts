@@ -390,14 +390,21 @@ describe("orbitOf", () => {
     }
   });
 
-  it("reads the stage-3 keyframe as a south-east view from 251 ft", () => {
+  it("reads the stage-3 keyframe as a south-east view from 230 ft", () => {
     // Anchors the convention against a keyframe someone else wrote: stage 3
     // stands east and south of Weld, above the eaves, looking back at it.
+    //
+    // 230.46 ft at pitch 45, where this read 251.44 ft at pitch 15.69 before P12. Both
+    // numbers are kf[3]'s, and kf[3] moved: stages.ts now derives it from obliqueDrop()
+    // like stages 0-2 instead of standing at the hand-placed [150, 110, 190], because
+    // geo/frame.ts's datum put Google's tiles at their real height and that pose turned out
+    // to sit level with Widener's roof. The CONVENTION this case exists to anchor is
+    // unchanged and still asserted: east and south of Weld is a heading between 90 and 180,
+    // and the camera is above what it looks at.
     const o = orbitOf(base);
-    expect(o.rangeFt).toBeCloseTo(251.44, 1);
+    expect(o.rangeFt).toBeCloseTo(230.46, 1);
     expect(o.headingDeg).toBeGreaterThan(90);
     expect(o.headingDeg).toBeLessThan(180);
-    // pitchDeg = 90 - polarDeg; the old assertion was polarDeg ~= 74.31.
-    expect(o.pitchDeg).toBeCloseTo(90 - 74.31, 1);
+    expect(o.pitchDeg).toBeCloseTo(45, 1);
   });
 });

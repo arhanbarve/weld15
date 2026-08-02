@@ -13,9 +13,16 @@
  *
  *   M_ecef->site = S . R . T
  *
- *   T  translate by -ECEF(WELD_ORIGIN)
+ *   T  translate by -ECEF(WELD_ORIGIN, at grade -- WELD_GRADE_H_FT below)
  *   R  rotate ECEF -> site (east -> +X, up -> +Y, north -> -Z)
  *   S  scale metres -> feet (3.280839895)
+ *
+ * WHERE y = 0 IS. Weld's GRADE, which is 64 ft below the WGS-84 ellipsoid at this site --
+ * see WELD_GRADE_H_FT, which carries the measurement and the bug it fixes. Every height in
+ * this module's public surface (`geodeticToSite`'s hFt, `siteToGeodetic`'s hFt,
+ * `altitudeOf`) is a height above that datum rather than above the ellipsoid, so the rest
+ * of the project keeps its one meaning of "up from the ground" and the ellipsoid is named
+ * in exactly one constant.
  *
  * `R` is exactly `weldBasis()`'s basis -- moved here verbatim from globeRig.ts, not
  * rewritten -- which tests/globeRig.test.ts already proves orthonormal, right-handed and
@@ -145,9 +152,67 @@ function ecefStdToGeodetic(p: Vec3): { lat: number; lon: number; hMeters: number
   return { lat: lat * RAD, lon: lon * RAD, hMeters: h };
 }
 
+/**
+ * Weld's grade, as a height above the WGS-84 ellipsoid, ft. THE DATUM THIS WHOLE FRAME
+ * HANGS ON, and the number that was missing.
+ *
+ * originEcefStd() passed 0 here through P11, i.e. it anchored the site frame on the
+ * ELLIPSOID rather than on the ground, while its own comment said "at grade". That is
+ * harmless as long as nothing else in the scene knows where the real ground is -- the
+ * parametric campus was self-consistent about y = 0 being grade, so the error was
+ * unobservable. Google's Photorealistic 3D Tiles are the thing that knows: they arrive in
+ * real ECEF, so their Cambridge landed 64 ft BELOW the model's own grade plane and every
+ * parametric thing in the scene (Weld's shell, WeldMarker's ring and pin, the carve prism
+ * in tilesCarve.ts, every camera keyframe's aim height) floated above the photogrammetry
+ * by that much. tilesCarve's prism was the quiet half of the same bug: it spans grade - 5
+ * ft up to the ridge, so 64 ft too high it covered the AIR over Weld's roof and could
+ * never have removed Google's own Weld at the threshold.
+ *
+ * MEASURED, FROM TWO INDEPENDENT PUBLIC DATASETS, AT EXACTLY WELD_ORIGIN
+ * (42.3739244, -71.1171195):
+ *
+ *   USGS EPQS (1 m 3DEP)      H = 8.240 m orthometric, NAVD88
+ *   NOAA NGS GEOID12B         N = -27.763 m (stated error 0.048 m)
+ *   h = H + N                   = -19.523 m = -64.05 ft
+ *
+ * NAVD88 + GEOID12B produces a NAD83(2011) ellipsoid height and Google's tiles are
+ * ITRF/WGS-84, and those two frames differ by one to two metres in height across CONUS --
+ * so the geodetic figure was taken as a starting point and then CHECKED against the surface
+ * Google actually renders, by scripts/measure-align.mjs. It samples every loaded tile's
+ * vertices in site space at stage 3 (779 meshes, 1,572 tiles, settled) and reports the
+ * ground as a per-cell 10th percentile on a 20 ft grid, medianed over cells:
+ *
+ *   ring 35-75 ft, hugging Weld       grade at  +1.7 ft
+ *   ring 80-160 ft, out in the yard   grade at  -1.3 ft
+ *   highest vertex over the footprint         +82.2 ft   (weld.json's ridge: 85.4)
+ *
+ * SO THE VALUE IS NOT TUNED FURTHER, AND THAT IS THE MEASUREMENT'S OWN CONCLUSION. The two
+ * rings bracket zero: Cambridge's ground rises about 3 ft over the 100 ft from the yard to
+ * Weld's walls, and this project's grade is ONE FLAT PLANE, so no constant makes both rings
+ * zero. What is left is a slope, not an offset, and shifting the datum to null one ring
+ * would only move the error into the other. The sign that remains is the safe one: grade
+ * sits 1.7 ft ABOVE Google's ground at the building, so WeldMarker's ring lies on top of
+ * the photogrammetry rather than buried inside it.
+ *
+ * The ridge line is the independent check and it passes: 82.2 ft of mesh over a building
+ * whose ridge is 85.4 ft, from photogrammetry that rounds slate ridges off, is agreement --
+ * a datum still 64 ft out would have put that number near 146.
+ *
+ * NOT SPELT AS A NEGATIVE ALTITUDE ANYWHERE ELSE. Everything above ground in this project
+ * is expressed in feet above grade -- weld.json's 85.4 ft ridge, place.ts's floorLevel(),
+ * geo/rig.ts's `targetFt` ("height of the target above grade") -- so this is the ONE place
+ * the ellipsoid is mentioned, and geodeticToSite/siteToGeodetic below convert at the
+ * boundary so no caller has to know.
+ */
+export const WELD_GRADE_H_FT = -64.05;
+
 /** WELD_ORIGIN, at grade, in standard ECEF metres. The translation T. */
 function originEcefStd(): Vec3 {
-  return geodeticToEcefStd(WELD_ORIGIN.lat, WELD_ORIGIN.lon, 0);
+  return geodeticToEcefStd(
+    WELD_ORIGIN.lat,
+    WELD_ORIGIN.lon,
+    WELD_GRADE_H_FT / FEET_PER_METRE,
+  );
 }
 
 /** ECEF (standard, metres) to the site frame (feet). */
@@ -170,21 +235,42 @@ export function siteToEcef(p: Vec3): Vec3 {
   return [origin[0] + rel[0], origin[1] + rel[1], origin[2] + rel[2]];
 }
 
-/** Geodetic lat/lon (degrees) and height above the ellipsoid (feet) to the site frame. */
+/**
+ * Geodetic lat/lon (degrees) and height ABOVE WELD'S GRADE (feet) to the site frame.
+ *
+ * `hFt` is measured from the datum WELD_GRADE_H_FT names, not from the ellipsoid, and the
+ * conversion happens here so that no caller has to hold both. That is what every caller
+ * already meant: geo/rig.ts's `targetFt` is documented as "height of the target above
+ * grade", and stages.ts builds its keyframes out of aim heights (40, 30, 42 ft) that are
+ * heights above the ground. Before the datum existed the two readings agreed numerically,
+ * because grade was assumed to be the ellipsoid; now they differ by 64 ft and this is the
+ * boundary where that is reconciled.
+ */
 export function geodeticToSite(lat: number, lon: number, hFt: number): Vec3 {
-  return ecefToSite(geodeticToEcefStd(lat, lon, hFt / FEET_PER_METRE));
+  return ecefToSite(
+    geodeticToEcefStd(lat, lon, (hFt + WELD_GRADE_H_FT) / FEET_PER_METRE),
+  );
 }
 
-/** The site frame (feet) to geodetic lat/lon (degrees) and height above the ellipsoid (feet). */
+/** The site frame (feet) to geodetic lat/lon (degrees) and height above Weld's grade (feet). */
 export function siteToGeodetic(p: Vec3): { lat: number; lon: number; hFt: number } {
   const { lat, lon, hMeters } = ecefStdToGeodetic(siteToEcef(p));
-  return { lat, lon, hFt: hMeters * FEET_PER_METRE };
+  return { lat, lon, hFt: hMeters * FEET_PER_METRE - WELD_GRADE_H_FT };
 }
 
 /**
- * Height above the WGS-84 ellipsoid, in feet. THE definition of altitude from P11 on --
- * correct for any camera position, not only one on Weld's local vertical, which is the
- * defect this module exists to fix (see docs/phases/P11-PHOTOREAL.md section 0.1).
+ * Height above WELD'S GRADE, in feet. THE definition of altitude from P11 on -- correct for
+ * any camera position, not only one on Weld's local vertical, which is the defect this
+ * module exists to fix (see docs/phases/P11-PHOTOREAL.md section 0.1).
+ *
+ * ABOVE GRADE RATHER THAN ABOVE THE ELLIPSOID, which is a correction to the datum and NOT
+ * to this function: every number this feeds -- altitude.ts's BANDS, its NEAR_FAR_STOPS
+ * schedule, CameraRig's window.__cam.alt, the fly-down's decades -- was measured and tuned
+ * against a camera height read off the site frame's own y, back when grade and the
+ * ellipsoid were assumed to be the same surface. Keeping altitude anchored on grade is what
+ * leaves every one of those figures meaning exactly what it meant before, so moving the
+ * datum moves the tiles into place without touching a single tuned constant.
+ * tests/geoFrame.test.ts's `altitudeOf([0, h, 0]) === h` still holds for that reason.
  */
 export function altitudeOf(p: Vec3): number {
   return siteToGeodetic(p).hFt;

@@ -7,6 +7,7 @@ import {
   siteToEcef,
   siteToGeodetic,
   weldBasis,
+  WELD_GRADE_H_FT,
   type Vec3,
 } from "@/scene/geo/frame";
 
@@ -61,6 +62,60 @@ describe("geodeticToSite sends due east to +X", () => {
     const dLonRad = (g.lon - WELD_ORIGIN.lon) * DEG;
     const arcMeters = dLonRad * parallelRadius;
     expect(arcMeters * FEET_PER_METRE).toBeCloseTo(100, 1);
+  });
+});
+
+describe("the site frame is anchored on Weld's grade, not on the ellipsoid", () => {
+  /**
+   * THE BUG THIS PINS. originEcefStd() passed a height of 0 through P11, so the frame hung
+   * off the WGS-84 ellipsoid while every other file in the project treated y = 0 as the
+   * ground. Google's tiles arrive in real ECEF and are the only thing in the scene that
+   * knows where the ground actually is, so the whole parametric model floated 64 ft above
+   * the photogrammetry. These cases fail if the datum is ever taken back out.
+   *
+   * Written against WELD_GRADE_H_FT rather than against a literal -64.05, because the
+   * shipped value is tuned to Google's own rendered surface (see frame.ts) and a test that
+   * restated it would have to be edited every time the surface was re-measured. What is
+   * asserted is the RELATIONSHIP -- ellipsoid heights and grade heights differ by exactly
+   * the datum, in the right direction -- plus the sign and rough size of the datum itself,
+   * which is what would actually regress.
+   */
+  it("the datum is a real depression below the ellipsoid, tens of feet, not zero", () => {
+    expect(WELD_GRADE_H_FT).toBeLessThan(-30);
+    expect(WELD_GRADE_H_FT).toBeGreaterThan(-100);
+  });
+
+  it("a point at ellipsoid height 0 stands WELD_GRADE_H_FT above the site's own grade", () => {
+    // Built independently of frame.ts: WELD_ORIGIN at ellipsoid height 0, straight through
+    // the WGS-84 closed form into ECEF, then asked where the site frame puts it.
+    const lat = WELD_ORIGIN.lat * DEG;
+    const lon = WELD_ORIGIN.lon * DEG;
+    const n = WGS84_A / Math.sqrt(1 - WGS84_E2 * Math.sin(lat) ** 2);
+    const onEllipsoid: Vec3 = [
+      n * Math.cos(lat) * Math.cos(lon),
+      n * Math.cos(lat) * Math.sin(lon),
+      n * (1 - WGS84_E2) * Math.sin(lat),
+    ];
+    const p = ecefToSite(onEllipsoid);
+    expect(p[0]).toBeCloseTo(0, 2);
+    expect(p[2]).toBeCloseTo(0, 2);
+    // Grade is BELOW the ellipsoid here, so the ellipsoid surface is above y = 0 by |datum|.
+    expect(p[1]).toBeCloseTo(-WELD_GRADE_H_FT, 1);
+  });
+
+  it("geodeticToSite reads its height as feet above grade", () => {
+    // Weld's ridge, 85.4 ft above grade, over Weld's own origin: straight up, y = 85.4.
+    const ridge = geodeticToSite(WELD_ORIGIN.lat, WELD_ORIGIN.lon, 85.4);
+    expect(ridge[0]).toBeCloseTo(0, 2);
+    expect(ridge[1]).toBeCloseTo(85.4, 2);
+    expect(ridge[2]).toBeCloseTo(0, 2);
+  });
+
+  it("siteToGeodetic round-trips a height above grade unchanged", () => {
+    const g = siteToGeodetic([0, 85.4, 0]);
+    expect(g.hFt).toBeCloseTo(85.4, 2);
+    expect(g.lat).toBeCloseTo(WELD_ORIGIN.lat, 6);
+    expect(g.lon).toBeCloseTo(WELD_ORIGIN.lon, 6);
   });
 });
 

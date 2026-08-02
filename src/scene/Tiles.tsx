@@ -10,6 +10,7 @@ import { ecefToSite, type Vec3 } from "./geo/frame";
 import { useStore } from "@/state/store";
 import { thresholdOpacity } from "./stages";
 import { applyWeldCarve, carveUniforms, type CarveUniforms } from "./tilesCarve";
+import { modelMode } from "./cutaway";
 
 /**
  * Live Google Photorealistic 3D Tiles: P11 phase 1.
@@ -282,6 +283,7 @@ export function Tiles() {
   const stage = useStore((s) => s.stage);
   const t = useStore((s) => s.t);
   const reducedMotion = useStore((s) => s.reducedMotion);
+  const cutaway = useStore((s) => s.cutaway);
 
   /**
    * uCarve rides thresholdOpacity()'s own `shell` ramp -- the exact number
@@ -297,7 +299,13 @@ export function Tiles() {
    */
   useFrame(() => {
     const { shell } = thresholdOpacity(stage, t, reducedMotion);
-    carveRef.current!.uCarve.value = 1 - shell;
+    // FULLY CARVED THE MOMENT A CUTAWAY IS PICKED, ahead of the ramp. cutaway.ts's
+    // modelMode() is the shared predicate (its docblock has the argument): a cut parametric
+    // Weld standing inside an uncut photogrammetric one is the double-building bug this
+    // phase exists to remove, just with a hole in it. Outside model mode nothing changes --
+    // `1 - shell` is still the threshold's own ramp, and still the same number
+    // WeldExterior's dissolve is driven from.
+    carveRef.current!.uCarve.value = modelMode(stage, cutaway) ? 1 : 1 - shell;
 
     // P11 phase 5: the store's own `stage`, read here (this component already subscribes
     // to it above) rather than LoadingBar importing the store itself -- see TilesProbe's
@@ -327,6 +335,22 @@ export function Tiles() {
     if (!tiles) return;
     constructions += 1;
     currentTiles = tiles;
+    /**
+     * The renderer itself, for measurement only, and NOT in a production bundle.
+     *
+     * `window.__tiles` above publishes numbers this file chooses to expose; the datum
+     * measurement (scripts/measure-align.mjs, the evidence behind geo/frame.ts's
+     * WELD_GRADE_H_FT) needs the tile GEOMETRY -- every loaded mesh's vertices in world
+     * space -- and there is no cheap summary of that to publish per frame. R3F keeps its
+     * scene graph off the DOM (the canvas carries no `__r3f`, and the React fiber tree
+     * holds no Object3D stateNodes -- both checked), so a handle here is the only way in.
+     *
+     * Gated on NODE_ENV so the production build's global surface is unchanged, and set
+     * once per construction rather than per frame.
+     */
+    if (process.env.NODE_ENV !== "production") {
+      (window as unknown as { __tilesImpl?: unknown }).__tilesImpl = tiles;
+    }
     publishProbe();
 
     tiles.group.matrix.copy(matrixRef.current!);

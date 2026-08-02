@@ -119,6 +119,8 @@ const DESCENT_FOV = 45;
 const STAGE0_TILT_DEG = 2;
 const STAGE1_TILT_DEG = 40;
 const STAGE2_TILT_DEG = 45;
+/** Stage 3's own tilt. Continues stage 2's 45 rather than steepening further -- see kf[3]. */
+const STAGE3_TILT_DEG = 45;
 
 /**
  * Camera altitude at stage 0, ft.
@@ -142,6 +144,7 @@ const STAGE0_ALT = 1.5 * R_EARTH_FT;
 const STAGE0_AZIMUTH_DEG = 30;
 const STAGE1_AZIMUTH_DEG = 30;
 const STAGE2_AZIMUTH_DEG = 34.1;
+const STAGE3_AZIMUTH_DEG = 38.3;
 
 /**
  * What each stop has to frame, ft of ground measured UP THE SCREEN.
@@ -157,6 +160,16 @@ const STAGE2_AZIMUTH_DEG = 34.1;
  */
 const CAMBRIDGE_EXTENT = 23_000;
 const YARD_EXTENT = 1_300;
+/**
+ * What stage 3 has to frame, ft. Weld's own 143.3 ft length plus air either side.
+ *
+ * 1.88x rather than GABLE_FRAMING's 1.35, and the difference is measured in the browser
+ * against live tiles rather than argued: at 193 ft the facade runs off both edges of the
+ * frame, because this stop looks down the building's DIAGONAL (38.3 degrees off the long
+ * axis) and the diagonal of a 63 x 143.3 ft plan is 157 ft, not 143.3. 270 leaves the whole
+ * building inside the frame with the yard reading around it.
+ */
+const WELD_EXTENT = 270;
 
 /**
  * The vertical drop from a target that frames `extent` feet of level ground at `tilt`.
@@ -490,9 +503,27 @@ function buildKeyframes(params: SuiteParams): Record<StageId, Keyframe> {
   //   1      alt 2,600 ft          alt 16,332 ft             23,000 ft -- Cambridge
   //   2      alt   620 ft          alt    815 ft             1,300 ft -- the whole Yard
   //
-  // Stage 3 does NOT move, and that is load-bearing rather than conservative: orbit.ts:71-93
-  // derives the whole of STAGE3_CLAMP from MASS_RADIUS and from this keyframe, so moving it
-  // invalidates a derivation and a brute-force verification in another file.
+  // STAGE 3 MOVED IN P12, AND THE REAL WORLD IS WHY. It stood at [150, 110, 190] -- hand
+  // placed, the one Cartesian stop among five derived ones -- and this paragraph used to say
+  // it must not move because orbit.ts derives STAGE3_CLAMP from it. That reading was too
+  // strong: STAGE3_CLAMP is derived from MASS_RADIUS alone (orbit.ts:126), and what this
+  // keyframe owes it is that its own pose falls INSIDE the clamp -- true of the new stop,
+  // range 230 ft against 115-345 and pitch 45 against 2-75, and asserted in orbit.test.ts.
+  //
+  // What forced the move is geo/frame.ts's datum. Until P12 the site frame hung off the
+  // WGS-84 ellipsoid, 64 ft above Cambridge's actual ground, so every camera in this file
+  // sat 64 ft further above the real world than its own numbers claimed. Google's tiles ARE
+  // the real world, and once the datum put them where they belong this stop -- 110 ft up and
+  // 190 ft SOUTH of Weld, which is over Widener -- was level with Widener's roof and framed
+  // that instead. Measured in the browser: the stage-3 frame was mostly a skylight.
+  //
+  // So it is built the way stages 0-2 are: obliqueDrop() framing a stated extent of ground
+  // at a stated tilt. 270 ft is Weld's own 143.3 ft length with air either side, and the air
+  // is measured rather than taken: at 193 ft (the 1.35x GABLE_FRAMING factor) the stop
+  // stands 158 ft up and runs the facade off both edges of the frame. The 45 degree tilt
+  // continues stage 2's 40, and 38.3 is the azimuth the old Cartesian pose already had --
+  // this file's own azimuth comment records it as that shot's angle -- so the swing eastward
+  // down the descent is unchanged.
   // Each base stop is built exactly as before -- descentStop()/obliqueDrop() are
   // unchanged -- and then rebuilt through its own GeoPose via viaGeoPose(), so the
   // stage's shot is actually a GeoPose construction (P11-PHOTOREAL.md 2.3) rather
@@ -517,11 +548,14 @@ function buildKeyframes(params: SuiteParams): Record<StageId, Keyframe> {
       30,
     ),
   );
-  const three: Keyframe = viaGeoPose({
-    position: [150, 110, 190],
-    target: [0, 42, 0],
-    fov: DESCENT_FOV,
-  });
+  const three: Keyframe = viaGeoPose(
+    descentStop(
+      obliqueDrop(WELD_EXTENT, STAGE3_TILT_DEG, DESCENT_FOV),
+      STAGE3_TILT_DEG,
+      STAGE3_AZIMUTH_DEG,
+      42,
+    ),
+  );
 
   return {
     0: { ...zero, path: descentPath(zero, one) },

@@ -10,21 +10,27 @@ const MIN_SPAN = 0.05;
 describe("legs", () => {
   it("weights the three descent legs by decades of altitude, at DEFAULT_PARAMS", () => {
     const l = legs(DEFAULT_PARAMS);
-    const want = [3.2831, 1.3018, 0.8698, 0.6, 0.9];
+    // Leg 2 fell from 0.8698 to 0.5993 decades in P12, and that is kf[3] moving rather than
+    // this weighting changing: the stage-3 stop rose from 110 ft to 204.96 ft (stages.ts
+    // records why -- at 110 the real world's own Widener stands in the shot), so the drop
+    // from stage 2's 814.6 ft is log10(814.6 / 204.96) = 0.5993 instead of log10(814.6 / 110).
+    const want = [3.2832, 1.3021, 0.5993, 0.6, 0.9];
     l.forEach((leg, i) => expect(leg.span, `leg ${i}`).toBeCloseTo(want[i]!, 3));
     const total = l.reduce((a, b) => a + b.span, 0);
-    expect(total).toBeCloseTo(6.9547, 3);
+    expect(total).toBeCloseTo(6.6846, 3);
   });
 });
 
 describe("boundaries", () => {
   it("places the six stage ticks, ascending, at DEFAULT_PARAMS", () => {
     const b = boundaries(DEFAULT_PARAMS);
-    // The plan's worked table (0.4720, 0.6592, 0.7843, 0.8706) rounds the span table to
-    // 3-4 significant figures before dividing; carrying the full-precision spans through
-    // shifts the last digit of two ticks by one. These are that same division, to the
-    // precision the actual keyframes() geometry produces.
-    const want = [0, 0.4721, 0.6593, 0.7843, 0.8706, 1];
+    // These are the spans above, divided by their total. They moved in P12 because leg 2
+    // did (see that test): a shorter third descent leg is a smaller share of a smaller bar,
+    // so every interior tick shifts right. The plan's original worked table (0.4720, 0.6592,
+    // 0.7843, 0.8706) belongs to the pre-P12 stage-3 altitude and to a span table rounded to
+    // 3-4 significant figures before dividing; this is the division the actual keyframes()
+    // geometry produces.
+    const want = [0, 0.4912, 0.686, 0.7756, 0.8654, 1];
     b.forEach((x, i) => expect(x, `tick ${i}`).toBeCloseTo(want[i]!, 4));
     for (let i = 1; i < b.length; i++) {
       expect(b[i]!, `tick ${i} follows tick ${i - 1}`).toBeGreaterThan(b[i - 1]!);
