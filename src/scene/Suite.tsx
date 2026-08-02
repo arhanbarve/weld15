@@ -9,6 +9,7 @@ import { buildSuite, type Rect, type SuiteParams } from "@/geo/rooms";
 import { buildWalls, suiteFootprint, type Opening, type Wall } from "@/geo/walls";
 import { sashParts } from "@/geo/sash";
 import { trimParts, RAIL_H, doorCasingParts, doorLeafParts, thresholdParts } from "@/geo/trim";
+import { bathFixtureParts } from "@/geo/fixtures";
 import { suiteToThree, floorLevel } from "@/geo/place";
 import type { Piece } from "@/geo/furniture";
 import type { DragResult } from "@/geo/drag";
@@ -22,9 +23,11 @@ import { Furniture } from "./Furniture";
  * with a reveal at every window.
  *
  * WHAT IS DRAWN, AND HOW MANY DRAW CALLS IT COSTS
- * Nine meshes at the defaults (P10 added sash joinery, which also carries
+ * Ten meshes at the defaults (P10 added sash joinery, which also carries
  * baseboard and picture rail, and a separate cornice mesh so it stays
- * visible when the ceiling plate is cut away), plus eleven from <Furniture>
+ * visible when the ceiling plate is cut away; P14 row 9 adds one more for the
+ * bathroom mirror, the one fixture reflective enough to need its own
+ * material), plus eleven from <Furniture>
  * (P10 batches by kind AND material, up from eight). Every one of them is a
  * merge of many boxes: the fifteen wall bands
  * become thirty-one boxes once the openings are cut out of them, and all
@@ -657,8 +660,10 @@ type SuiteGeometry = {
   glazing: THREE.BufferGeometry | null;
   cornice: THREE.BufferGeometry | null;
   ceiling: THREE.BufferGeometry | null;
-  /** The bathroom's tile floor and porcelain wainscot, merged as one mesh. */
+  /** The bathroom's tile floor, porcelain wainscot, tub, lavatory and WC (P14 row 9), merged as one mesh. */
   tile: THREE.BufferGeometry | null;
+  /** The bathroom's mirror -- the one fixture with a material of its own. */
+  mirror: THREE.BufferGeometry | null;
   yaw: number;
 };
 
@@ -727,6 +732,17 @@ function buildSuiteGeometry(params: SuiteParams, hidden: ReadonlySet<string>): S
     oak.push(...thresholdSlabs(w, cuts, floor));
     if (bath) tile.push(...bathWainscotSlab(w, cuts, bath, floor));
   }
+  // Fixtures (P14 row 9), walked once like the leaf below rather than per wall: they
+  // are not wall-band features, just fixed geometry standing in the room. Present in
+  // every cutaway mode, the same as the floor they stand on -- a wallsDown or section
+  // cut removes the wall a fixture backs onto, not the fixture itself.
+  const mirror: Slab[] = [];
+  if (bath) {
+    const fx = bathFixtureParts(bath, floor);
+    tile.push(...fx.porcelain, ...fx.curtain);
+    sashJoinery.push(...fx.joinery);
+    mirror.push(...fx.mirror);
+  }
   // Walked once over every opening rather than inside the per-wall loop above:
   // a leaf is chiral and needs the specific room it swings into, which a Cut
   // no longer carries -- see doorLeafSlabs()'s own header.
@@ -774,6 +790,7 @@ function buildSuiteGeometry(params: SuiteParams, hidden: ReadonlySet<string>): S
     cornice: mergeSlabs(cornice, yaw, params, "cornice"),
     ceiling: mergeSlabs(ceiling, yaw, params, "ceiling"),
     tile: mergeSlabs(tile, yaw, params, "bathroom tile"),
+    mirror: mergeSlabs(mirror, yaw, params, "bathroom mirror"),
     yaw,
   };
 }
@@ -805,6 +822,7 @@ function useSuitePalette(opacity: number) {
       glazing: m.glazing.clone(),
       slate: m.slate.clone(),
       porcelain: m.porcelain.clone(),
+      mirror: m.mirror.clone(),
     };
     // Every face here is seen from inside a room. FrontSide culls all of them.
     for (const x of Object.values(p)) x.side = THREE.DoubleSide;
@@ -999,6 +1017,7 @@ export function Suite({
       ) : null}
       {geo.unknownMark ? <mesh geometry={geo.unknownMark} material={pal.slate} /> : null}
       {geo.tile ? <mesh geometry={geo.tile} material={pal.porcelain} receiveShadow={solid} /> : null}
+      {geo.mirror ? <mesh geometry={geo.mirror} material={pal.mirror} /> : null}
       {geo.partitions ? (
         <mesh geometry={geo.partitions} material={pal.plaster} receiveShadow={solid} />
       ) : null}

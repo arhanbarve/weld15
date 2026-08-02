@@ -420,6 +420,7 @@ export type Palette = {
   brick: THREE.MeshStandardMaterial;
   hardware: THREE.MeshStandardMaterial;
   porcelain: THREE.MeshStandardMaterial;
+  mirror: THREE.MeshStandardMaterial;
 };
 
 let cache: Palette | null = null;
@@ -558,7 +559,30 @@ export function materials(): Palette {
     metalness: 0,
   });
 
-  cache = { plaster, oak, masonry, glazing, crimson, oakDeep, slate, brick, hardware, porcelain };
+  // The bathroom mirror (P14 row 9): high metalness and low roughness so
+  // Lighting.tsx's scene.environment (the same procedural room map glazing already
+  // reflects, see materials.ts's own note on glazing) gives it a soft reflection,
+  // rather than an invented reflective texture. Near-white rather than tinted, so
+  // that reflection reads as silvering and not as coloured glass.
+  const mirror = new THREE.MeshStandardMaterial({
+    color: "#e8e8e8",
+    roughness: 0.05,
+    metalness: 0.9,
+  });
+
+  cache = {
+    plaster,
+    oak,
+    masonry,
+    glazing,
+    crimson,
+    oakDeep,
+    slate,
+    brick,
+    hardware,
+    porcelain,
+    mirror,
+  };
   return cache;
 }
 

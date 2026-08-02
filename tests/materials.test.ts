@@ -456,13 +456,14 @@ describe("headless, where vitest and any SSR pass live", () => {
 // ------------------------------------------------------------------- palette
 
 describe("palette", () => {
-  it("returns exactly the ten keys in the contract", () => {
+  it("returns exactly the eleven keys in the contract", () => {
     expect(Object.keys(materials()).sort()).toEqual([
       "brick",
       "crimson",
       "glazing",
       "hardware",
       "masonry",
+      "mirror",
       "oak",
       "oakDeep",
       "plaster",
@@ -498,9 +499,9 @@ describe("palette", () => {
     expect(lum(m.oakDeep.color)).toBeLessThan(lum(m.oak.color));
   });
 
-  it("is entirely non-metal, except the one material that is furniture hardware", () => {
+  it("is entirely non-metal, except furniture hardware and the mirror", () => {
     for (const [k, mat] of Object.entries(materials())) {
-      if (k === "hardware") continue;
+      if (k === "hardware" || k === "mirror") continue;
       expect(mat.metalness, k).toBe(0);
     }
   });
@@ -597,6 +598,20 @@ describe("palette", () => {
     }
   });
 
+  it("makes the mirror the one other reflective surface, and it is not glazing again", () => {
+    const m = materials();
+    // High metalness and low roughness is the reflective pairing hardware
+    // deliberately stops short of ("satin, not mirror" -- see materials()'s own
+    // comment on hardware); the mirror is the one place that pairing belongs.
+    expect(m.mirror.metalness).toBeGreaterThan(m.hardware.metalness);
+    expect(m.mirror.roughness).toBeLessThan(m.hardware.roughness);
+    // Near-white rather than tinted: a mirror reads as silvering, not as the
+    // same blue-tinted pane a window is.
+    expect(hexOf(m.mirror.color)).not.toBe(hexOf(m.glazing.color));
+    const lum = (c: THREE.Color) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+    expect(lum(m.mirror.color)).toBeGreaterThan(0.7);
+  });
+
   it("disposes every material, the grain texture and the plaster tooth, then rebuilds fresh", () => {
     const first = withStubCanvas(() => materials()).value;
     const grain = oakNormalMap();
@@ -617,6 +632,7 @@ describe("palette", () => {
       "grain",
       "hardware",
       "masonry",
+      "mirror",
       "oak",
       "oakDeep",
       "plaster",
