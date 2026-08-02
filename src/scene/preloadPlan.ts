@@ -76,6 +76,14 @@ export const TOTAL_BATCHES = Math.ceil(N_POSES / POSES_PER_BATCH);
  * in u; since u and altitude both decrease monotonically along the descent (stages.ts's own
  * "descends monotonically" regression fence), sampling in ascending u already IS descending
  * altitude, so no separate sort is needed.
+ *
+ * ONE EXCEPTION, NOT A CONTRADICTION: the last leg climbs the modelled stair from the
+ * loggia's own grade-level arch crossing up to the stair hall's floor level (P14 rows 5-7,
+ * stages.ts's thresholdPath(), eyeGround -> eyeUpstairs), so the final handful of samples
+ * rise rather than keep falling. That climb lands entirely inside the last batch alongside
+ * the rest of the lowest-altitude samples, so batch-level ordering -- the thing this
+ * comment and errorTarget's step-down actually depend on -- is unaffected; only a
+ * pose-by-pose comparison at the very tail would notice.
  */
 /**
  * Kept strictly below 1 when resolving (stage, t): journey.ts's fromJourney maps u = 1 to

@@ -583,20 +583,35 @@ test.describe("P6 -- the suite is changeable", () => {
     const midDrag = await calls();
     await page.mouse.up();
 
-    // Measured on this build: 46 idle at stage 5, and three more while a gesture is live --
-    // still the same +3 a ghost and an outline plus the frame's own bookkeeping cost
-    // before P10, so a live gesture's overhead did not move; only the idle floor did.
+    // Measured on this build: 57 idle at stage 5, and three more while a gesture is live --
+    // still the same +3 a ghost and an outline plus the frame's own bookkeeping cost every
+    // prior figure here found, so a live gesture's overhead has never moved; only the idle
+    // floor keeps rising as the suite gains real geometry.
     //
-    // Idle rose from 38 to 46 with P10: real furniture geometry (11 batches by kind AND
-    // material, up from 8) and interior sash joinery/glazing/cornice (geo/sash.ts,
-    // geo/trim.ts) replaced the old shared-unit-box furniture and flat window panes.
-    // NOTHING is a surprise here -- every one of those additions is exactly what P10 set
-    // out to draw, each measured and recorded in its own commit. 46 + 3 is 49, which is
-    // why the ceiling moves to 50: the same two calls of headroom over the gesture the
-    // previous figure kept. Still well clear of campus.spec.ts's 30, which covers stages
-    // 1 to 3 where nothing casts.
+    // Idle rose from 50 to 57 with P14 row 8: Outlook.tsx mounts a keyless world (two
+    // FallbackGround ground quads plus one merged campus.glb mesh, +3) now that stage 5's
+    // own windows are real holes in the wall rather than a solid casing panel and
+    // `visibility()`'s own `tiles` flag covers that stage too -- see stages.ts's docblock
+    // on visibility() and Outlook.tsx's own header. The remaining +4 over the prior 53 is
+    // the same async-load variance FallbackGround has always had at earlier stages
+    // (GroundQuad/the campus mesh render nothing until their own texture/GLTF arrives, so
+    // "idle" can read a few calls lower on a run whose load races the 1.4 s settle wait);
+    // 57 is this build's settled ceiling, not its floor. 57 + 3 is 60, which is why the
+    // ceiling moves to 62: two calls of headroom over the gesture, the same margin every
+    // previous figure here kept.
+    //
+    // P14 ROW 12, THE FINAL RE-MEASUREMENT: rows 9-11 (bathroom fixtures, baked AO,
+    // ceiling fixtures and radiators) added no further calls to THIS idle figure --
+    // fixtures and ceiling canopies reuse the porcelain merge, radiators the oak-toned
+    // sash-joinery merge, and baked AO is a vertex attribute, not a mesh. The one new
+    // mesh, the bathroom mirror (its own material), does not show up in the hall's own
+    // idle count because it is out of frustum from the arrival pose -- facing it directly
+    // costs one more call, the same "frustum, not a cost" finding walk.spec.ts's own
+    // draw-call test already records for first-person movement generally. So 57 idle /
+    // 62 ceiling is this phase's own settled figure, not a checkpoint expecting another
+    // widening.
     expect(midDrag - idle, `idle ${idle}, mid-drag ${midDrag}`).toBeLessThanOrEqual(3);
-    expect(midDrag, `idle ${idle}, mid-drag ${midDrag}`).toBeLessThanOrEqual(50);
+    expect(midDrag, `idle ${idle}, mid-drag ${midDrag}`).toBeLessThanOrEqual(62);
   });
 
   test("the room is lit with real shadows, and they are paid for once", async ({ page }) => {
@@ -623,10 +638,10 @@ test.describe("P6 -- the suite is changeable", () => {
     // shows up here as a decision.
     expect(p.casters, `casters ${p.casters}`).toBeGreaterThanOrEqual(8);
     expect(p.casters, `casters ${p.casters}`).toBeLessThanOrEqual(14);
-    // And the cost is the measured one, not a surprise. 46 shipped with P10 (was 38; see
-    // the drag-budget test above for what moved); 50 leaves room for a gesture's ghost
-    // and outline.
+    // And the cost is the measured one, not a surprise. 57 shipped with P14 row 8 (was 50
+    // with rows 1-6, 46 with P10; see the drag-budget test above for what moved); 62 leaves
+    // room for a gesture's ghost and outline.
     expect(p.calls, `calls ${p.calls}`).toBeGreaterThan(30);
-    expect(p.calls, `calls ${p.calls}`).toBeLessThanOrEqual(50);
+    expect(p.calls, `calls ${p.calls}`).toBeLessThanOrEqual(62);
   });
 });

@@ -97,4 +97,25 @@ describe("sashParts()", () => {
       }
     }
   });
+
+  /**
+   * The casing is an architrave -- two jambs and a head -- not a panel over the
+   * whole opening. A single box spanning the full width and the full
+   * sill-to-head range shipped for a while: it stood proud of the room face
+   * and covered every window in the model, since nothing here checked that the
+   * "proud" parts left the opening itself clear. This is that check.
+   */
+  it("never covers the opening: the room-face parts leave a clear hole", () => {
+    for (const width of [1, 3, 4.5, 8, 16]) {
+      const proud = sashParts(width, SILL, HEAD, SASH_DEPTH).filter((p) => p.v < 0);
+      for (const p of proud) {
+        const overlapsU = p.u < width - EPS && p.u + p.du > 0 + EPS;
+        const overlapsY = p.y0 < HEAD - EPS && p.y1 > SILL + EPS;
+        expect(
+          overlapsU && overlapsY,
+          `width ${width}: proud part u[${p.u},${p.u + p.du}] y[${p.y0},${p.y1}] covers the opening`,
+        ).toBe(false);
+      }
+    }
+  });
 });

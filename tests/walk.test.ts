@@ -228,6 +228,7 @@ function gapCtx(width: number): WalkCtx {
     ],
     rooms,
     solids: solidsOf([band], [gap], rooms),
+    fixtures: [],
     radius: RADIUS,
   };
 }
@@ -657,18 +658,29 @@ describe("walk into every wall in turn", () => {
 
   it("finds a real approach to every one of the fifteen bands", () => {
     // Non-vacuity, and worth stating: an empty list passes every assertion below.
-    // Measured on the default suite: 37 approaches over 20 solids, and every one of the
+    // Measured on the default suite: 36 approaches over 20 solids, and every one of the
     // 15 bands is walked into from at least one side. A band whose only reachable face is
     // the outside of the facade masonry would contribute nothing, and none is.
     //
-    // 36 over 19 solids before the hall-to-common-room door, and the one extra approach is
+    // 37 over 20 solids before P14 row 9's bathroom fit-out (geo/fixtures.ts) started
+    // counting as clearance too (walk.ts's clearance()/isClear() check ctx.fixtures
+    // alongside ctx.solids, though the fixtures themselves are not bands and are not
+    // counted in ctx.solids.length below). The one approach this test lost is w5's own
+    // -- the bath's low-v wall, shared with bedroom A -- standing at (13.25, 27.125),
+    // 2 ft plus RADIUS out from the wall on the BATH side. The tub (geo/fixtures.ts)
+    // sits flush against that same wall, u 8.05 to 13.05, so a stand 0.2 ft past its own
+    // edge is 0.55 ft inside the tub's own clearance -- a real fixture in a real
+    // photographed bathroom would refuse this approach too. This is the count moving
+    // because the room is more furnished, not because a band went missing.
+    //
+    // 36 over 19 solids before the hall-to-common-room door, and the earlier +1 there was
     // that door's doing rather than a drift. It splits w0 into two pieces where there was
     // one, u 0 to 16.5 and u 19.5 to 21. The long piece keeps the two approaches the whole
     // band had -- from the common room to its south and bedroom A to its north, the only
     // two faces of it a walker can stand clear of -- and the 1.5 ft stub beyond the door
     // adds one, from the hall. Its other three starts are refused: two land in the band's
     // own row and one lands inside w7, so none of them is clear.
-    expect(approaches.length).toBe(37);
+    expect(approaches.length).toBe(36);
     expect(ctx.solids.length).toBe(20);
     expect(new Set(approaches.map((a) => a.s.wallId)).size).toBe(ctx.walls.length);
     expect(approaches.filter((a) => a.s.wallId === "w0").length).toBe(3);

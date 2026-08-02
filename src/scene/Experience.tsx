@@ -14,11 +14,11 @@ import { Ground } from "./Ground";
 import { Labels } from "./Labels";
 import { Campus } from "./Campus";
 import { WeldMarker } from "./WeldMarker";
-import { FallbackGround } from "./FallbackGround";
-import { Tiles } from "./Tiles";
 import { Preload } from "./Preload";
+import { Outlook } from "./Outlook";
 import { WeldExterior } from "./WeldExterior";
 import { Suite } from "./Suite";
+import { CommonParts } from "./CommonParts";
 import { Effects } from "./Effects";
 import { Perf } from "./Perf";
 import { Hud } from "@/ui/Hud";
@@ -191,14 +191,13 @@ export default function Experience() {
               the hall, behind the walls the ring and pin sit outside of, so there is nothing left
               for either to mark from in there. */}
           <WeldMarker visible={stage >= 2 && stage <= 4} />
-          {/* `<Tiles>` has no `visible` prop of its own -- it is unconditionally mounted whenever
-              a key is present, which is already the "real tiles are visible from orbit all the
-              way down" behaviour `tiles`'s own comment in stages.ts argues for, so there is
-              nothing to gate here. `<FallbackGround>` does have one, and takes `vis.tiles` like
-              Ground and Campus, for the same §0.7 fix -- and is the ONLY world-geometry mounted
-              on the keyless path, now that Globe/Ground/Campus are gated off above whenever a key
-              is present. */}
-          {HAS_TILES_KEY ? <Tiles /> : <FallbackGround visible={vis.tiles} />}
+          {/* Outlook.tsx owns the HAS_TILES_KEY branch itself now (P14 row 8) -- it is the
+              ONLY world-geometry mounted on the keyless path, now that Globe/Ground/Campus
+              are gated off above whenever a key is present, and it is what stage 5's own
+              windows now look out onto, `tiles` having been extended to cover that stage
+              too. See its own header for why that earned a component rather than another
+              line in this file's ternary. */}
+          <Outlook visible={vis.tiles} />
           {/* P13: registers synthetic cameras at every sampled descent pose so their tiles
               are resident before the app is reachable (docs/phases/P13-PRELOAD.md). A no-op
               whenever `!HAS_TILES_KEY` or `?preload=0` -- see Preload.tsx's own header --
@@ -228,6 +227,12 @@ export default function Experience() {
               two buildings trading places. `vis.weld` is kept as the stage window it has
               always been; `model` narrows it. */}
           <WeldExterior visible={vis.weld && model} opacity={shell} />
+          {/* The loggia, stair hall, stair and corridor beyond the suite's own
+              entry door (P14 rows 5-6). Stage 5 only for now: it exists so the
+              entry reads as a real doorway rather than a crack onto sky, which
+              only matters once the camera is inside the suite looking at that
+              door. */}
+          <CommonParts visible={stage === LAST_STAGE} params={params} />
           <Suite
             visible={vis.interior}
             opacity={interiorOpacity}

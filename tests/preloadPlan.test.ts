@@ -20,8 +20,20 @@ describe("preloadPoses", () => {
     }
   });
 
-  it("altitude decreases monotonically -- the whole premise of high-to-low batching", () => {
+  it("altitude decreases monotonically down to the loggia's own grade crossing", () => {
+    // Not the whole path any more (P14 rows 5-7): the last leg climbs the modelled stair
+    // from the loggia's grade-level arch crossing up to the stair hall's own floor level
+    // (stages.ts's thresholdPath(), eyeGround -> eyeUpstairs), so the very end of the
+    // descent has a real, small altitude RISE rather than a continued fall. That climb
+    // lands inside the final batch regardless (POSES_PER_BATCH groups it with the rest of
+    // the lowest-altitude samples), so it costs the coarse-to-fine batching order nothing --
+    // this test now only asserts the part of the premise that still holds: every sample up
+    // to the lowest point of the whole path is strictly lower than the one before it.
+    let minIdx = 0;
     for (let i = 1; i < poses.length; i++) {
+      if (poses[i]!.altFt < poses[minIdx]!.altFt) minIdx = i;
+    }
+    for (let i = 1; i <= minIdx; i++) {
       expect(poses[i]!.altFt, `pose ${i}`).toBeLessThan(poses[i - 1]!.altFt);
     }
   });

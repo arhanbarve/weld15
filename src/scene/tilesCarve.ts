@@ -68,18 +68,23 @@ export const HALF_U = weld.meta.width_ft_max_at_wings / 2;
 /** Half the footprint's overall length, ft. */
 export const HALF_V = weld.meta.length_ft / 2;
 
-/**
- * Clear below grade, ft: no other constant in this project records "how far below the
- * ground a real photogrammetric mesh's own terrain relief might dip near a building", so
- * this is this module's own margin rather than a reused figure. Generous against the ~2 ft
- * feather below it.
- */
-const BELOW_GRADE_FT = 5;
-
 /** Ridge plus the roof feature's inferred maximum rise -- see the header. */
 export const HEIGHT_MAX = weld.meta.ridge_height_ft + weld.meta.towers.height_above_ridge_ft_estimate;
 
-export const HEIGHT_MIN = -BELOW_GRADE_FT;
+/**
+ * Grade, not 5 ft below it -- P14 row 8's fix. A 5 ft margin held `dyLow` deeply negative
+ * for real terrain anywhere under the footprint's own middle (real relief rarely dips a
+ * full 5 ft off nominal grade), which made `outside` there track `dyLow` instead of the
+ * horizontal terms and carve the ground away at essentially full strength, not just the
+ * feathered ~2 ft the spec asks for. That was invisible before P14: nothing stood inside
+ * the shell to look back out across the footprint. Once a window is a real hole in the
+ * wall (sash.ts), a sightline that grazes back over the suite's own footprint on its way
+ * out reads as a void in the ground rather than the ground. Pinning the boundary to grade
+ * itself gives real terrain (which varies a foot or so either side of the datum) the same
+ * fair ~2 ft feather every other face of the prism already gets, rather than a standing
+ * 5 ft head start toward fully discarded.
+ */
+export const HEIGHT_MIN = 0;
 
 /** How far either side of the prism boundary the cut is feathered, ft. Spec: "~2 ft". */
 export const FEATHER_FT = 2;

@@ -70,8 +70,10 @@ describe("carveFactor: the prism containment math", () => {
     expect(FEATHER_FT).toBeCloseTo(2, 6);
   });
 
-  it("has a vertical span from near grade to above the ridge", () => {
-    expect(HEIGHT_MIN).toBeLessThan(0);
+  it("has a vertical span from grade to above the ridge", () => {
+    // P14 row 8: pinned to grade itself, not a below-grade margin -- see tilesCarve.ts's
+    // own comment on HEIGHT_MIN for why a margin here hid real terrain under the footprint.
+    expect(HEIGHT_MIN).toBe(0);
     expect(HEIGHT_MAX).toBeGreaterThan(85); // clear of the 85.4 ft ridge
   });
 

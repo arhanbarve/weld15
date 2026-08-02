@@ -44,6 +44,7 @@
 
 import type { Rect, Suite } from "@/geo/rooms";
 import { buildWalls, suiteFootprint, type Opening, type Wall } from "@/geo/walls";
+import { bathFixtureParts } from "@/geo/fixtures";
 
 /** A point in the suite frame, in feet. */
 export type Vec2 = { u: number; v: number };
@@ -199,6 +200,14 @@ export type WalkCtx = {
   rooms: Rect[];
   /** what the walker cannot enter, doors already cut out */
   solids: Solid[];
+  /**
+   * Fixed fixtures the walker cannot enter either (P14 row 9's bathroom fit-out),
+   * kept apart from `solids` rather than folded into it: every solid there comes
+   * from exactly one wall band, an invariant tests/walk.test.ts checks directly by
+   * looking each one's wallId back up in `walls` -- a fixture has no band to name.
+   * clearance() checks both.
+   */
+  fixtures: Solid[];
   /** the walker's radius in plan, ft */
   radius: number;
 };
@@ -373,6 +382,24 @@ export function solidsOf(
   return out;
 }
 
+/**
+ * The bathroom's fixed fixtures (P14 row 9), as Solids -- geo/fixtures.ts's own
+ * `solid` field, given a synthetic wallId since they came from no wall band. `0` for
+ * `floor`: FixturePart carries a y0/y1 this module never reads (HEIGHT IS DROPPED,
+ * see the header), so any value produces the same u/v/du/dv.
+ */
+function bathFixtureSolids(rooms: readonly Rect[]): Solid[] {
+  const bath = rooms.find((r) => r.kind === "bath");
+  if (!bath) return [];
+  return bathFixtureParts(bath, 0).solid.map((p, i) => ({
+    wallId: `fixture:bath:${i}`,
+    u: p.u,
+    v: p.v,
+    du: p.du,
+    dv: p.dv,
+  }));
+}
+
 /** Everything a step needs, for one suite. Memoise this per params, not per frame. */
 export function walkContext(suite: Suite, radius = RADIUS): WalkCtx {
   const { walls, openings } = buildWalls(suite);
@@ -382,6 +409,7 @@ export function walkContext(suite: Suite, radius = RADIUS): WalkCtx {
     footprint: suiteFootprint(suite),
     rooms: suite.rooms,
     solids: solidsOf(walls, openings, suite.rooms, radius),
+    fixtures: bathFixtureSolids(suite.rooms),
     radius,
   };
 }
@@ -403,6 +431,10 @@ function distanceTo(p: Vec2, r: { u: number; v: number; du: number; dv: number }
 export function clearance(p: Vec2, ctx: WalkCtx): number {
   let best = Infinity;
   for (const s of ctx.solids) {
+    const d = distanceTo(p, s) - ctx.radius;
+    if (d < best) best = d;
+  }
+  for (const s of ctx.fixtures) {
     const d = distanceTo(p, s) - ctx.radius;
     if (d < best) best = d;
   }
@@ -513,7 +545,7 @@ function resolve(p: Vec2, ctx: WalkCtx): Vec2 {
     // deep one, and starting with the deep one usually settles both at once.
     let worst: Solid | null = null;
     let worstDepth = 0;
-    for (const s of ctx.solids) {
+    for (const s of [...ctx.solids, ...ctx.fixtures]) {
       const depth = ctx.radius - distanceTo(at, s);
       if (depth > worstDepth) {
         worstDepth = depth;

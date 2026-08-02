@@ -8,7 +8,8 @@ import { mergeBufferGeometries } from "three-stdlib";
 import { buildSuite, type Rect, type SuiteParams } from "@/geo/rooms";
 import { buildWalls, suiteFootprint, type Opening, type Wall } from "@/geo/walls";
 import { sashParts } from "@/geo/sash";
-import { trimParts, RAIL_H } from "@/geo/trim";
+import { trimParts, RAIL_H, doorCasingParts, doorLeafParts, thresholdParts } from "@/geo/trim";
+import { bathFixtureParts, ceilingFixturePart, roomRadiatorPart } from "@/geo/fixtures";
 import { suiteToThree, floorLevel } from "@/geo/place";
 import type { Piece } from "@/geo/furniture";
 import type { DragResult } from "@/geo/drag";
@@ -22,9 +23,11 @@ import { Furniture } from "./Furniture";
  * with a reveal at every window.
  *
  * WHAT IS DRAWN, AND HOW MANY DRAW CALLS IT COSTS
- * Nine meshes at the defaults (P10 added sash joinery, which also carries
+ * Ten meshes at the defaults (P10 added sash joinery, which also carries
  * baseboard and picture rail, and a separate cornice mesh so it stays
- * visible when the ceiling plate is cut away), plus eleven from <Furniture>
+ * visible when the ceiling plate is cut away; P14 row 9 adds one more for the
+ * bathroom mirror, the one fixture reflective enough to need its own
+ * material), plus eleven from <Furniture>
  * (P10 batches by kind AND material, up from eight). Every one of them is a
  * merge of many boxes: the fifteen wall bands
  * become thirty-one boxes once the openings are cut out of them, and all
@@ -133,7 +136,7 @@ export function rectCentre(r: Rect | Wall, z: number, params: SuiteParams): THRE
  * unknown room's diagonal mark. `boards` asks for the oak grain to be scaled to
  * this box's real size -- see slabGeometry().
  */
-type Slab = {
+export type Slab = {
   u: number;
   v: number;
   du: number;
@@ -143,6 +146,116 @@ type Slab = {
   turn?: number;
   boards?: true;
 };
+
+/**
+ * How far a baked-AO darkening reaches from a box's own edge, ft. ASSUMED -- a few
+ * inches, the same order as a real contact shadow where a baseboard meets a floor.
+ */
+export const AO_DEPTH_FT = 0.15;
+
+/** How dark the very edge of a box gets, as a multiple of its own material color. ASSUMED. */
+export const AO_MIN = 0.72;
+
+/**
+ * An axis is worth subdividing for AO once it clears this, ft. ASSUMED, but not
+ * arbitrary: it is twice AO_DEPTH_FT, the shortest an axis can be and still have
+ * ANY point further than AO_DEPTH_FT from both its own ends at once.
+ */
+const AO_SEG_MIN_FT = 2 * AO_DEPTH_FT;
+
+/**
+ * Interior resolution once an axis clears AO_SEG_MIN_FT. ASSUMED, chosen small on
+ * purpose -- see applyAoColor()'s own header on why a fine grid is not affordable
+ * here, and this function's own test file for the measured triangle cost this
+ * bought project-wide.
+ */
+const AO_SEGMENTS = 3;
+
+/**
+ * How many segments slabGeometry() should build a box's given axis with, so
+ * applyAoColor() below has an interior vertex to read a gradient from. BoxGeometry
+ * vertices sit ONLY at face corners -- every one of a plain box's 24 vertices has
+ * ALL THREE local coordinates pinned to that axis's own half-extent, so a
+ * distance-to-edge computed straight off `position` is zero everywhere and every
+ * vertex reads as the same, fully-occluded colour. This is the fix: segments add
+ * vertices along the middle of an axis, where distance-to-edge is genuinely
+ * nonzero, and this function is the one place that decides how many.
+ */
+export function aoSegments(extentFt: number): number {
+  return extentFt > AO_SEG_MIN_FT ? AO_SEGMENTS : 1;
+}
+
+/**
+ * Baked per-vertex ambient occlusion, box by box -- P14 row 10.
+ *
+ * NOT N8AO. Effects.tsx's own header records why a screen-space AO pass was tried and
+ * dropped: its per-frame cost under SwiftShader (headless Chromium's software
+ * rasterizer, which the whole e2e suite runs on) broke a wall-clock-timed walk test
+ * and timed out a perf test outright, and gating it on measured frame time is the
+ * fix Perf.tsx's own header already warns against. This is the opposite kind of cost:
+ * a one-time vertex attribute, written when the geometry is built (the same moment
+ * scaleFloorUv() scales its UVs) and never touched again. Zero per-frame cost, and no
+ * new DRAW call -- every box still merges into the same handful of meshes. It is not
+ * free in triangles (see aoSegments()'s own header and this function's test file for
+ * the measured total), which is the one cost this trades against N8AO's frame time.
+ *
+ * THE PROXY, AND WHY IT NEEDS NO NEW DATA. Every wall in this suite is emitted as
+ * the complement of the rooms (geo/walls.ts's own header), so a room's Rect already
+ * IS bounded by its own walls -- there is no separate "distance to the nearest wall"
+ * fact to fetch for a floor slab, because that distance is exactly the distance to
+ * the slab's OWN footprint edge. The same is true vertically: a wall slab's y0 is
+ * exactly where it meets the floor and y1 exactly where it meets the lintel or
+ * ceiling. So this darkens every box toward its OWN silhouette, using only the Slab
+ * already in scope, before slabGeometry()'s own transform moves it into the room.
+ * That is a real simplification: it cannot tell a real inside corner (two walls
+ * meeting) from a doorway (no wall there at all), and doing so would mean threading
+ * the wall adjacency graph through every merge. What it buys uniformly and for free
+ * is every floor-to-wall line, every wall-to-ceiling line, every piece of trim's own
+ * edge, and every fixture's own base reading as a hair darker than its own centre --
+ * the cue N8AO gave without N8AO's per-frame cost.
+ *
+ * THE THINNEST AXIS IS EXCLUDED, and this is the second fix past plain
+ * distance-to-edge. A Slab is a THIN THING along at least one axis by construction
+ * -- a floor is a few inches of FLOOR_SLAB, a baseboard is BASE_PROUD ft proud of
+ * the wall -- and that thinness is the slab's own nature, not a sign of occlusion.
+ * Folding it into the same min() as the other two axes would zero the gradient
+ * everywhere on a floor twenty feet across, because every vertex sits at the top or
+ * bottom face regardless of where it is in the room. Excluding the box's own
+ * shortest axis leaves the two axes where "near this box's own edge" is actually a
+ * meaningful occlusion cue -- for a floor, its footprint; for a baseboard, its run
+ * and its height.
+ *
+ * UNIFORM ACROSS EVERY SLAB, NOT SOME. mergeBufferGeometries (three-stdlib) requires
+ * every geometry in one merge call to carry the same attribute set or none of them,
+ * throwing otherwise -- so a `color` attribute half-applied within one merged mesh
+ * (say, room floors but not threshold boards, which share the `oak` merge) is not an
+ * option. Called on every box before every merge, so every Suite mesh gets one, and
+ * useSuitePalette() below turns `vertexColors` on for every material to match --
+ * including the ones this component's own comment on itself already flags as shared
+ * across several meshes (plaster across partitions/cornice/ceiling, masonry across
+ * the unknown room's floor and the exterior walls), which is exactly why "some
+ * boxes get it" was never survivable here.
+ */
+export function applyAoColor(geometry: THREE.BufferGeometry, s: Slab): void {
+  const position = geometry.getAttribute("position");
+  const half: [number, number, number] = [s.du / 2, (s.y1 - s.y0) / 2, s.dv / 2];
+  const thinnest = half.indexOf(Math.min(...half));
+  const colors = new Float32Array(position.count * 3);
+  for (let i = 0; i < position.count; i++) {
+    const p: [number, number, number] = [position.getX(i), position.getY(i), position.getZ(i)];
+    let edge = Infinity;
+    for (let axis = 0; axis < 3; axis++) {
+      if (axis === thinnest) continue;
+      edge = Math.min(edge, half[axis]! - Math.abs(p[axis]!));
+    }
+    const t = Math.min(1, Math.max(0, edge / AO_DEPTH_FT));
+    const b = AO_MIN + (1 - AO_MIN) * t;
+    colors[i * 3] = b;
+    colors[i * 3 + 1] = b;
+    colors[i * 3 + 2] = b;
+  }
+  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+}
 
 /**
  * One Slab as a positioned BufferGeometry.
@@ -157,11 +270,21 @@ type Slab = {
  * that is guaranteed. The merge copies the scaled UVs, so one shared oak material
  * at repeat 1 still gives 6 in boards in a 20 ft common room and in a 4.5 ft hall
  * at the same time. Calling it per render instead is what makes a floor read as one
- * enormous board.
+ * enormous board. applyAoColor() is the same idiom for the same reason, one
+ * attribute later.
  */
 function slabGeometry(s: Slab, yaw: number, params: SuiteParams): THREE.BufferGeometry {
-  const g = new THREE.BoxGeometry(s.du, s.y1 - s.y0, s.dv);
+  const height = s.y1 - s.y0;
+  const g = new THREE.BoxGeometry(
+    s.du,
+    height,
+    s.dv,
+    aoSegments(s.du),
+    aoSegments(height),
+    aoSegments(s.dv),
+  );
   if (s.boards) scaleFloorUv(g, s.du, s.dv);
+  applyAoColor(g, s);
   const c = suiteToThree(s.u + s.du / 2, s.v + s.dv / 2, (s.y0 + s.y1) / 2, params);
   g.applyMatrix4(
     new THREE.Matrix4().compose(
@@ -196,7 +319,7 @@ function mergeSlabs(
 }
 
 /** A void cut through a wall band: a span along its length and a vertical range. */
-type Cut = { lo: number; hi: number; y0: number; y1: number };
+export type Cut = { lo: number; hi: number; y0: number; y1: number };
 
 /**
  * Which way a band runs, how long it is, and how thick.
@@ -227,7 +350,7 @@ function spanRect(w: Wall, lo: number, hi: number, alongV: boolean) {
  * Doors and windows are merged separately -- they have different heads, and a
  * door merged into a window would acquire a sill.
  */
-function cutsFor(w: Wall, openings: Opening[], wallH: number): Cut[] {
+export function cutsFor(w: Wall, openings: Opening[], wallH: number): Cut[] {
   const { along } = bandAxis(w);
   const raw: (Cut & { kind: Opening["kind"] })[] = [];
 
@@ -352,12 +475,17 @@ function sashSlabs(
 }
 
 /**
- * Baseboard, picture rail and cornice for one band, on every room-facing
- * side of it. An exterior band has exactly one: the room it encloses. A
- * partition, in this suite's layout, always has a real room on both sides
- * -- rooms.ts never leaves a partition's far side open -- so both faces get
- * trim, each proud in the opposite direction, at the SAME across-axis
- * mirror sashSlabs() uses.
+ * Baseboard, picture rail, cornice and door casing for one band, on every
+ * room-facing side of it. An exterior band has exactly one: the room it
+ * encloses. A partition, in this suite's layout, always has a real room on
+ * both sides -- rooms.ts never leaves a partition's far side open -- so both
+ * faces get trim, each proud in the opposite direction, at the SAME
+ * across-axis mirror sashSlabs() uses.
+ *
+ * Door casing is symmetric -- unlike the leaf, it has no `turn` and no
+ * opinion about which room is which -- so it is placed here, by the same
+ * per-face mirror as the baseboard, rather than beside the leaf in
+ * doorLeafSlabs() below.
  */
 function roomTrimSlabs(
   w: Wall,
@@ -368,7 +496,8 @@ function roomTrimSlabs(
 ): { joinery: Slab[]; plaster: Slab[] } {
   const { alongV, along, thick } = bandAxis(w);
   const low = alongV ? w.u : w.v;
-  const doorSpans = solidSpans(cuts.filter((c) => c.y0 <= EPS), along);
+  const doorCuts = cuts.filter((c) => c.y0 <= EPS);
+  const doorSpans = solidSpans(doorCuts, along);
   const railSpans = solidSpans(cuts.filter((c) => c.y1 > RAIL_H + EPS), along);
   const faces = w.kind === "exterior" ? [roomFaceIsLow(w, rooms)] : [true, false];
 
@@ -382,8 +511,227 @@ function roomTrimSlabs(
         : { u: w.u + p.u, v: across, du: p.du, dv: p.dv, y0: floor + p.y0, y1: floor + p.y1 };
       (p.material === "plaster" ? plaster : joinery).push(slab);
     }
+    for (const c of doorCuts) {
+      for (const p of doorCasingParts(c.hi - c.lo, c.y1)) {
+        const localU = p.u + c.lo;
+        const across = roomLow ? low + p.v : low + thick - p.v - p.dv;
+        const slab: Slab = alongV
+          ? { u: across, v: w.v + localU, du: p.dv, dv: p.du, y0: floor + p.y0, y1: floor + p.y1 }
+          : { u: w.u + localU, v: across, du: p.du, dv: p.dv, y0: floor + p.y0, y1: floor + p.y1 };
+        joinery.push(slab);
+      }
+    }
   }
   return { joinery, plaster };
+}
+
+/**
+ * One oak threshold strip per door, spanning the wall's own thickness --
+ * placed ONCE per doorway rather than per face, since it is the strip in the
+ * gap itself, not a room-facing surface. Pushed by the caller into the same
+ * merged geometry as the room floors, so it costs zero draw calls of its own.
+ */
+function thresholdSlabs(w: Wall, cuts: Cut[], floor: number): Slab[] {
+  const { alongV, thick } = bandAxis(w);
+  const low = alongV ? w.u : w.v;
+  const out: Slab[] = [];
+  for (const c of cuts) {
+    if (c.y0 > EPS) continue; // only a door reaches the floor
+    for (const p of thresholdParts(c.hi - c.lo, thick)) {
+      const localU = p.u + c.lo;
+      const across = low + p.v;
+      out.push(
+        alongV
+          ? { u: across, v: w.v + localU, du: p.dv, dv: p.du, y0: floor + p.y0, y1: floor + p.y1 }
+          : { u: w.u + localU, v: across, du: p.du, dv: p.dv, y0: floor + p.y0, y1: floor + p.y1 },
+      );
+    }
+  }
+  return out;
+}
+
+/**
+ * Which side of a wall band one specific room sits on, along the band's
+ * across (thickness) axis.
+ *
+ * roomFaceIsLow() above answers a related but different question -- "is the
+ * ROOM FACE this band draws trim toward, on average, its low or high edge" --
+ * averaged over every room `w.between` names, which is the right question
+ * for a symmetric part drawn on both faces. A door leaf is chiral: it swings
+ * into ONE specific room, named by the opening's own `connects[1]`, and that
+ * room's side has to be asked for directly rather than averaged with
+ * whatever else happens to touch the same band.
+ */
+function roomIsOnLowSide(w: Wall, room: Rect): boolean {
+  const { alongV } = bandAxis(w);
+  const mid = alongV ? w.u + w.du / 2 : w.v + w.dv / 2;
+  const centre = alongV ? room.u + room.du / 2 : room.v + room.dv / 2;
+  return centre <= mid;
+}
+
+/** Wainscot height, ft: an ordinary tile dado. ASSUMED, no source. */
+const WAINSCOT_H = 4.0;
+const WAINSCOT_PROUD = 0.05;
+
+/**
+ * A porcelain dado on one wall band's bathroom-facing side, floor to
+ * WAINSCOT_H, broken at the doorway exactly like the baseboard it stands in
+ * front of -- reusing the SAME door-cut solid spans, since a wainscot that
+ * ran across the opening would be tile floating in the doorway.
+ *
+ * Called once per wall FROM the main loop, with that wall's own already-built
+ * `cuts`, rather than as a second pass over every wall: the bathroom is one
+ * room, so this is one extra `if` in a loop that already runs, not a second
+ * loop that mostly finds nothing.
+ */
+export function bathWainscotSlab(w: Wall, cuts: Cut[], bath: Rect, floor: number): Slab[] {
+  if (!w.between.includes(bath.id)) return [];
+  const { alongV, along, thick } = bandAxis(w);
+  const low = alongV ? w.u : w.v;
+  const doorSpans = solidSpans(
+    cuts.filter((c) => c.y0 <= EPS),
+    along,
+  );
+  const roomLow = roomIsOnLowSide(w, bath);
+  // Same mirror as roomTrimSlabs()'s trimParts() placement: a proud part's low
+  // corner sits at `low - proud` on the room's own side, or flush at
+  // `low + thick` (NOT + proud again) on the far side -- checked numerically
+  // against that existing, already-shipped formula rather than re-derived.
+  const across = roomLow ? low - WAINSCOT_PROUD : low + thick;
+  const out: Slab[] = [];
+  for (const [lo, hi] of doorSpans) {
+    out.push(
+      alongV
+        ? { u: across, v: w.v + lo, du: WAINSCOT_PROUD, dv: hi - lo, y0: floor, y1: floor + WAINSCOT_H }
+        : { u: w.u + lo, v: across, du: hi - lo, dv: WAINSCOT_PROUD, y0: floor, y1: floor + WAINSCOT_H },
+    );
+  }
+  return out;
+}
+
+/**
+ * The hung-open leaf for every door opening whose swing target is a real,
+ * modelled room -- which today is every interior door; the suite's own entry
+ * (P14 row 3) hangs a leaf too, but closed, and is handled by its caller
+ * passing a near-zero `openDeg` rather than by a branch in here.
+ *
+ * WHY THIS IS SEPARATE FROM roomTrimSlabs()'S PER-FACE LOOP
+ * A leaf is chiral -- see doorLeafParts()'s own header -- so placing it via
+ * the same mirror formula the casing above uses would flip its swing
+ * direction on the face it was not computed for, which is wrong rather than
+ * merely reversed: a leaf only physically exists on the one side of the wall
+ * it swings into. This function places it directly against ITS room, once,
+ * negating `turn` (and only `turn`; the along-axis mapping never changes)
+ * when that room is on the wall's high side -- the axis flip on `across`
+ * that the high-side placement needs inverts handedness, and a rotation
+ * composed with a single-axis reflection is that same rotation negated. See
+ * geo/trim.ts's own header for the swing geometry this starts from.
+ *
+ * A SECOND CORRECTION, AND IT IS THE ONE THAT MATTERS FOR MOST OF THIS SUITE'S
+ * DOORS. For an alongV band (dv >= du, the shape of the long partition every
+ * hall door pierces), this file's own convention swaps du/dv AND swaps which
+ * of (along, across) becomes suite u versus suite v -- across maps to suite u
+ * there, along to suite v, the opposite of a !alongV band. Swapping which
+ * axis is first and which is second is a REFLECTION (determinant -1), not a
+ * rotation, and a symmetric part never shows it -- every other Slab in this
+ * file has no `turn`, so a mirrored box is indistinguishable from an
+ * unmirrored one. `doorLeafParts()`'s `turn` is not symmetric: it was derived
+ * in the (along, across) frame assuming no such mirror, and a rotation seen
+ * through a mirror is that rotation negated. So the alongV case needs `turn`
+ * negated to compensate, on top of (not instead of) the roomLow reflection
+ * above.
+ *
+ * NOT DERIVED FROM FIRST PRINCIPLES ALONE -- CALIBRATED AGAINST THE REAL
+ * TRANSFORM. An earlier version of this function guessed the compensation
+ * was a fixed -90 degree ROTATION rather than a SIGN FLIP, reasoning from
+ * "which suite axis does a box's local +X land on" rather than "which axis
+ * is this suite's actual long dimension for THIS box" -- both true facts, but
+ * the wrong one to reason from, and it passed no test because none existed
+ * yet. tests/suite-transform.test.ts's door-leaf block runs
+ * slabGeometry()'s own position+rotation transform on one real door of each
+ * kind this suite has (alongV true and false, target room on the low and
+ * high side of its band) and checks in WORLD space, which is the one frame
+ * every quantity here is unambiguously already in -- no inverse transform,
+ * which is its own trap (see that file's header for the one this exposed).
+ *
+ * `openings` is walked directly rather than through the merged `Cut[]`
+ * cutsFor() builds, because a Cut has already lost the one thing a leaf
+ * needs and casing does not: which two rooms this specific opening connects.
+ */
+/**
+ * How far the suite's own entry hangs open, degrees. Not `OPEN_DEG`: every
+ * other door in this suite is hung wide because walk.ts and route.ts both
+ * treat its doorway as passable, and a leaf sitting nearly shut would be
+ * geometry contradicting a route the code still walks. The entry is the one
+ * doorway walk.ts's own solidsOf() deliberately never cuts -- "never leaves
+ * the suite" is the property docs/phases/P7-P8.md asks for -- so a leaf
+ * standing almost closed there is the geometry telling the TRUTH: a viewer
+ * cannot walk through this one. Not fully closed (0 deg): a hair open is what
+ * tells the two shots apart at a glance, and is what a real door left
+ * unlatched looks like.
+ */
+const ENTRY_AJAR_DEG = 12;
+
+export function doorLeafSlabs(
+  walls: Wall[],
+  openings: Opening[],
+  rooms: Rect[],
+  floor: number,
+  wallH: number,
+  hidden: ReadonlySet<string>,
+  openDeg?: number,
+): Slab[] {
+  const byId = new Map(rooms.map((r) => [r.id, r]));
+  const out: Slab[] = [];
+  for (const o of openings) {
+    if (o.kind !== "door") continue;
+    // Every interior door names a real room second; the suite's own entry
+    // names "outside" (walk.ts's own token for the unmodelled stair hall) --
+    // the one case this suite's doors have where connects[1] is not a room.
+    // It still has a real room FIRST, though, and that is what its leaf hangs
+    // against: hall, nearly shut. See ENTRY_AJAR_DEG.
+    const targetId = byId.has(o.connects[1] ?? "") ? o.connects[1] : o.connects[0];
+    const target = byId.get(targetId ?? "");
+    if (!target) continue; // neither name is a room this suite has modelled
+    const isEntry = !byId.has(o.connects[1] ?? "");
+    const w = walls.find((x) => x.id === o.wallId);
+    // A hidden wall is not drawn -- see the note on the main wall loop in
+    // buildSuiteGeometry() -- and its leaf goes with it, for the same reason:
+    // a leaf hanging in a doorway whose jamb has been cut away is a leaf with
+    // nothing to hinge from.
+    if (!w || hidden.has(w.id)) continue;
+    const { alongV, thick } = bandAxis(w);
+    const low = alongV ? w.u : w.v;
+    const doorH = Math.min(wallH, DOOR_H);
+    const roomLow = roomIsOnLowSide(w, target);
+    for (const p of doorLeafParts(o.width, doorH, "low", isEntry ? ENTRY_AJAR_DEG : openDeg)) {
+      const localU = p.u + o.offset;
+      // Same reflection sashSlabs()/roomTrimSlabs() use for the high-side face:
+      // `low+thick-p.v-p.dv`, not `low+thick-p.v` -- the box's own local extent
+      // has to come out of the reflection too, or the leaf's CENTRE lands a
+      // half-thickness off (checked numerically, not just derived).
+      const across = roomLow ? low + p.v : low + thick - p.v - p.dv;
+      // `alongV` swaps not just du/dv but WHICH of (along, across) maps to
+      // (suite v, suite u) versus (suite u, suite v) -- a swap of which axis
+      // is first and which is second, which is a reflection (determinant -1),
+      // not a rotation. A rotation viewed through a mirror is that rotation
+      // negated, and `turn` was derived in the (along, across) frame assuming
+      // no such mirror -- so the alongV case needs it negated to compensate,
+      // on top of (not instead of) the roomLow face-reflection above. Found by
+      // calibration (tests/suite-transform.test.ts's door-leaf describe block
+      // runs the real transform end to end for one case of each kind), not by
+      // a derivation that could be trusted alone -- this is the second time
+      // today the algebra alone gave the wrong sign.
+      const faced = roomLow ? p.turn : -p.turn;
+      const turn = alongV ? faced : -faced;
+      out.push(
+        alongV
+          ? { u: across, v: w.v + localU, du: p.dv, dv: p.du, y0: floor + p.y0, y1: floor + p.y1, turn }
+          : { u: w.u + localU, v: across, du: p.du, dv: p.dv, y0: floor + p.y0, y1: floor + p.y1, turn },
+      );
+    }
+  }
+  return out;
 }
 
 /**
@@ -432,6 +780,12 @@ type SuiteGeometry = {
   glazing: THREE.BufferGeometry | null;
   cornice: THREE.BufferGeometry | null;
   ceiling: THREE.BufferGeometry | null;
+  /** The bathroom's tile floor, porcelain wainscot, tub, lavatory and WC (P14 row 9),
+   *  plus every room's own ceiling fixture (P14 row 11) -- porcelain reused for a plain
+   *  white fixture canopy rather than opening a mesh of its own. Merged as one mesh. */
+  tile: THREE.BufferGeometry | null;
+  /** The bathroom's mirror -- the one fixture with a material of its own. */
+  mirror: THREE.BufferGeometry | null;
   yaw: number;
 };
 
@@ -445,10 +799,13 @@ function buildSuiteGeometry(params: SuiteParams, hidden: ReadonlySet<string>): S
   const { yaw } = suiteBasis(params);
   const floor = floorLevel(1);
   const wallH = params.ceiling;
+  const ceilingH = floor + params.ceiling;
 
   const oak: Slab[] = [];
   const bare: Slab[] = [];
   const mark: Slab[] = [];
+  const tile: Slab[] = [];
+  const sashJoinery: Slab[] = [];
   for (const r of suite.rooms) {
     const slab: Slab = {
       u: r.u,
@@ -461,14 +818,26 @@ function buildSuiteGeometry(params: SuiteParams, hidden: ReadonlySet<string>): S
     if (r.kind === "unknown") {
       bare.push(slab);
       mark.push(...unknownMarkSlabs(r, floor));
+    } else if (r.kind === "bath") {
+      // Ceramic, not oak boards -- no `boards: true`, since scaleFloorUv()'s
+      // per-face grain scaling is an oak-floor concern and porcelain has no
+      // grain map to scale.
+      tile.push(slab);
     } else {
       oak.push({ ...slab, boards: true });
     }
+    // Ceiling fixture and radiator, P14 row 11 -- every room but "unknown" gets a
+    // flush ceiling fixture (that room keeps its own stated ignorance, the same
+    // reason it has no furniture either); a radiator only if the room actually has
+    // a facade wall to stand against. Both are geo/fixtures.ts's own generic
+    // (not bathroom-specific) parts.
+    if (r.kind !== "unknown") tile.push(ceilingFixturePart(r, ceilingH));
+    if (r.windows.includes("facade")) sashJoinery.push(roomRadiatorPart(r, floor));
   }
 
+  const bath = suite.rooms.find((r) => r.kind === "bath");
   const partitions: Slab[] = [];
   const masonry: Slab[] = [];
-  const sashJoinery: Slab[] = [];
   const glazing: Slab[] = [];
   const cornice: Slab[] = [];
   for (const w of walls) {
@@ -487,7 +856,27 @@ function buildSuiteGeometry(params: SuiteParams, hidden: ReadonlySet<string>): S
     const trim = roomTrimSlabs(w, cuts, suite.rooms, floor, wallH);
     sashJoinery.push(...trim.joinery);
     cornice.push(...trim.plaster);
+    // Threshold boards are oak, same as the floor either side of them, so they
+    // join the SAME merged geometry rather than opening a mesh of their own --
+    // the doorway reads as two rooms without costing a draw call for it.
+    oak.push(...thresholdSlabs(w, cuts, floor));
+    if (bath) tile.push(...bathWainscotSlab(w, cuts, bath, floor));
   }
+  // Fixtures (P14 row 9), walked once like the leaf below rather than per wall: they
+  // are not wall-band features, just fixed geometry standing in the room. Present in
+  // every cutaway mode, the same as the floor they stand on -- a wallsDown or section
+  // cut removes the wall a fixture backs onto, not the fixture itself.
+  const mirror: Slab[] = [];
+  if (bath) {
+    const fx = bathFixtureParts(bath, floor);
+    tile.push(...fx.porcelain, ...fx.curtain);
+    sashJoinery.push(...fx.joinery);
+    mirror.push(...fx.mirror);
+  }
+  // Walked once over every opening rather than inside the per-wall loop above:
+  // a leaf is chiral and needs the specific room it swings into, which a Cut
+  // no longer carries -- see doorLeafSlabs()'s own header.
+  sashJoinery.push(...doorLeafSlabs(walls, openings, suite.rooms, floor, wallH, hidden));
 
   /**
    * The ceiling sits at params.ceiling, which IS weld.json's
@@ -506,7 +895,6 @@ function buildSuiteGeometry(params: SuiteParams, hidden: ReadonlySet<string>): S
    * room, and in the roof-off cutaway it reads as the wall's own thickness, which
    * is worth more than a flush plate.
    */
-  const ceilingH = floor + params.ceiling;
   const ceiling: Slab[] = suiteFootprint(suite).map((f) => ({
     u: f.u,
     v: f.v,
@@ -530,6 +918,8 @@ function buildSuiteGeometry(params: SuiteParams, hidden: ReadonlySet<string>): S
     glazing: mergeSlabs(glazing, yaw, params, "glazing"),
     cornice: mergeSlabs(cornice, yaw, params, "cornice"),
     ceiling: mergeSlabs(ceiling, yaw, params, "ceiling"),
+    tile: mergeSlabs(tile, yaw, params, "bathroom tile"),
+    mirror: mergeSlabs(mirror, yaw, params, "bathroom mirror"),
     yaw,
   };
 }
@@ -560,9 +950,20 @@ function useSuitePalette(opacity: number) {
       masonry: m.masonry.clone(),
       glazing: m.glazing.clone(),
       slate: m.slate.clone(),
+      porcelain: m.porcelain.clone(),
+      mirror: m.mirror.clone(),
     };
     // Every face here is seen from inside a room. FrontSide culls all of them.
-    for (const x of Object.values(p)) x.side = THREE.DoubleSide;
+    for (const x of Object.values(p)) {
+      x.side = THREE.DoubleSide;
+      // Baked AO (applyAoColor(), P14 row 10): on for every material here, because
+      // every Slab in this component gets a `color` attribute now and
+      // mergeBufferGeometries refuses a merge where some geometries have one and
+      // others don't. Cloned per mount for the same reason opacity/side are: the
+      // materials() singleton is shared with CommonParts.tsx and Furniture.tsx,
+      // neither of which bakes this attribute onto its own geometry.
+      x.vertexColors = true;
+    }
     return p;
   }, []);
 
@@ -753,6 +1154,8 @@ export function Suite({
         <mesh geometry={geo.unknownFloor} material={pal.masonry} receiveShadow={solid} />
       ) : null}
       {geo.unknownMark ? <mesh geometry={geo.unknownMark} material={pal.slate} /> : null}
+      {geo.tile ? <mesh geometry={geo.tile} material={pal.porcelain} receiveShadow={solid} /> : null}
+      {geo.mirror ? <mesh geometry={geo.mirror} material={pal.mirror} /> : null}
       {geo.partitions ? (
         <mesh geometry={geo.partitions} material={pal.plaster} receiveShadow={solid} />
       ) : null}
