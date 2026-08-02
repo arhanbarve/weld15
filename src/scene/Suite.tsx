@@ -495,6 +495,20 @@ function roomIsOnLowSide(w: Wall, room: Rect): boolean {
  * cutsFor() builds, because a Cut has already lost the one thing a leaf
  * needs and casing does not: which two rooms this specific opening connects.
  */
+/**
+ * How far the suite's own entry hangs open, degrees. Not `OPEN_DEG`: every
+ * other door in this suite is hung wide because walk.ts and route.ts both
+ * treat its doorway as passable, and a leaf sitting nearly shut would be
+ * geometry contradicting a route the code still walks. The entry is the one
+ * doorway walk.ts's own solidsOf() deliberately never cuts -- "never leaves
+ * the suite" is the property docs/phases/P7-P8.md asks for -- so a leaf
+ * standing almost closed there is the geometry telling the TRUTH: a viewer
+ * cannot walk through this one. Not fully closed (0 deg): a hair open is what
+ * tells the two shots apart at a glance, and is what a real door left
+ * unlatched looks like.
+ */
+const ENTRY_AJAR_DEG = 12;
+
 export function doorLeafSlabs(
   walls: Wall[],
   openings: Opening[],
@@ -508,8 +522,15 @@ export function doorLeafSlabs(
   const out: Slab[] = [];
   for (const o of openings) {
     if (o.kind !== "door") continue;
-    const target = byId.get(o.connects[1] ?? "");
-    if (!target) continue; // "outside", or any id this suite has not modelled
+    // Every interior door names a real room second; the suite's own entry
+    // names "outside" (walk.ts's own token for the unmodelled stair hall) --
+    // the one case this suite's doors have where connects[1] is not a room.
+    // It still has a real room FIRST, though, and that is what its leaf hangs
+    // against: hall, nearly shut. See ENTRY_AJAR_DEG.
+    const targetId = byId.has(o.connects[1] ?? "") ? o.connects[1] : o.connects[0];
+    const target = byId.get(targetId ?? "");
+    if (!target) continue; // neither name is a room this suite has modelled
+    const isEntry = !byId.has(o.connects[1] ?? "");
     const w = walls.find((x) => x.id === o.wallId);
     // A hidden wall is not drawn -- see the note on the main wall loop in
     // buildSuiteGeometry() -- and its leaf goes with it, for the same reason:
@@ -520,7 +541,7 @@ export function doorLeafSlabs(
     const low = alongV ? w.u : w.v;
     const doorH = Math.min(wallH, DOOR_H);
     const roomLow = roomIsOnLowSide(w, target);
-    for (const p of doorLeafParts(o.width, doorH, "low", openDeg)) {
+    for (const p of doorLeafParts(o.width, doorH, "low", isEntry ? ENTRY_AJAR_DEG : openDeg)) {
       const localU = p.u + o.offset;
       // Same reflection sashSlabs()/roomTrimSlabs() use for the high-side face:
       // `low+thick-p.v-p.dv`, not `low+thick-p.v` -- the box's own local extent

@@ -190,16 +190,39 @@ describe("door leaf placement in the world", () => {
   const closed = doorLeafSlabs(walls, openings, suite.rooms, floor, wallH, new Set(), 0);
   const open = doorLeafSlabs(walls, openings, suite.rooms, floor, wallH, new Set(), 100);
 
-  it("produces one leaf per door opening with a real target room", () => {
-    // Five interior doors connect two modelled rooms at the defaults; the
-    // suite's own entry (connects to "outside") is the one door this suite
-    // has that does not get a leaf here -- see doorLeafSlabs()'s own header.
-    const doorsWithRealTargets = openings.filter(
-      (o) => o.kind === "door" && byId.has(o.connects[1] ?? ""),
-    );
-    expect(open.length).toBe(doorsWithRealTargets.length);
+  /**
+   * Which room a door's leaf swings against, mirroring doorLeafSlabs()'s own
+   * fallback: every interior door names a real room second (`connects[1]`);
+   * the suite's own entry names "outside" (walk.ts's token for the
+   * unmodelled stair hall) there, and hangs its leaf against `connects[0]`
+   * (the hall) instead, nearly shut -- P14 row 3, ENTRY_AJAR_DEG.
+   */
+  function targetOf(o: (typeof openings)[number]): Rect | undefined {
+    const id = byId.has(o.connects[1] ?? "") ? o.connects[1] : o.connects[0];
+    return byId.get(id ?? "");
+  }
+
+  const doorsWithLeaves = openings.filter((o) => o.kind === "door" && targetOf(o));
+  const entryIdx = doorsWithLeaves.findIndex((o) => !byId.has(o.connects[1] ?? ""));
+
+  it("produces one leaf per door opening -- every door in this suite names a real room on one side or the other", () => {
+    expect(open.length).toBe(doorsWithLeaves.length);
     expect(closed.length).toBe(open.length);
     expect(open.length).toBeGreaterThan(0);
+  });
+
+  it("hangs the suite's own entry nearly shut, not wide open like the rest", () => {
+    expect(entryIdx, "no door in this suite names an unmodelled room").toBeGreaterThanOrEqual(0);
+    const [aClosed, bClosed] = worldEnds(closed[entryIdx]!);
+    const [aOpen, bOpen] = worldEnds(open[entryIdx]!);
+    const distA = Math.hypot(aOpen.x - aClosed.x, aOpen.z - aClosed.z);
+    const distB = Math.hypot(bOpen.x - bClosed.x, bOpen.z - bClosed.z);
+    const swing = Math.max(distA, distB);
+    // A leaf's free end sweeps close to leafW*sin(angle) from its 0 deg pose.
+    // At 100 deg (every interior door) that is ~2.8 ft; at ENTRY_AJAR_DEG (12
+    // deg) it is ~0.6 ft. Asserting well under the interior figure is the
+    // point: the entry reads as barely open, not as a fire door propped wide.
+    expect(swing, `entry leaf swung ${swing.toFixed(2)} ft, as far as an interior door`).toBeLessThan(1);
   });
 
   /** Both ends of a Slab's long axis, in WORLD (x, z), as a fixed-size tuple --
@@ -218,6 +241,10 @@ describe("door leaf placement in the world", () => {
       const distA = Math.hypot(aOpen.x - aClosed.x, aOpen.z - aClosed.z);
       const distB = Math.hypot(bOpen.x - bClosed.x, bOpen.z - bClosed.z);
       expect(Math.min(distA, distB), `leaf ${i}: hinge moved`).toBeLessThan(0.2);
+      // The entry swings only ENTRY_AJAR_DEG, not OPEN_DEG -- its own "hangs
+      // nearly shut" test above covers the magnitude; this loop still checks
+      // its hinge stays put, which does not depend on the angle.
+      if (i === entryIdx) continue;
       expect(Math.max(distA, distB), `leaf ${i}: free end barely moved`).toBeGreaterThan(1.5);
     }
   });
@@ -230,7 +257,7 @@ describe("door leaf placement in the world", () => {
    * suite's doors actually produce is covered by at least one leaf.
    */
   function caseOf(o: (typeof openings)[number]): { alongV: boolean; roomLow: boolean } | null {
-    const target = byId.get(o.connects[1] ?? "");
+    const target = targetOf(o);
     if (!target) return null;
     const w = walls.find((x) => x.id === o.wallId)!;
     const alongV = w.dv >= w.du;
@@ -239,8 +266,7 @@ describe("door leaf placement in the world", () => {
     return { alongV, roomLow: centre <= mid };
   }
 
-  const doorsWithTargets = openings.filter((o) => o.kind === "door" && byId.has(o.connects[1] ?? ""));
-  const cases = doorsWithTargets.map((o, i) => ({ o, i, c: caseOf(o)! }));
+  const cases = doorsWithLeaves.map((o, i) => ({ o, i, c: caseOf(o)! }));
   const seen = new Set(cases.map((c) => `${c.c.alongV}:${c.c.roomLow}`));
 
   it("this suite's doors exercise both alongV values and both room sides", () => {
@@ -253,8 +279,15 @@ describe("door leaf placement in the world", () => {
   });
 
   for (const { o, i, c } of cases) {
+    // The entry is excluded here: at only ENTRY_AJAR_DEG (12 deg), the "free"
+    // end and the hinge end are both within a foot of the closed pose, and
+    // distinguishing which is which by "which moved more" -- fine at the
+    // interior doors' full 100 deg swing -- is noise at that scale. Its own
+    // "hangs nearly shut" test above checks the magnitude that actually
+    // matters for this one door without needing to pick a side.
+    if (i === entryIdx) continue;
     it(`${o.id} (${o.connects.join("-")}), alongV=${c.alongV} roomLow=${c.roomLow}: open leaf's free end lands in its target room`, () => {
-      const target = byId.get(o.connects[1]!)!;
+      const target = targetOf(o)!;
       const quad = worldQuad(target);
       const [aClosed, bClosed] = worldEnds(closed[i]!);
       const [aOpen, bOpen] = worldEnds(open[i]!);
