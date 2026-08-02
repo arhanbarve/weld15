@@ -127,8 +127,12 @@ import {
 // Type-only, and it has to stay that way. H integrates this module INTO store.ts,
 // so a value import here would close a real cycle; rooms.ts's measuredFacadeStep
 // and store.ts's `orbit: null` are the same decision made twice already.
-import type { Orbit } from "@/scene/orbit";
-import type { StageId } from "@/state/store";
+//
+// `Orbit` now comes from store.ts rather than from scene/orbit.ts: the store's shape
+// is the new heading/pitch/range one (P11-PHOTOREAL.md section 2.3), and this file's
+// wire format has to match what the store actually holds, not what the camera rig's
+// old spherical coordinates were called.
+import type { Orbit, StageId } from "@/state/store";
 
 /**
  * Everything a link carries.
@@ -215,9 +219,9 @@ export const SNAPSHOT_PARAM = "s";
 //   uint  hour                         minutes
 //   int   date                         days since 1970-01-01, UTC
 //   int   x15                          params lengths, inches, in LENGTH_KEYS order
-//   int   orbit azimuth                hundredths of a degree   ) only if bit3
-//   uint  orbit polar                  hundredths of a degree   )
-//   uint  orbit radius                 hundredths of a foot     )
+//   int   orbit heading                hundredths of a degree   ) only if bit3
+//   int   orbit pitch                  hundredths of a degree   ) VERSION 3 only --
+//   uint  orbit range                  hundredths of a foot     ) see PREV_VERSION below
 //   uint  piece count
 //   per piece:
 //     uint  room                       index into buildSuite(params).rooms
@@ -242,21 +246,31 @@ export const SNAPSHOT_PARAM = "s";
 /**
  * The format's version byte, and the first thing decode() checks.
  *
- * 2 adds `occupancy` after the date. The bump is the point rather than a formality:
- * a v1 string is a byte-for-byte prefix of a v2 one up to that field and then
- * diverges, so a v1 link read as v2 would take the low byte of the first length as
- * an occupancy and shift every field after it. The trailer would almost always
- * catch that -- 1 in 65,536 would not -- and "almost always" is not the guarantee
- * this file makes. Refusing on the version byte makes it exact: an old link decodes
- * to null, and null means the recipient opens at the defaults, which is this
- * module's stated answer for every string it cannot read.
+ * 3 renames the orbit block from azimuth/polar/radius to heading/pitch/range and
+ * widens the middle field from uint to int -- see docs/phases/P11-PHOTOREAL.md
+ * section 2.3 and store.ts's `Orbit` type. Unlike the 1-to-2 bump, this one does NOT
+ * refuse the previous version outright: decode() special-cases PREV_VERSION below
+ * and converts its azimuth/polar/radius triple into heading/pitch/range on the way
+ * in (`headingDeg = azimuthDeg`, `pitchDeg = 90 - polarDeg`, `rangeFt = radius` --
+ * the exact relationship geo/rig.ts's GeoPose already states), because decision 5 in
+ * the phase spec is that old share links keep working rather than reopening at the
+ * defaults. encode() only ever writes VERSION; PREV_VERSION is decode()'s alone.
  *
- * What that costs is real and is the price of the fix: links shared before this
- * change open at the default suite instead of the sender's. There is no third
- * option -- a v1 payload does not contain the occupancy, so nothing can be
- * recovered from it except by guessing, and guessing is how a link comes to lie.
+ * The 1-to-2 bump is a different case and stays refused outright: a v1 string is a
+ * byte-for-byte prefix of a v2 one up to the occupancy field and then diverges, so a
+ * v1 link read as v2 would take the low byte of the first length as an occupancy and
+ * shift every field after it -- there is no occupancy value to recover a link from,
+ * only one to guess, and guessing is how a link comes to lie. The 2-to-3 bump has no
+ * such gap: every v2 payload names an actual azimuth/polar/radius, which converts
+ * exactly.
  */
-const VERSION = 2;
+const VERSION = 3;
+
+/**
+ * The one older version decode() still reads. See VERSION's own docblock for why
+ * this one, alone among past versions, gets a conversion path instead of a refusal.
+ */
+const PREV_VERSION = 2;
 
 /**
  * What `occupancy` is allowed to be on the wire.
@@ -438,9 +452,11 @@ export function encode(s: Snapshot): string {
     putUint(out, s.occupancy);
     for (const k of LENGTH_KEYS) putInt(out, count(s.params[k], PER_FOOT));
     if (s.orbit) {
-      putInt(out, count(s.orbit.azimuthDeg, PER_CENTI));
-      putUint(out, count(s.orbit.polarDeg, PER_CENTI));
-      putUint(out, count(s.orbit.radius, PER_CENTI));
+      putInt(out, count(s.orbit.headingDeg, PER_CENTI));
+      // int, not uint: pitchDeg is 90 - polarDeg, and polarDeg's old 0..180 range
+      // means pitchDeg can be negative (-90..90), unlike the old orbit.polarDeg field.
+      putInt(out, count(s.orbit.pitchDeg, PER_CENTI));
+      putUint(out, count(s.orbit.rangeFt, PER_CENTI));
     }
     putUint(out, s.pieces.length);
     for (const p of s.pieces) {
@@ -489,7 +505,10 @@ export function decode(q: string): Snapshot | null {
     if (trailer(body) !== want) return null;
 
     const r: Cursor = { bytes: body, at: 0 };
-    if (getByte(r) !== VERSION) return null;
+    // VERSION or PREV_VERSION -- see VERSION's own docblock for why the previous
+    // format alone gets a conversion path (below) rather than an outright refusal.
+    const version = getByte(r);
+    if (version !== VERSION && version !== PREV_VERSION) return null;
 
     const stage = pick(STAGE_IDS, getUint(r));
     const t = getUint(r) / PER_UNIT;
@@ -513,13 +532,25 @@ export function decode(q: string): Snapshot | null {
       wingStep: (flags & 0b01000) !== 0,
     };
 
+    // PREV_VERSION wrote azimuthDeg/polarDeg/radius (polar as a uint); VERSION writes
+    // headingDeg/pitchDeg/rangeFt (pitch as an int, since it can be negative). The
+    // conversion is geo/rig.ts's own `pitch = 90 - polar` relationship: headingDeg is
+    // the same compass bearing azimuthDeg already was, and rangeFt is the same
+    // distance radius already was, so only the middle field's meaning and sign
+    // convention change.
     const orbit: Orbit | null =
       flags & 0b10000
-        ? {
-            azimuthDeg: getInt(r) / PER_CENTI,
-            polarDeg: getUint(r) / PER_CENTI,
-            radius: getUint(r) / PER_CENTI,
-          }
+        ? version === PREV_VERSION
+          ? {
+              headingDeg: getInt(r) / PER_CENTI,
+              pitchDeg: 90 - getUint(r) / PER_CENTI,
+              rangeFt: getUint(r) / PER_CENTI,
+            }
+          : {
+              headingDeg: getInt(r) / PER_CENTI,
+              pitchDeg: getInt(r) / PER_CENTI,
+              rangeFt: getUint(r) / PER_CENTI,
+            }
         : null;
 
     // Built here rather than after the pieces, because resolving a room index is
@@ -642,12 +673,13 @@ function validate(s: Snapshot, suite: Suite): void {
   dateToDays(s.date);
 
   if (s.orbit) {
-    if (!inRange(s.orbit.azimuthDeg, -180, 180)) reject();
-    if (!inRange(s.orbit.polarDeg, 0, 180)) reject();
-    // Not clamped to STAGE3_CLAMP. CameraRig runs clampOrbit on every value that
-    // reaches it (store.ts says why the store does not), and clamping here would
-    // mean a link whose camera came back somewhere else than it went out.
-    if (!inRange(s.orbit.radius, 0, 100_000)) reject();
+    if (!inRange(s.orbit.headingDeg, -180, 180)) reject();
+    // pitchDeg = 90 - polarDeg, and polarDeg's old 0..180 range makes this -90..90.
+    if (!inRange(s.orbit.pitchDeg, -90, 90)) reject();
+    // Not clamped to STAGE3_CLAMP/STAGE4_CLAMP. CameraRig runs clampPose on every
+    // value that reaches it (store.ts says why the store does not), and clamping
+    // here would mean a link whose camera came back somewhere else than it went out.
+    if (!inRange(s.orbit.rangeFt, 0, 100_000)) reject();
   }
 
   if (!Array.isArray(s.pieces) || s.pieces.length > MAX_PIECES) reject();

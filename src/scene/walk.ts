@@ -50,18 +50,21 @@ export type Vec2 = { u: number; v: number };
 
 /**
  * Eye height, ft. ASSUMED, and stages.ts assumed it first -- its `EYE` is this
- * number and this is the same 5 ft 10 in, restated here rather than imported
+ * number and this is the same 5 ft 2 in, restated here rather than imported
  * because stages.ts does not export it and importing a scene module that pulls
  * place.ts and buildSuite in for one scalar is worse than the duplication.
  *
  * What bounds it: it is a standing adult's eye, so somewhere between about 4 ft 9 in
  * (a 5th-percentile adult) and 6 ft 3 in, and the choice inside that changes nothing
  * this module computes -- height is dropped, see the header. It matters only to how
- * the room reads, and 5 ft 10 in is what every existing render was framed at.
- * tests/walk.test.ts pins it against stages.ts's own arithmetic so the two cannot
- * drift.
+ * the room reads. WAS 5 ft 10 in; docs/phases/P11-PHOTOREAL.md decision 7 lowered it
+ * to 5 ft 2 in because the opening first-person shot read as a 7 ft tall viewer --
+ * decision 8 is that this one constant is shared, so the opening shot and the walker
+ * come down together. The -8 deg look-down pitch in route.ts's standingPose() is
+ * unchanged; only the eye it starts from moved. tests/walk.test.ts pins it against
+ * stages.ts's own arithmetic so the two cannot drift.
  */
-export const EYE = 5 + 10 / 12;
+export const EYE = 5 + 2 / 12;
 
 /**
  * The walker's radius in plan, ft. ASSUMED. 0.75 ft, i.e. an 18 in shoulder width.
@@ -605,9 +608,10 @@ export function step(from: Vec2, to: Vec2, ctx: WalkCtx): Vec2 {
  * parallel to up, so a straight-up or straight-down look has no well-defined camera
  * basis. Bounded at 85 rather than closer to 90 because the last 5 degrees buys
  * nothing a viewer can use: at 85 degrees the floor is already
- * `5.833 / tan(85 deg) = 0.51 ft` ahead of the eye and the ceiling
- * `4.917 / tan(85 deg) = 0.43 ft` ahead, so the frame is already filled with the
+ * `5.167 / tan(85 deg) = 0.45 ft` ahead of the eye and the ceiling
+ * `5.583 / tan(85 deg) = 0.49 ft` ahead, so the frame is already filled with the
  * floor or the ceiling and further tilt only pushes that point half an inch closer.
+ * (Recomputed for EYE = 5 ft 2 in; the 10 ft 9 in ceiling did not move.)
  */
 export const PITCH_LIMIT = (85 * Math.PI) / 180;
 

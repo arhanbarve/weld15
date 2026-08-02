@@ -1,15 +1,60 @@
 import { test, expect, type Page } from "@playwright/test";
 
 /**
- * Drives the whole descent and checks each stage actually renders something.
+ * P11 PHASE 5: variance/edge-energy replace the coverage heuristic, because the frame is
+ * now real (or fallback-photographic) imagery rather than the scan/void chrome this file's
+ * previous method was tuned against.
  *
- * The luminance method is the one from scripts/measure-render.mjs. It exists
- * because two earlier render assertions in this repo passed against broken
- * scenes: one checked only that a WebGL context existed, the next counted
- * non-background pixels and was satisfied by the grid helper alone. Sampling for
- * pixels brighter than the background and the grid is what actually proves
- * geometry is on screen.
+ * WHAT USED TO BE HERE. `frameStats()` counted pixels brighter than a hard-coded RGB
+ * distance from `#06203f` (`--void`) and its `#0c3260` grid lines -- "background #06203f
+ * sums to 101; grid lines #0c3260 to 158" -- and gated `nonBgPct > 8`. That is a
+ * palette-membership test: it only proves something is on screen because it knows what the
+ * *background* looks like, and decision 9 (docs/phases/P11-PHOTOREAL.md) retires exactly
+ * that background from the world. A photograph -- Google's live tiles, or the L3/L4 NAIP
+ * fallback this build actually renders keyless -- has no fixed void colour to be "not", and
+ * near orbit the frame is legitimately mostly one photographed tone (haze, or Earth's
+ * daylit face), so a fixed RGB-distance floor tuned to a Prussian-blue void would either
+ * miss a real regression (too loose against a photograph) or flag a correct frame as empty
+ * (too tight against one that is mostly sky).
+ *
+ * THE REPLACEMENT: LUMINANCE VARIANCE AND EDGE ENERGY, over the same 60x60 sample grid this
+ * file has always used. A blank or flat-filled frame -- solid colour, any colour -- has
+ * variance 0 and edge energy 0 by construction, which is the actual failure mode every
+ * "is anything on screen" gate in this project exists to catch (P8's code-split experiment
+ * measured exactly this: a frame in which every layer's opacity was zero). Real photographic
+ * content, whether Google's tiles or this build's NAIP fallback, is never flat: haze,
+ * shoreline, rooftops and streets all vary in luminance and carry edges a flat fill cannot.
+ * So the same two numbers work at every altitude and do not need to know what the
+ * photograph's own palette is, which a fixed-colour distance test always secretly did.
+ *
+ * `distinct` (count of unique sampled RGB triples) is kept from the old method: it is
+ * already palette-agnostic -- a flat fill of ANY colour has distinct = 1 -- and variance and
+ * edge energy are both computed FROM the luminance channel, so a frame that varied only in
+ * hue and not in brightness (unlikely for a photograph, but not ruled out by the other two)
+ * still fails on `distinct`.
+ *
+ * FLOORS ARE MEASURED, ON THIS BUILD, KEYLESS (Ground/Campus/FallbackGround, the current
+ * dual-mounted scene per Experience.tsx's own HAS_TILES_KEY comment -- this phase does not
+ * touch that mounting decision). `NEXT_PUBLIC_GOOGLE_MAPS_KEY= npx playwright test
+ * tests/e2e/journey.spec.ts`, 1280x720, one run:
+ *
+ *   stage   variance   edge       distinct
+ *   0       1140.80    61508.3    1630
+ *   1        564.08   142528.6    2767
+ *   2       1206.31   164624.8    2362
+ *   3        680.46    58436.3     632
+ *   4        703.73    40644.9     913
+ *   5       1354.09    25510.2     303
+ *
+ * Floors below are roughly half of the observed minimum across all six stages (variance
+ * 564, edge 25,510, distinct 303), the same margin convention the old bounds used ("these
+ * sit at roughly half of each, so a real regression trips them while normal variation does
+ * not"), and comfortably clear of the zero a genuinely blank frame produces.
  */
+const VARIANCE_FLOOR = 250;
+const EDGE_FLOOR = 12_000;
+const DISTINCT_FLOOR = 40;
+
 async function frameStats(page: Page) {
   return page.locator("canvas").evaluate((el) => {
     const src = el as HTMLCanvasElement;
@@ -20,12 +65,11 @@ async function frameStats(page: Page) {
     ctx.drawImage(src, 0, 0);
     const { data } = ctx.getImageData(0, 0, off.width, off.height);
     const N = 60;
-    let lit = 0;
-    let nonBg = 0;
+    const lum = new Float64Array(N * N);
+    const seen = new Set<string>();
     let warm = 0;
     let pale = 0;
     let total = 0;
-    const seen = new Set<string>();
     for (let gx = 0; gx < N; gx++) {
       for (let gy = 0; gy < N; gy++) {
         const x = Math.floor((off.width * (gx + 0.5)) / N);
@@ -34,19 +78,37 @@ async function frameStats(page: Page) {
         const r = data[i]!, g = data[i + 1]!, b = data[i + 2]!;
         total++;
         seen.add(`${r},${g},${b}`);
-        // background #06203f sums to 101; grid lines #0c3260 to 158.
-        if (r + g + b > 300) lit++;
-        if (Math.abs(r - 6) > 6 || Math.abs(g - 32) > 6 || Math.abs(b - 63) > 6) nonBg++;
+        lum[gy * N + gx] = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        // Oak floors are warm (r > b); plaster walls are near-neutral and bright. Kept
+        // unchanged from the previous version -- these detect real INTERIOR materials
+        // (stage 5, largely untouched by this phase) rather than the retired world
+        // palette, so they are not part of what this rewrite replaces.
         if (r > b + 25 && r > 60) warm++;
         if (r > 110 && Math.abs(r - b) < 30) pale++;
       }
     }
+    let mean = 0;
+    for (let i = 0; i < lum.length; i++) mean += lum[i]!;
+    mean /= lum.length;
+    let variance = 0;
+    for (let i = 0; i < lum.length; i++) variance += (lum[i]! - mean) ** 2;
+    variance /= lum.length;
+    // Edge energy: sum of |luminance gradient| between horizontally/vertically adjacent
+    // grid samples. Zero for any flat fill; positive wherever the frame has real texture,
+    // a coastline, a rooftop edge, or a building silhouette -- none of which a fixed
+    // background colour test could see without first being told what "background" means.
+    let edge = 0;
+    for (let gx = 0; gx < N; gx++) {
+      for (let gy = 0; gy < N; gy++) {
+        const c = lum[gy * N + gx]!;
+        if (gx + 1 < N) edge += Math.abs(lum[gy * N + gx + 1]! - c);
+        if (gy + 1 < N) edge += Math.abs(lum[(gy + 1) * N + gx]! - c);
+      }
+    }
     return {
-      litPct: (lit / total) * 100,
-      nonBgPct: (nonBg / total) * 100,
+      variance: +variance.toFixed(1),
+      edge: +edge.toFixed(1),
       distinct: seen.size,
-      // Oak floors are warm (r > b); plaster walls are near-neutral and bright.
-      // A frame showing only one surface fails this, which coverage alone does not.
       warmPct: (warm / total) * 100,
       palePct: (pale / total) * 100,
     };
@@ -58,7 +120,7 @@ async function gotoStage(page: Page, stage: number) {
   await page.waitForTimeout(1400); // camera settles
 }
 
-test("every stage renders lit geometry, and there are no console errors", async ({ page }) => {
+test("every stage renders real, non-flat imagery, and there are no console errors", async ({ page }) => {
   const errors: string[] = [];
   page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
   page.on("pageerror", (e) => errors.push(e.message));
@@ -70,37 +132,29 @@ test("every stage renders lit geometry, and there are no console errors", async 
   for (const stage of [0, 1, 2, 3, 4, 5]) {
     await gotoStage(page, stage);
     const s = await frameStats(page);
-    report.push(`stage ${stage}: ${s.nonBgPct.toFixed(1)}% covered, ${s.distinct} distinct`);
-    // Bounds measured by scripts/measure-stages.mjs, not guessed. Across all six
-    // stages the observed minima were nonBg 14.7% (stage 1, Cambridge from far
-    // out) and 10 distinct colours (stage 5). These sit at roughly half of each,
-    // so a real regression trips them while normal variation does not.
-    //
-    // Luminance is deliberately NOT the gate: the globe measures 0.8% lit while
-    // carrying 361 distinct colours, so a brightness threshold would either fail
-    // stage 0 or be too loose to mean anything.
-    expect(s.nonBgPct, `stage ${stage} renders nothing: ${report.join(" | ")}`).toBeGreaterThan(8);
-    expect(s.distinct, `stage ${stage} is a flat wash`).toBeGreaterThanOrEqual(5);
-    // Stage 5 stands inside a room, so it must show BOTH an oak floor and a
-    // plaster wall. A single flat plane filling the frame passes the coverage
-    // check at 100% -- it did, twice -- and fails this one.
+    report.push(
+      `stage ${stage}: variance ${s.variance.toFixed(0)}, edge ${s.edge.toFixed(0)}, ${s.distinct} distinct`,
+    );
+    expect(s.variance, `stage ${stage} is a flat wash: ${report.join(" | ")}`).toBeGreaterThan(
+      VARIANCE_FLOOR,
+    );
+    expect(s.edge, `stage ${stage} has no texture or edges: ${report.join(" | ")}`).toBeGreaterThan(
+      EDGE_FLOOR,
+    );
+    expect(s.distinct, `stage ${stage} is a flat wash`).toBeGreaterThanOrEqual(DISTINCT_FLOOR);
+    // Stage 5 stands inside a room, so it must show BOTH an oak floor and a plaster wall.
+    // A single flat plane filling the frame would pass the variance/edge checks above if it
+    // were, say, a textured photograph filling the whole view -- this is the check that
+    // still catches "only the floor" or "only the wall".
     if (stage === 5) {
       expect(s.warmPct, `stage 5 shows no floor: ${JSON.stringify(s)}`).toBeGreaterThan(2);
       expect(s.palePct, `stage 5 shows no wall: ${JSON.stringify(s)}`).toBeGreaterThan(2);
     }
     /*
-     * A side effect, not an assertion, and it writes into a TRACKED directory on purpose.
-     *
-     * This dirties the working tree on every run, which looks like a wart and is the
-     * deliberate choice. The alternative is writing to test-results/ or gitignoring these,
-     * and both cost the thing they are for: in a project whose whole output is pixels, a
-     * render that shows up in `git diff` is how a change to the picture becomes reviewable
-     * at all. It has already paid for itself once -- P7 moved the stage-5 shot from a corner
-     * of bedroom B into the hall, and the committed p2-stage-5.png was the only artifact
-     * that showed the new framing rather than describing it.
-     *
-     * So the convention is: these are refreshed and committed alongside whatever changed the
-     * picture, and a dirty tree after a test run is expected rather than a bug to fix.
+     * A side effect, not an assertion, and it writes into a TRACKED directory on purpose --
+     * unchanged from the previous version of this file. See its own long-standing rationale:
+     * a render that shows up in `git diff` is how a change to the picture becomes reviewable
+     * at all, in a project whose whole output is pixels.
      */
     await page.screenshot({ path: `design/renders/p2-stage-${stage}.png` });
   }
@@ -121,6 +175,14 @@ test("the threshold never shows an empty frame as it crosses", async ({ page }) 
   // debug probe) rather than through a second implementation of journey.ts's mapping.
   const slider = page.getByTestId("journey");
   const worst: string[] = [];
+  /**
+   * Measured minima across t, keyless, on this build: variance 610.6 (t=0.2), edge 29,394.5
+   * (t=1), distinct 123 (t=1) -- see this file's header for the full table. Floors are the
+   * same shared constants the whole-descent test above uses, which already sit under every
+   * one of these; a stage-4-specific floor would be tighter but this file's own convention
+   * (VARIANCE_FLOOR/EDGE_FLOOR/DISTINCT_FLOOR) is one set of numbers for one claim ("not
+   * empty"), not a table with an entry per stage.
+   */
   for (const t of [0, 0.2, 0.35, 0.5, 0.65, 0.8, 1]) {
     const u = await page.evaluate((tt) => {
       const j = (window as unknown as { __journey: { boundaries: number[]; spans: number[]; total: number } })
@@ -135,11 +197,14 @@ test("the threshold never shows an empty frame as it crosses", async ({ page }) 
     await slider.fill(String(u));
     await page.waitForTimeout(500);
     const s = await frameStats(page);
-    worst.push(`t=${t}: ${s.nonBgPct.toFixed(1)}%/${s.distinct}`);
-    // Observed minima across t: 28% covered, 9 distinct. An empty frame reads as
-    // 0% and 1 -- which is exactly what this caught before the fix.
-    expect(s.nonBgPct, `threshold went empty at t=${t}: ${worst.join(" | ")}`).toBeGreaterThan(10);
-    expect(s.distinct, `threshold went flat at t=${t}: ${worst.join(" | ")}`).toBeGreaterThanOrEqual(4);
+    worst.push(`t=${t}: var ${s.variance.toFixed(0)}/edge ${s.edge.toFixed(0)}/${s.distinct}`);
+    expect(s.variance, `threshold went flat at t=${t}: ${worst.join(" | ")}`).toBeGreaterThan(
+      VARIANCE_FLOOR,
+    );
+    expect(s.edge, `threshold went empty at t=${t}: ${worst.join(" | ")}`).toBeGreaterThan(EDGE_FLOOR);
+    expect(s.distinct, `threshold went flat at t=${t}: ${worst.join(" | ")}`).toBeGreaterThanOrEqual(
+      DISTINCT_FLOOR,
+    );
   }
   console.log(worst.join(" | "));
 });
@@ -157,6 +222,19 @@ test("the skip control is the first thing you reach by keyboard", async ({ page 
   await expect(page.getByTestId("stage-name")).toContainText("Weld 15");
 });
 
+/**
+ * Reduced motion drops the bloom composer (Effects.tsx, asserted directly in perf.spec.ts's
+ * own "bloom is dropped under reduced motion"), and bloom is exactly what spreads bright
+ * pixels and raises local contrast -- so a bloom-off frame is a DIFFERENT, measurably lower-
+ * variance population than every other measurement in this file, all of which are full
+ * motion. Measured, keyless, this build: stage 3 under `reducedMotion: "reduce"`, 250ms
+ * after the stage-3 click, variance 183.4 -- under the shared VARIANCE_FLOOR (250), which
+ * every full-motion stage clears by 3x or more (see this file's header table). Rather than
+ * loosen the shared floor for every other test to accommodate one bloom-off sample, this
+ * gets its own, still comfortably above the zero a genuinely empty arrival would show.
+ */
+const REDUCED_MOTION_VARIANCE_FLOOR = 80;
+
 test("reduced motion jump-cuts instead of flying", async ({ browser }) => {
   // Must not merely shorten the fly. A shortened fly is still a fly.
   const ctx = await browser.newContext({ reducedMotion: "reduce" });
@@ -168,6 +246,8 @@ test("reduced motion jump-cuts instead of flying", async ({ browser }) => {
   await page.getByTestId("stage-3").click();
   await page.waitForTimeout(250); // far less than a fly would need
   const s = await frameStats(page);
-  expect(s.nonBgPct, "reduced motion did not arrive immediately").toBeGreaterThan(8);
+  expect(s.variance, "reduced motion did not arrive immediately").toBeGreaterThan(
+    REDUCED_MOTION_VARIANCE_FLOOR,
+  );
   await ctx.close();
 });

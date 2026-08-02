@@ -934,3 +934,23 @@ any of these sibling worktrees without first checking which server answered on 3
   pulse — verified visually under the toggle rather than only by the number, since Weld's white
   outline is now the brightest thing on a **brick** building rather than a **blue** one. It still
   reads clearly as the highlighted building at stages 2 and 3 with the toggle on.
+
+---
+
+# P11 — photorealism, and the specs it retires
+
+Phase 5 (`docs/phases/P11-PHOTOREAL.md`), the final phase. A note for anyone who follows one of
+the `tests/e2e/*.spec.ts` references above (lines 771, 809, 835, 901, 925) and finds the file
+gone: **`imagery.spec.ts`, `campus.spec.ts`, `contrast.spec.ts` and `wheel-and-spin.spec.ts` were
+deleted in this phase**, per the phase spec's own instruction — each tested a system this phase
+retires (the L0-L2 imagery pyramid, Campus.tsx's `.weld-chip` highlight, MASTER's stroke-width
+figures for that same highlight, and the old per-stage globe-spin/wheel split CameraRig.tsx
+replaced with one drag-and-wheel handler for every stage but the last). The measurements those
+sections of this document recorded are left exactly as taken — they were true of the build at the
+time — but the commands quoted in them (`npm run test:e2e -- tests/e2e/campus.spec.ts`, etc.) no
+longer run. What is not retired-system-specific from those four files survived into
+`tests/e2e/descent.spec.ts`, whose own header names each piece and where it came from.
+`perf.spec.ts` and `journey.spec.ts` were rewritten rather than deleted: draw-call budgets became
+triangles/frame-time/tile-memory, and the coverage heuristic became luminance variance and edge
+energy — both changes are explained at length in each file's own header, for the same reason this
+document explains its own.

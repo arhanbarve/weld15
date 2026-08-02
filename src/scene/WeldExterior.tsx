@@ -15,51 +15,37 @@
  * the ring itself. roofGeometry() has been deleted from geometry.ts, since this
  * rewrite was what made it dead.
  *
- * THE TWO PALETTES, WHICH IS THE REAL DECISION IN THIS FILE
- * Weld is brick with light sandstone belts under a slate roof, and it first appears
- * at stage 2, in the middle of a cyanotype: white line work on Prussian blue.
- * MASTER.md is explicit that the scan and daylight palettes must not be BLENDED,
- * because the crossing between them is the payoff of the whole piece -- so an
- * exterior that lerps from cyan to brick over the threshold spends the payoff on a
- * cross-fade and delivers a few seconds of muddy purple masonry on the way.
+ * THE PALETTE, RETIRED RATHER THAN BLENDED (P11 decision 9)
+ * Weld is brick with light sandstone belts under a slate roof, and through P10 it
+ * appeared at stage 2 wearing a cyanotype at long range that handed off to those
+ * real materials as the camera closed -- a handoff rather than a blend, because
+ * MASTER.md was explicit that the two must not cross-fade.
  *
- * A blend averages the two palettes in time. A HANDOFF does not, and this one is
- * spatial: the sweep's seam descends from above the ridge to grade over the
- * dissolve, and every fragment is wholly cyanotype below it and wholly brick and
- * slate above it. The two palettes meet along one 1.5 ft line -- that line IS the
- * crossing, and it is the only place on the building where both exist at once. So:
+ * Now that live Google Photorealistic 3D Tiles render the real world at every
+ * altitude (P11), Weld's own parametric shell keeping a second, drawing-style
+ * palette for its distant views has no photograph beside it to justify: everything
+ * else in frame at stage 2 is already photoreal, so a blue-line-on-blue-ground Weld
+ * would be the one wrong thing on screen rather than a coherent "scan of the
+ * campus" moment. Locked decision 9: "Retire the cyanotype for the world, keep it
+ * for UI. Photoreal at every altitude. Scan palette survives only as chrome." So
+ * this shell wears `BRICK` / `SLATE` from materials.ts unconditionally -- every
+ * stage, every altitude -- and there is no seam, no progress ramp and no second
+ * palette left to hand off from. `attachPaletteSeam`, `SCAN_ROOF` and the altitude
+ * ramp that used to drive them are gone with it; `Threshold.tsx`, which existed only
+ * to draw the bright line riding that seam, is deleted outright.
  *
- *   progress 0     stages 2 and 3, and stage 4 up to t = 0.2. Seam at 97.4 ft,
- *                  above the tallest roof feature the slider can make. Entirely
- *                  scan. The shell reads as part of the campus drawing, which is
- *                  what those two stages are.
- *   progress 0..1  the seam crosses the gable triangle, the eaves and the wall.
- *                  Brick above, cyanotype below, nothing in between.
- *   progress 1     t = 0.7. Entirely brick and slate. Stage 4's blend does not put
- *                  the camera at the gable's outer face until about t = 0.79 --
- *                  suite v runs 84 to 36.5 over the stage and the ring's north gable
- *                  is at suite v 46.25 -- so the building has arrived at its real
- *                  materials before the camera reaches it, which is the requirement.
+ * WHAT DID NOT MOVE. The dissolve is untouched: `opacity`, fed by `shell` from
+ * thresholdOpacity()'s stage 3->4 ramp, still fades this shell to nothing as the
+ * camera passes through the wall, exactly as before. That crossing was never the
+ * palette's -- it is the ONLY thing left that varies the shell's appearance now.
  *
- * The dissolve itself stays where it already was: the `opacity` prop, i.e.
- * thresholdOpacity()'s shell ramp. The seam recolours, the ramp removes, and both
- * run off the same number so they cannot disagree about when the threshold is over.
- *
- * WHERE PROGRESS COMES FROM
- * `1 - opacity`. thresholdOpacity() defines shell as `1 - ramp(t, 0.2, 0.7)`, so the
- * complement of the number the call site already passes IS that ramp. Reading `t`
- * out of the store instead would be a second progress convention for one quantity,
- * free to drift a frame from the alpha it is supposed to be describing. Under
- * reduced motion the same function returns a binary shell, so progress is 0 or 1
- * there and the seam never moves -- the behaviour wanted, and no branch to get it.
- *
- * DRAW CALLS: four meshes here at mode "none", five while the sweep runs. walls, roof,
- * towers and bays are the four geometries buildWeldCut() returns; the towers share the
- * roof's material, and <Threshold> merges walls and roof into the one extra mesh.
+ * DRAW CALLS: four meshes here at mode "none", period -- P11 decision 9 deletes the fifth,
+ * <Threshold>'s own scanline mesh, along with the seam it rode. walls, roof, towers and bays
+ * are the four geometries buildWeldCut() returns; the towers share the roof's material.
  * Measured at stage 4 with reduced motion, where nothing else is on screen and the
  * composer is off: 4 calls, 416 triangles, which is 220 for the extruded 56-point ring,
  * 112 for the gable's 56 fan quads, 24 for two roof features and 60 for five window
- * bays. Against a budget of 8 that leaves three spare, and the reason not to spend them
+ * bays. Against a budget of 8 that leaves four spare, and the reason not to spend them
  * on a material feature is the one materials() records against `transmission` -- it
  * forces a second full scene render, so it doubles every call rather than adding one.
  * Nothing here has that property and nothing here uses a render target.
@@ -67,14 +53,11 @@
  * THAT 8 IS A BUDGET OF MESHES, AND THE MEASUREMENT BESIDE IT IS THE OPAQUE ONE. Reduced
  * motion draws this shell fully opaque, and an opaque mesh is one submission; three submits
  * a TRANSPARENT DoubleSide material twice, back faces then front, and every material here is
- * DoubleSide and goes transparent for the whole dissolve. So those five meshes are 10 calls
- * at the stage 4 mid-crossing and not 5. That is not the budget blown -- what the crossing
- * is measured against is the whole frame's 30, the same ceiling campus.spec.ts gates stages
- * 1 to 3 at. Off window.__perf at stage 4, mode none: 21 calls at t = 0.2, where the shell is
- * still opaque and <Threshold> mounts nothing, and 27 at t = 0.35 with the sweep running --
- * 17 for the composer and the fixtures plus 10 for five meshes at two passes each. The
- * doubling is measured rather than assumed: roofOff takes two of those meshes off, and the
- * difference from none is 2 calls at t = 0.2 against 4 at t = 0.35.
+ * DoubleSide and goes transparent for the whole dissolve. So those four meshes are 8 calls
+ * at the stage 4 mid-crossing and not 4 -- the doubling P10 measured against a fifth,
+ * now-deleted mesh applies to these same four alone, which is what the shell's own draw-call
+ * cost is against the whole frame's 30, the same ceiling campus.spec.ts gates stages 1 to 3
+ * at.
  *
  * A CUTAWAY ONLY EVER LOWERS THAT. Counted off the parts buildWeldCut() returns and
  * asserted in tests/weldGeometry.test.ts rather than reasoned about. Both the stage 3
@@ -111,9 +94,9 @@
  * depthWrite goes off below full opacity: a half-transparent mesh that writes depth
  * occludes what is drawn after it, and the shell is at partial opacity for the entire
  * threshold, with the interior fading up behind it.
- * And nothing in the effect keys off the camera -- see Threshold's note. Backface
- * culling, a one-sided plane and a distance-to-camera sign all invert at the frame
- * the camera crosses the wall, which is the frame this exists for.
+ * And nothing here keys off the camera. Backface culling, a one-sided plane and a
+ * distance-to-camera sign all invert at the frame the camera crosses the wall, which
+ * is the frame this dissolve exists for.
  *
  * WHAT THE BAYS ACTUALLY LOOK LIKE, WHICH IS NOT QUITE WHAT THEY ARE CALLED
  * bayGeometry() emits a SOLID box per window, centred on the suite's masonry
@@ -200,9 +183,8 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { type SuiteParams } from "@/geo/rooms";
 import { useStore } from "@/state/store";
-import { layerOpacity } from "./altitude";
 import { type CutawayMode } from "./cutaway";
-import { materials, SCAN } from "./materials";
+import { materials } from "./materials";
 import {
   buildWeldCut,
   NO_CUT,
@@ -214,45 +196,23 @@ import {
   type WeldCut,
 } from "./weldGeometry";
 import { REDUCED_CUT } from "./stages";
-import { Threshold, attachPaletteSeam, sweepUniforms, sweepY } from "./Threshold";
 
 /**
- * The scan end of the roof, and the only colour in this file that is not a token as
- * written.
- *
- * P2 used a literal #5783b4 here with no source. The roof has to read darker than
- * the walls or the massing collapses into one silhouette, and the palette has no
- * second building tone -- so this is `line` pulled 45% toward `void`, one documented
- * operation on two SCAN tokens, which is how materials() arrives at BRICK and SLATE.
- * THREE.Color converts hex out of sRGB on construction, so the lerp happens in linear
- * light, as the renderer's own blends do.
- *
- * 45% and not the old literal, which does not sit on this line at all: reproducing
- * #5783b4 needs 0.66 of the red, 0.61 of the green and 0.52 of the blue. So it is
- * near 0.6 on average and this is deliberately lighter, because at 09:00 the sun is
- * off the near slope and a roof at the P2 tone loses the gable against the void.
- */
-const SCAN_ROOF = new THREE.Color(SCAN.line).lerp(new THREE.Color(SCAN.void), 0.45);
-
-/**
- * The three shell materials, cloned once and seamed.
+ * The three shell materials, cloned once.
  *
  * Clones for the reason Suite.tsx gives: materials() hands out singletons so there
  * is one shader program and one grain texture per process, but `opacity` is per-frame
- * threshold state, `side` is a fact about where the camera stands, and the seam's
- * uniforms belong to this component. Writing any of them onto the shared object would
- * push this dissolve into every other consumer. Cloned on mount, never per render,
- * and disposed on unmount.
+ * threshold state and `side` is a fact about where the camera stands. Writing either
+ * onto the shared object would push this dissolve into every other consumer. Cloned
+ * on mount, never per render, and disposed on unmount.
  *
- * All three share one SweepUniforms object, so the seam is one number for the whole
- * building. They also share one compiled program, because attachPaletteSeam injects
- * identical source into each and only the colour uniforms differ -- see the cache-key
- * note in Threshold.
+ * P11 decision 9 retires the seam these used to carry (`attachPaletteSeam`,
+ * `SCAN_ROOF`): there is no second palette left to hand off from, so each clone just
+ * wears materials()'s own daylight colour, unconditionally.
  */
-function useShellPalette(opacity: number, progress: number, reduced: boolean) {
-  const { pal, uniforms } = useMemo(() => {
+function useShellPalette(opacity: number) {
+  const pal = useMemo(() => {
     const m = materials();
-    const u = sweepUniforms();
     const next = {
       walls: m.brick.clone(),
       roof: m.slate.clone(),
@@ -260,11 +220,8 @@ function useShellPalette(opacity: number, progress: number, reduced: boolean) {
       // dark, and an opening reads dark from outside. See the note on the bays above.
       bays: m.slate.clone(),
     };
-    attachPaletteSeam(next.walls, u, SCAN.line);
-    attachPaletteSeam(next.roof, u, SCAN_ROOF);
-    attachPaletteSeam(next.bays, u, SCAN.void);
     for (const x of Object.values(next)) x.side = THREE.DoubleSide;
-    return { pal: next, uniforms: u };
+    return next;
   }, []);
 
   useEffect(() => {
@@ -279,8 +236,7 @@ function useShellPalette(opacity: number, progress: number, reduced: boolean) {
       x.opacity = opacity;
       x.depthWrite = opacity > 0.99;
     }
-    uniforms.uSweepY.value = sweepY(progress, reduced);
-  }, [pal, uniforms, opacity, progress, reduced]);
+  }, [pal, opacity]);
 
   return pal;
 }
@@ -300,13 +256,13 @@ function useShellPalette(opacity: number, progress: number, reduced: boolean) {
  * camera would show a full shell in a cutaway mode until something moved. One frame of
  * uncut brick at the stage 4/5 crossing is worse than a walk of bays() nobody sees.
  *
- * THE ONE ANSWER FOR THE WHOLE BUILDING. <Threshold> takes this cut as a prop rather than
- * deriving its own, so the seam rides the geometry the shell is actually showing and the
- * two cannot disagree -- weldCut()'s WALL_HOLD_FT hysteresis is path-dependent, so two
- * hooks whose first sample fell at different points of the flight could hold opposite
- * answers about a wall the camera is loitering beside. That does not make this hook the
- * sweep's cost: the sweep gates its own GEOMETRY on being drawn, so nothing is built for it
- * outside the crossing, and what is shared here is a cut this component computes anyway.
+ * ONE HOOK, ONE ANSWER. Through P10 this cut was also handed down to <Threshold>, so that
+ * the seam it drew rode the geometry the shell was actually showing rather than a second,
+ * independently-timed answer -- weldCut()'s WALL_HOLD_FT hysteresis is path-dependent, so
+ * two hooks whose first sample fell at different points of the flight could disagree about
+ * a wall the camera is loitering beside. P11 decision 9 deletes Threshold.tsx along with the
+ * seam, so this is now the only consumer of the cut it computes -- the risk the sharing used
+ * to guard against no longer has a second hook to apply to, and the hook itself is unchanged.
  */
 function useWeldCut(mode: CutawayMode, params: SuiteParams): WeldCut {
   const [cut, setCut] = useState<WeldCut>(NO_CUT);
@@ -374,26 +330,12 @@ export function WeldExterior({
   params,
   towers = TOWER_DEFAULTS,
   cutaway,
-  palette,
 }: {
   visible: boolean;
   opacity: number;
   params?: SuiteParams;
   towers?: TowerParams;
   cutaway?: CutawayMode;
-  /**
-   * How far across the scan-to-masonry seam the shell is, 0..1, INDEPENDENT OF THE DISSOLVE.
-   *
-   * P10 split this from `opacity`. It used to be `1 - opacity` outright, which tied "is Weld brick
-   * yet" to "is Weld fading yet" and meant the building could not be brick while it was still
-   * solid -- so it stayed cyanotype through the whole of stages 2 and 3 and only crossed during
-   * stage 4's slider. Once CampusMesh.tsx stood real brick neighbours around it at stage 2, Weld
-   * was the one blue building on a street of red ones.
-   *
-   * Defaulted to `1 - opacity` so the old behaviour is what a call site that does not pass it
-   * still gets, which keeps every existing test of this component honest.
-   */
-  palette?: number;
 }) {
   const reduced = useStore((s) => s.reducedMotion);
   const storeParams = useStore((s) => s.params);
@@ -411,43 +353,10 @@ export function WeldExterior({
   }, [geo]);
 
   /**
-   * How far the palette has resolved from cyanotype into brick: an ALTITUDE ramp since P10,
-   * not the dissolve.
-   *
-   * It read `1 - opacity`, and thresholdOpacity() returns shell: 1 for every stage below 4 --
-   * so progress was 0 for the whole descent and the building was a blue ghost box at stage 3,
-   * which is the complaint P10 exists to answer. The brick, the sandstone belts and the slate
-   * were all in the file and none of them was ever seen before the wall started dissolving.
-   *
-   * layerOpacity(alt).tint is the SAME 40,000 -> 400 ft band the ground resolves on, so the
-   * building and the photograph under it stop being a drawing at the same rate, which is what
-   * makes the descent read as one continuous resolve rather than two effects.
-   *
-   * WHAT THIS COSTS, STATED RATHER THAN HIDDEN. The header above argues for driving the
-   * palette from the dissolve so the payoff is not spent early: "an exterior that lerps from
-   * cyan to brick over the threshold spends the payoff on a dissolve". P10 spends it earlier
-   * on purpose. The threshold now does one thing -- it dissolves the shell -- and the palette
-   * change is the descent's.
-   */
-  const [progress, setProgress] = useState(0);
-  useFrame(({ camera }) => {
-    const want = layerOpacity(camera.position.y).tint;
-    // Quantised to 1/64, because `progress` feeds a useMemo that writes three materials'
-    // uniforms, and a per-frame React state write here is the stall useWeldCut's docblock
-    // records buying a throttle for. 64 steps across the ramp is under a pixel of seam
-    // movement per step at stage 3.
-    if (Math.abs(want - progress) >= 1 / 64) setProgress(want);
-  });
-
-  /**
    * Reduced motion is a different regime, not the same one with the animation
    * switched off. The shell is drawn FULLY OPAQUE with depth writes on until the
    * crossover and not drawn at all after it: no partial-opacity frames, no sort
-   * against the interior, no seam travelling anywhere. That is the jump-cut
-   * MASTER.md asks for, and it has a consequence worth stating rather than hiding --
-   * the exterior never wears brick under reduced motion, because the only ways to
-   * show it would be an animated seam, which is the thing being suppressed, or a
-   * second hard cut, which is two pops where the guideline asks for one.
+   * against the interior. That is the jump-cut MASTER.md asks for.
    *
    * REDUCED_CUT is stages.ts's number and is imported rather than restated, which is
    * what the note on it there asks for. It is the midpoint of the crossing, and
@@ -458,38 +367,14 @@ export function WeldExterior({
    * that owns the mesh: a call site that forgets thresholdOpacity's third argument
    * gets a jump cut anyway instead of a dissolve nobody asked for.
    *
-   * CORRECTED IN P10: the paragraph above about brick never showing under reduced motion is no
-   * longer true, and that is a fix rather than a regression. `progress`, just above, is now an
-   * altitude ramp rather than this dissolve's own complement, so a reduced-motion viewer who
-   * scrubs the master slider down to stage 3 -- well under 400 ft -- sees brick before the
-   * shell has cut at all. What is suppressed under reduced motion is still exactly what this
-   * paragraph says: the ANIMATED seam travelling down the building. Nothing about that
-   * animation has been reintroduced; the seam's own position (`sweepY`, fed by `progress`) is
-   * just no longer the only thing that can put colour on the wall. The local variable used
-   * for the binarisation below is `1 - opacity` rather than `progress` for exactly this
-   * reason: the two used to be the same number and are not any more, and this line's contract
-   * -- a jump cut at REDUCED_CUT, decided from `opacity` -- must not silently start reading
-   * altitude instead.
+   * P11 decision 9 removes the paragraph this docblock used to carry about the
+   * palette never reaching brick under reduced motion: there is no palette left to
+   * reach, since the shell wears brick and slate unconditionally now. What survives
+   * here is the dissolve alone -- opaque, then gone, at this one threshold.
    */
   const shell = reduced ? (1 - opacity < REDUCED_CUT ? 1 : 0) : opacity;
 
-  /**
-   * MERGE NOTE (P10 integration). `shell` keeps p10-ux's `1 - opacity` and not p10-imagery's
-   * `progress`: the paragraph above IS the argument for it, and that argument only became true
-   * once `progress` stopped meaning the threshold and started meaning an altitude. p10-imagery
-   * branched before that, so its line was the same line under the older assumption. This is the
-   * one that holds under both.
-   *
-   * `seam` is p10-imagery's, and where a palette is supplied it wins over the altitude ramp.
-   * Experience.tsx passes 1 from stage 2, which is where this shell is first mounted, so Weld is
-   * masonry at every stage it is actually visible at rather than being the one blue building in a
-   * Yard whose neighbours have already crossed -- CampusMesh crosses on layerOpacity().massing,
-   * which is over well above stage 2's 815 ft. The ramp stays as the fallback, and it still
-   * drives <Threshold> below, which is the stage-4 dissolve and a different quantity.
-   */
-  const seam = palette ?? progress;
-
-  const pal = useShellPalette(shell, seam, reduced);
+  const pal = useShellPalette(shell);
 
   if (shell <= 0.001) return null;
 
@@ -504,11 +389,6 @@ export function WeldExterior({
       {geo.roof ? <mesh geometry={geo.roof} material={pal.roof} /> : null}
       {geo.towers ? <mesh geometry={geo.towers} material={pal.roof} /> : null}
       {geo.bays ? <mesh geometry={geo.bays} material={pal.bays} /> : null}
-      {/* Mounted here rather than from Experience so the seam's progress is the
-          same number the shell's alpha was derived from, and its cut the same cut these
-          four meshes were built from, and so the integrator has one component to wire
-          instead of two. */}
-      <Threshold progress={progress} cut={cut} />
     </group>
   );
 }

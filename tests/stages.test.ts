@@ -80,8 +80,9 @@ describe("keyframes", () => {
   });
 
   it("stands the interior camera at eye height on the first floor", () => {
-    // 12 ft floor-to-floor, plus 5 ft 10 in of person.
-    expect(kf[5].position[1]).toBeCloseTo(12 + 5 + 10 / 12, 6);
+    // 12 ft floor-to-floor, plus 5 ft 2 in of person. WAS 5 ft 10 in; lowered by
+    // docs/phases/P11-PHOTOREAL.md decision 7.
+    expect(kf[5].position[1]).toBeCloseTo(12 + 5 + 2 / 12, 6);
   });
 
   it("builds kf[5] from the same standing pose the walker will use", () => {
@@ -406,8 +407,8 @@ describe("the threshold path", () => {
     // disagree about it.
     expect(roomAt(inSuite(kf[5].position))).toBe(HUB);
     // At eye height on the first floor, still: this moved the camera across the suite,
-    // not up or down.
-    expect(kf[5].position[1] - floorLevel(1)).toBeCloseTo(5 + 10 / 12, 9);
+    // not up or down. WAS 5 ft 10 in; lowered by docs/phases/P11-PHOTOREAL.md decision 7.
+    expect(kf[5].position[1] - floorLevel(1)).toBeCloseTo(5 + 2 / 12, 9);
   });
 
   it("hangs a path off the stages that travel and not off the stages that sit", () => {
@@ -553,15 +554,30 @@ describe("visibility", () => {
     for (const s of [1, 2, 3, 4, 5] as StageId[]) expect(visibility(s).globe).toBe(false);
   });
 
-  it("mounts the campus at stage 0, because stage 0 is where the ground arrives", () => {
+  // RENAMED FROM "campus" TO "tiles", AND EXTENDED THROUGH STAGE 4, per
+  // docs/phases/P11-PHOTOREAL.md §0.7 and §3.2 ("visibility() loses campus/globe, gains
+  // tiles"). This is a DELIBERATE BEHAVIOUR FIX, not a regression of the assertions below:
+  // the old `campus: stage <= 3` was the measured bug -- Experience.tsx unmounted
+  // Ground/Campus/FallbackGround at stage 4, the fly-through into Weld, leaving the
+  // dissolving shell floating against nothing (confirmed at u = 0.93 in the spec). The user's
+  // own framing of the fix: "stage 3 and 4 should essentially just be the same thing."
+  it("mounts the world at stage 0, because stage 0 is where the ground arrives", () => {
     // P9 CHANGED THIS LINE and it is worth an assertion of its own. Stage 0's path runs from
     // 31,353,347 ft down to stage 1's keyframe at 16,332 ft, so the massing's fade-in at
-    // 40,000 ft happens inside stage 0. Mounting the campus only from stage 1 would move the
-    // pop from the 0 -> 1 boundary to the moment of mounting rather than removing it.
-    expect(visibility(0).campus).toBe(true);
-    for (const s of [1, 2, 3] as StageId[]) expect(visibility(s).campus).toBe(true);
-    // And still off once the camera is inside, where it would be geometry behind a wall.
-    for (const s of [4, 5] as StageId[]) expect(visibility(s).campus).toBe(false);
+    // 40,000 ft happens inside stage 0. Mounting the world only from stage 1 would move the
+    // pop from the 0 -> 1 boundary to the moment of mounting rather than removing it. This
+    // argument only strengthens for `tiles`: the live Google Photorealistic 3D Tiles path is
+    // genuinely visible from orbit altitude in a real flyby, unlike a flat NAIP quad, so stage
+    // 0 is no longer just a bounded-cost warm-up, it is decision 2's "Orbit -> Yard, all of it."
+    expect(visibility(0).tiles).toBe(true);
+    // NOW TRUE THROUGH STAGE 4 -- this is §0.7's fix. The world must not disappear during the
+    // fly-through into Weld: stage 3 and stage 4 are meant to read as one continuous move.
+    for (const s of [1, 2, 3, 4] as StageId[]) expect(visibility(s).tiles).toBe(true);
+    // Off only at stage 5, where the camera stands first-person inside the hall, behind
+    // Weld's exterior walls for the whole stage -- the world outside them is never in frame,
+    // so mounting it would cost draw calls for geometry nothing can see (the same argument
+    // Experience.tsx's own <Labels> comment makes for that component at stages 4-5).
+    expect(visibility(5).tiles).toBe(false);
   });
 
   it("mounts the interior a stage before the threshold needs it", () => {
@@ -573,7 +589,7 @@ describe("visibility", () => {
   it("always has something to render", () => {
     for (const s of [0, 1, 2, 3, 4, 5] as StageId[]) {
       const v = visibility(s);
-      expect(v.globe || v.campus || v.weld || v.interior, `stage ${s} renders nothing`).toBe(true);
+      expect(v.globe || v.tiles || v.weld || v.interior, `stage ${s} renders nothing`).toBe(true);
     }
   });
 });
@@ -630,9 +646,11 @@ describe("stage4Pose", () => {
 
   const kf4Path = keyframes(DEFAULT_PARAMS);
   const held = stage4OrbitKeyframe(kf4Path[4], {
-    azimuthDeg: 40,
-    polarDeg: 60,
-    radius: 200,
+    // P11: headingDeg/pitchDeg/rangeFt, orbit.ts's new shape; pitchDeg = 90 - polarDeg
+    // (the old azimuthDeg 40 / polarDeg 60 / radius 200 fixture).
+    headingDeg: 40,
+    pitchDeg: 30,
+    rangeFt: 200,
   });
 
   it("returns the path pose by identity at and after SHELL_GONE", () => {
@@ -698,13 +716,16 @@ describe("stage4Pose", () => {
    */
   it("never clips into Weld's real massing while funnelling back onto the path", () => {
     const ring = weld.rings[0] as number[][];
+    // P11: headingDeg/pitchDeg/rangeFt, orbit.ts's new shape; each pitchDeg is
+    // 90 - <the old polarDeg fixture>, and minRangeFt/maxRangeFt replace
+    // minRadius/maxRadius -- same six physical camera positions as before.
     const orbits: Orbit[] = [
-      { azimuthDeg: 0, polarDeg: 20, radius: STAGE4_CLAMP.minRadius + 1 },
-      { azimuthDeg: 90, polarDeg: 45, radius: STAGE4_CLAMP.minRadius + 20 },
-      { azimuthDeg: 180, polarDeg: 60, radius: (STAGE4_CLAMP.minRadius + STAGE4_CLAMP.maxRadius) / 2 },
-      { azimuthDeg: 270, polarDeg: 75, radius: STAGE4_CLAMP.maxRadius - 1 },
-      { azimuthDeg: 45, polarDeg: 15.5, radius: STAGE4_CLAMP.maxRadius },
-      { azimuthDeg: -135, polarDeg: 87.5, radius: STAGE4_CLAMP.minRadius },
+      { headingDeg: 0, pitchDeg: 70, rangeFt: STAGE4_CLAMP.minRangeFt + 1 },
+      { headingDeg: 90, pitchDeg: 45, rangeFt: STAGE4_CLAMP.minRangeFt + 20 },
+      { headingDeg: 180, pitchDeg: 30, rangeFt: (STAGE4_CLAMP.minRangeFt + STAGE4_CLAMP.maxRangeFt) / 2 },
+      { headingDeg: 270, pitchDeg: 15, rangeFt: STAGE4_CLAMP.maxRangeFt - 1 },
+      { headingDeg: 45, pitchDeg: 74.5, rangeFt: STAGE4_CLAMP.maxRangeFt },
+      { headingDeg: -135, pitchDeg: 2.5, rangeFt: STAGE4_CLAMP.minRangeFt },
     ];
     let checked = 0;
     for (const o of orbits) {

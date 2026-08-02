@@ -57,12 +57,13 @@ function clock(hour: number): string {
 }
 
 /**
- * Degrees of azimuth or polar per press, and the arithmetic behind the 5.
+ * Degrees of heading or pitch per press, and the arithmetic behind the 5.
  *
- * STAGE3_CLAMP allows 15 to 88 degrees of polar, a span of 73, which 5 crosses in
- * 15 presses -- end to end in under a second of key repeat, and no press large
- * enough to lose track of where the building went. Azimuth wraps, so its span is
- * 360: 72 presses for a full turn, 18 from one facade to the next.
+ * STAGE3_CLAMP allows 2 to 75 degrees of pitch, a span of 73 (unchanged from the old
+ * 15-to-88-degree polar clamp -- pitchDeg = 90 - polarDeg is a relabelling, not a
+ * resizing), which 5 crosses in 15 presses -- end to end in under a second of key
+ * repeat, and no press large enough to lose track of where the building went. Heading
+ * wraps, so its span is 360: 72 presses for a full turn, 18 from one facade to the next.
  *
  * It is also the same size as a small drag. CameraRig turns the orbit one full
  * turn per viewport height, which at 1000 px is 0.36 deg/px, so 5 deg is 14 px of
@@ -71,16 +72,14 @@ function clock(hour: number): string {
 const STEP_DEG = 5;
 
 /**
- * Radius multiplier per press: STAGE3_CLAMP's whole 3x span in 15 presses.
+ * Range multiplier per press: STAGE3_CLAMP's whole 3x span in 15 presses.
  *
  * Derived from the clamp rather than written out as 1.076, so the press count is
- * what stays fixed if the radii move -- and they can, both are computed from
- * Weld's ring and ridge. It lands within a hair of CameraRig's 1.08 per wheel
- * notch, so a press and a notch zoom by the same amount without either number
- * being a copy of the other.
+ * what stays fixed if the ranges move -- and they can, both are computed from
+ * Weld's ring and ridge.
  */
 const ZOOM_PRESSES = 15;
-const ZOOM_PER_PRESS = (STAGE3_CLAMP.maxRadius / STAGE3_CLAMP.minRadius) ** (1 / ZOOM_PRESSES);
+const ZOOM_PER_PRESS = (STAGE3_CLAMP.maxRangeFt / STAGE3_CLAMP.minRangeFt) ** (1 / ZOOM_PRESSES);
 
 /**
  * How long the orbit must sit still before it is announced, ms.
@@ -115,25 +114,28 @@ const ANNOUNCE_MS = 400;
 const FP_ROW_MAX = "18rem";
 
 /** One press worth of orbit. Defaults are the identity nudge. */
-type Nudge = { az?: number; polar?: number; zoom?: number };
+type Nudge = { heading?: number; pitch?: number; zoom?: number };
 
 /**
  * Arrow, page and plus/minus keys to an orbit nudge.
  *
  * ORBIT_CONTROLS and its six buttons are gone (step 5); this is only the mapping that
- * survives them. SIGNS follow CameraRig's drag exactly, the same choice ORBIT_CONTROLS'
- * own docblock recorded: right increases azimuth, up increases polar, because polar is
- * measured from straight up, so a rising polar tilts the view UP toward the horizon --
- * which is what an up arrow should do.
+ * survives them. SIGNS follow CameraRig's drag exactly: right increases heading, and up
+ * tilts the view UP toward the horizon -- which, under geo/rig.ts's pitchDeg convention
+ * (0 level, 90 straight down, the opposite sense from the old polarDeg-from-straight-up),
+ * is a FALLING pitch rather than a rising one. So up now decreases pitchDeg and down
+ * increases it -- the on-screen effect of each arrow is unchanged from before this
+ * rename; only the field it moves, and which direction counts as "more", flipped along
+ * with polarDeg -> pitchDeg = 90 - polarDeg.
  *
  * `=` and `_` stay for the reason they always did: on a US layout `+` and `-` share keys
  * with them, and an unshifted press reports the unshifted character.
  */
 const NUDGE_BY_KEY: Record<string, Nudge> = {
-  ArrowLeft: { az: -STEP_DEG },
-  ArrowRight: { az: STEP_DEG },
-  ArrowUp: { polar: STEP_DEG },
-  ArrowDown: { polar: -STEP_DEG },
+  ArrowLeft: { heading: -STEP_DEG },
+  ArrowRight: { heading: STEP_DEG },
+  ArrowUp: { pitch: -STEP_DEG },
+  ArrowDown: { pitch: STEP_DEG },
   PageUp: { zoom: 1 / ZOOM_PER_PRESS },
   "+": { zoom: 1 / ZOOM_PER_PRESS },
   "=": { zoom: 1 / ZOOM_PER_PRESS },
@@ -185,35 +187,35 @@ function nudgeOrbit(n: Nudge, seed: Orbit, setOrbit: (o: Orbit) => void): void {
   const o = useStore.getState().orbit ?? seed;
   setOrbit(
     clampOrbit({
-      azimuthDeg: o.azimuthDeg + (n.az ?? 0),
-      polarDeg: o.polarDeg + (n.polar ?? 0),
-      radius: o.radius * (n.zoom ?? 1),
+      headingDeg: o.headingDeg + (n.heading ?? 0),
+      pitchDeg: o.pitchDeg + (n.pitch ?? 0),
+      rangeFt: o.rangeFt * (n.zoom ?? 1),
     }),
   );
 }
 
 /** Where the camera is, compactly, for the row itself. */
 function readOrbit(o: Orbit): string {
-  return `az ${o.azimuthDeg.toFixed(0)}° pol ${o.polarDeg.toFixed(0)}° ${o.radius.toFixed(0)} ft`;
+  return `heading ${o.headingDeg.toFixed(0)}° pitch ${o.pitchDeg.toFixed(0)}° ${o.rangeFt.toFixed(0)} ft`;
 }
 
 /**
  * The same reading in words, for a reader that cannot see the frame.
  *
- * Spelled out rather than reusing readOrbit because "az" and "°" are read as
+ * Spelled out rather than reusing readOrbit because "heading" and "°" are read as
  * letters and a symbol, and this is the only description of the camera a screen
  * reader gets -- the canvas is opaque to it.
  *
- * Azimuth is the stored bearing, degrees east of north wrapped to (-180, 180], so
+ * Heading is the stored bearing, degrees east of north wrapped to (-180, 180], so
  * it can come out negative. Left that way on purpose: rewriting it as 0 to 360
  * here would put a second convention on the same number, and frames.ts, solar.ts
  * and orbit.ts all use this one.
  */
 function sayOrbit(o: Orbit): string {
   return (
-    `Azimuth ${o.azimuthDeg.toFixed(0)} degrees, ` +
-    `polar ${o.polarDeg.toFixed(0)} degrees, ` +
-    `${o.radius.toFixed(0)} feet out.`
+    `Heading ${o.headingDeg.toFixed(0)} degrees, ` +
+    `pitch ${o.pitchDeg.toFixed(0)} degrees, ` +
+    `${o.rangeFt.toFixed(0)} feet out.`
   );
 }
 
@@ -236,7 +238,6 @@ export function Hud() {
   const params = useStore((s) => s.params);
   const orbit = useStore((s) => s.orbit);
   const setOrbit = useStore((s) => s.setOrbit);
-  const setGlobeSpin = useStore((s) => s.setGlobeSpin);
   const cutaway = useStore((s) => s.cutaway);
   const setCutaway = useStore((s) => s.setCutaway);
   const occupancy = useStore((s) => s.occupancy);
@@ -492,9 +493,11 @@ export function Hud() {
    *   no modifiers     Cmd+Arrow and Alt+Arrow are platform navigation.
    *
    * STEP_DEG, ZOOM_PER_PRESS and nudgeOrbit are unchanged from when buttons called them. The
-   * derivation in their docblocks -- 15 presses end to end on both the polar span and the
-   * radius, matched to one wheel notch and to 14 px of drag -- is why the keys still feel
-   * like the pointer, and none of it moved.
+   * derivation in their docblocks -- 15 presses end to end on both the pitch span and the
+   * range, matched to 14 px of drag -- is why the keys still feel like the pointer, and
+   * none of it moved. P11 moved zooming itself off the wheel (CameraRig.tsx's wheel now
+   * always advances the journey; see that file's own header), so PageUp/PageDown/+/-
+   * here are the range control's only surviving input.
    */
   useEffect(() => {
     if (stage !== 3) return;
@@ -602,15 +605,17 @@ export function Hud() {
                 {flying ? "Stop" : "Fly down to Weld"}
               </button>
             ) : null}
-            {/* [Reset the view], at the two stages that have one to reset: stage 0's turn
-                (globeSpin) and stage 3's free orbit (orbit). Both are session state rather
-                than model state -- neither is carried by a link, for the reason store.ts
-                gives on each field -- so nothing else puts either back. */}
-            {stage === 0 || stage === 3 ? (
+            {/* [Reset the view], at every stage that has a free orbit to reset -- P11 made
+                that every stage but the last (CameraRig.tsx's drag/wheel effect is mounted
+                at every stage < LAST_STAGE), where it used to be only stage 0's turn
+                (globeSpin, now removed) and stage 3's free orbit. `orbit` is session state
+                rather than model state -- it is not carried by a link, for the reason
+                store.ts gives on the field -- so nothing else puts it back. */}
+            {stage !== LAST_STAGE ? (
               <button
                 type="button"
                 className="fly"
-                onClick={() => (stage === 0 ? setGlobeSpin(null) : setOrbit(null))}
+                onClick={() => setOrbit(null)}
                 data-testid="reset-view"
               >
                 Reset the view

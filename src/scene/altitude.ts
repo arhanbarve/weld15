@@ -22,7 +22,20 @@
  * these stops would spend essentially all of its travel in the top decade and snap through
  * the rest. "One octave wide" is a statement about a ratio, and the only interpolation in
  * which it means anything is the logarithmic one.
+ *
+ * P11 CORRECTION (task 4): `nearFar()` used to read its argument as altitude directly,
+ * which is only true for a camera on Weld's local vertical -- see geo/frame.ts's header and
+ * docs/phases/P11-PHOTOREAL.md section 0.1 for the measured failure once a camera leaves
+ * it (globeRig.ts's spinPose). `nearFar()` keeps its existing signature, `nearFar(y:
+ * number)`, because CameraRig.tsx's call site (`nearFar(camera.position.y)`) is owned by a
+ * concurrent workstream and is not touched here -- but internally it now builds a site-frame
+ * point `[0, y, 0]` and asks geo/frame.ts's `altitudeOf` for the true height above the
+ * WGS-84 ellipsoid, rather than trusting `y` as-is. For a camera actually on the vertical
+ * (x = z = 0, the only case the current call site ever produces), `altitudeOf([0, y, 0]) ===
+ * y` to within a foot (frame.ts's own guarantee), so this is a no-op today and only changes
+ * behaviour once a future call site passes an off-vertical position.
  */
+import { altitudeOf } from "./geo/frame";
 
 /**
  * Earth's radius in feet.
@@ -94,14 +107,35 @@ function logLerp(x: number, x0: number, x1: number, y0: number, y1: number): num
  * CameraRig applies this every frame, in the same place it already writes camera.fov and
  * calls updateProjectionMatrix(). Experience.tsx's hard-coded `near: 0.5, far: 25_000`
  * becomes the initial value only.
+ *
+ * `y` is CameraRig's call site's own value, `camera.position.y` -- one component of a
+ * site-frame position, in feet. It is turned into a site-frame POINT, `[0, y, 0]`, and
+ * handed to geo/frame.ts's `altitudeOf`, rather than trusted as altitude directly: the two
+ * only coincide when x = z = 0, i.e. a camera on Weld's local vertical, which is every
+ * camera this function is called with today (see this file's header) but is not, in
+ * general, true -- docs/phases/P11-PHOTOREAL.md section 0.1 measures the failure once a
+ * camera leaves it. `altitudeOf` correctly ignores x and z here in exactly the case they
+ * are meant to be ignored, and correctly stops ignoring them once a caller starts passing
+ * a real off-vertical component in their place -- which is not this task, since this
+ * function's signature stays a single number so CameraRig.tsx's call site does not change.
  */
-export function nearFar(alt: number): { near: number; far: number } {
+export function nearFar(y: number): { near: number; far: number } {
+  const alt = altitudeOf([0, y, 0]);
   const a = Math.max(0, alt);
   const stops = NEAR_FAR_STOPS;
   const first = stops[0]!;
   const last = stops[stops.length - 1]!;
-  if (a <= first.alt) return { near: first.near, far: first.far };
-  if (a >= last.alt) return { near: last.near, far: last.far };
+  /**
+   * Slack absorbing altitudeOf's own round trip through ECEF (Bowring's iteration settles
+   * to 1e-9 metres, not to machine epsilon -- see geo/frame.ts). Passing `y` exactly on the
+   * flat schedule's own boundary (as tests/altitude.test.ts does) can therefore come back a
+   * few billionths of a foot to the wrong side of `first.alt`/`last.alt`, which used to be
+   * impossible when this function read `y` directly. 1e-6 ft is three orders of magnitude
+   * over that noise floor and nine orders under anything visible.
+   */
+  const FLAT_EPS = 1e-6;
+  if (a <= first.alt + FLAT_EPS) return { near: first.near, far: first.far };
+  if (a >= last.alt - FLAT_EPS) return { near: last.near, far: last.far };
   for (let i = 1; i < stops.length; i++) {
     const lo = stops[i - 1]!;
     const hi = stops[i]!;

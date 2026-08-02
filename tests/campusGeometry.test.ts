@@ -1,29 +1,30 @@
 import { describe, it, expect } from "vitest";
 import campus from "@/data/campus.json";
 import { extrude, normalizeRing } from "@/geo/extrude";
-import { buildEdgeGeometry, expectedSegments, WELD_NAME } from "@/scene/campusGeometry";
+import { buildGroundRingGeometry, expectedGroundSegments, WELD_NAME } from "@/scene/campusGeometry";
 
 /**
- * buildCampusGeometry() itself is exercised by the e2e draw-call count -- P10 retired the merged
- * mass it used to build, so what is left of it (Weld's own box, kept only for the `!weld` guard,
- * and weldEdges) is thin enough not to need a unit test of its own. What is worth pinning here is
- * the edge geometry, because a wireframe with missing verticals or a dropped closing edge looks
+ * P11 §0.5 RETIRED THE THREE-SEGMENTS-PER-EDGE WIREFRAME these tests used to pin -- a grade
+ * ring, an eaves ring and a corner vertical, which is exactly the shape that merged into white
+ * panels at Weld's gable ends. `buildGroundRingGeometry()` is what replaced it: one segment per
+ * ring edge, at grade, nothing above it. What is worth pinning here is unchanged in spirit --
+ * a ring with a missing vertical, sorry, a missing SEGMENT, or a dropped closing edge looks
  * almost right and is very easy to ship.
  */
-describe("edge geometry", () => {
+describe("ground ring geometry", () => {
   const others = campus.buildings.filter((b) => b.name !== WELD_NAME);
   const weld = campus.buildings.filter((b) => b.name === WELD_NAME);
 
-  it("emits three segments per ring edge: grade, eaves and corner", () => {
-    const g = buildEdgeGeometry(weld);
+  it("emits one segment per ring edge, at grade only", () => {
+    const g = buildGroundRingGeometry(weld);
     const verts = g.getAttribute("position").count;
     // two vertices per segment
-    expect(verts).toBe(expectedSegments(weld) * 2);
+    expect(verts).toBe(expectedGroundSegments(weld) * 2);
   });
 
   it("covers every building except Weld in the merged set", () => {
-    const g = buildEdgeGeometry(others);
-    expect(g.getAttribute("position").count).toBe(expectedSegments(others) * 2);
+    const g = buildGroundRingGeometry(others);
+    expect(g.getAttribute("position").count).toBe(expectedGroundSegments(others) * 2);
     expect(others).toHaveLength(35);
   });
 
@@ -33,56 +34,50 @@ describe("edge geometry", () => {
     for (const b of [...weld, ...others].slice(0, 6)) {
       const ring = normalizeRing(b.ring as number[][]);
       const n = ring.length - 1;
-      const g = buildEdgeGeometry([b]);
+      const g = buildGroundRingGeometry([b]);
       const pos = g.getAttribute("position");
-      // Collect the grade-level segments and check each ring vertex appears twice
-      // (once as a start, once as an end), which only holds for a closed loop.
+      // Every vertex is at grade now, so every position counts. Each distinct ring vertex
+      // is shared by two grade edges -- once as a start, once as an end -- which only
+      // holds for a closed loop.
       const touches = new Map<string, number>();
       for (let i = 0; i < pos.count; i++) {
-        if (Math.abs(pos.getY(i)) > 1e-6) continue;
         const key = `${pos.getX(i).toFixed(3)},${pos.getZ(i).toFixed(3)}`;
         touches.set(key, (touches.get(key) ?? 0) + 1);
       }
-      // Each distinct grade vertex is shared by two grade edges, plus one corner
-      // vertical also starts at grade, so three touches per vertex.
       expect(touches.size, `${b.name} vertex count`).toBe(n);
       for (const [key, count] of touches) {
-        expect(count, `${b.name} vertex ${key} touched ${count} times`).toBe(3);
+        expect(count, `${b.name} vertex ${key} touched ${count} times`).toBe(2);
       }
     }
   });
 
-  it("puts every edge vertex at or above grade and at or below the eaves", () => {
+  it("puts every vertex at grade, not above it", () => {
     for (const b of [...weld, ...others]) {
-      const g = buildEdgeGeometry([b]);
+      const g = buildGroundRingGeometry([b]);
       const pos = g.getAttribute("position");
       for (let i = 0; i < pos.count; i++) {
-        const y = pos.getY(i);
-        // Tolerance is 1e-3, not 1e-6: positions are Float32, and 87.01 stores as
-        // 87.01000213623047, which a tighter bound rejects for no real reason.
-        expect(y, `${b.name} vertex below grade`).toBeGreaterThanOrEqual(-1e-3);
-        expect(y, `${b.name} vertex above eaves`).toBeLessThanOrEqual(b.height_ft + 1e-3);
+        expect(pos.getY(i), `${b.name} vertex off grade`).toBe(0);
       }
     }
   });
 
   it("maps north onto -Z, matching the mass geometry", () => {
-    // If the edges and the masses disagreed on handedness, the wireframe would be
-    // mirrored against the solid and the whole campus would look doubled.
+    // If the ring and the mass disagreed on handedness, WeldMarker's outline would be
+    // mirrored against the solid and sit off the building it is meant to trace.
     const b = weld[0]!;
-    const edges = buildEdgeGeometry([b]).getAttribute("position");
+    const ring = buildGroundRingGeometry([b]).getAttribute("position");
     const mass = extrude(b.ring as number[][], b.height_ft);
-    let edgeMinZ = Infinity;
-    for (let i = 0; i < edges.count; i++) edgeMinZ = Math.min(edgeMinZ, edges.getZ(i));
+    let ringMinZ = Infinity;
+    for (let i = 0; i < ring.count; i++) ringMinZ = Math.min(ringMinZ, ring.getZ(i));
     let massMinZ = Infinity;
     for (let i = 2; i < mass.positions.length; i += 3) {
       massMinZ = Math.min(massMinZ, mass.positions[i]!);
     }
-    expect(edgeMinZ).toBeCloseTo(massMinZ, 3);
+    expect(ringMinZ).toBeCloseTo(massMinZ, 3);
   });
 
-  it("produces a non-trivial wireframe, so the checks above are not vacuous", () => {
-    const g = buildEdgeGeometry(campus.buildings);
-    expect(g.getAttribute("position").count).toBeGreaterThan(2000);
+  it("produces a non-trivial ring, so the checks above are not vacuous", () => {
+    const g = buildGroundRingGeometry(campus.buildings);
+    expect(g.getAttribute("position").count).toBeGreaterThan(700);
   });
 });

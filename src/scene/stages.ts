@@ -18,6 +18,7 @@ import type { StageId } from "@/state/store";
 import { HUB, route, standingPose } from "./route";
 import { EYE } from "./walk";
 import { R_EARTH_FT } from "./altitude";
+import { poseToKeyframe, keyframeToPose, type GeoPose } from "./geo/rig";
 
 /**
  * One camera pose, plus -- for the one stage that has a path rather than a place -- the
@@ -224,6 +225,42 @@ function stopGeometry(k: Keyframe): {
 }
 
 /**
+ * A keyframe, rebuilt through its own GeoPose -- geo/rig.ts's keyframeToPose then
+ * poseToKeyframe -- so that the stage's shot is, per P11-PHOTOREAL.md section 2.3,
+ * actually constructed via lat/lon/targetFt/heading/pitch/range rather than merely
+ * describable that way.
+ *
+ * A ROUND TRIP, DELIBERATELY, RATHER THAN A DIRECT BUILD FROM THIS FILE'S OWN
+ * CONSTANTS (STAGE1_AZIMUTH_DEG and friends), because those constants and
+ * GeoPose.headingDeg do not share a sign convention. descentStop()'s azimuthDeg
+ * places the camera at position.z = +horizontal * cos(azimuthDeg), while
+ * poseToKeyframe/orbitKeyframe place it at target.z - horizontal * cos(headingDeg)
+ * -- i.e. z with the OPPOSITE sign for the same angle. Measured directly: stage 3's
+ * fixed pose ([150,110,190] looking at [0,42,0]) has a true GeoPose headingDeg of
+ * atan2(150,-190) =~ 141.8 deg, not the "38.3" this file's own azimuth comments use
+ * for the same shot -- the two are related by headingDeg = 180 - azimuthDeg, and
+ * conflating them would put the camera on the wrong side of the building. Building
+ * every base keyframe from its own already-correct Cartesian pose and reading the
+ * GeoPose back off THAT (rather than hand-deriving headingDeg from the old azimuth
+ * constants) sidesteps the sign question entirely and cannot mirror a shot by
+ * mistake.
+ *
+ * SAFE TO WITHIN 0.01 FT, not exact, which is what every stage-0..4 keyframe below
+ * inherits: tests/geoRig.test.ts proves keyframeToPose/poseToKeyframe round-trip
+ * every one of today's six stage keyframes to within 0.01 ft, and every assertion
+ * in tests/stages.test.ts about stages 0-4 is a self-referential or tolerant check
+ * (pointInPolygon, monotonic-distance, toBeCloseTo, dist() < some feet), not a
+ * bit-exact recomputation -- so this bridge cannot regress any of them. Stage 5 is
+ * the one exception and is NOT run through this: kf[5] is asserted bit-for-bit
+ * (`toBe`, not `toBeCloseTo`) equal to standingPose()'s own suiteToThree() output,
+ * so it keeps its direct Cartesian construction untouched.
+ */
+function viaGeoPose(k: Keyframe): Keyframe {
+  const pose: GeoPose = keyframeToPose(k);
+  return poseToKeyframe(pose);
+}
+
+/**
  * The flight between two descent stops.
  *
  * LOGARITHMIC IN ALTITUDE, AND THAT IS THE WHOLE POINT OF THIS FUNCTION. Stage 0 falls from
@@ -424,7 +461,15 @@ function buildKeyframes(params: SuiteParams): Record<StageId, Keyframe> {
   const inHall = suiteToThree(pose.p.u, pose.p.v, floor + EYE, params);
   const hallTarget = suiteToThree(pose.aim.u, pose.aim.v, floor + EYE - pose.drop, params);
 
-  const four: Keyframe = { position: gableOutside, target: insideBedB, fov: GABLE_FOV };
+  // Also rebuilt through its own GeoPose, for the same reason the descent stops are --
+  // it is a plain two-point shot with no orbit constants to conflict with, so the round
+  // trip is pure margin here rather than a sign-convention dodge.
+  const four: Keyframe = viaGeoPose({ position: gableOutside, target: insideBedB, fov: GABLE_FOV });
+  // kf[5] is NOT run through viaGeoPose. tests/stages.test.ts asserts it bit-for-bit
+  // (`toBe`, not `toBeCloseTo`) equal to standingPose()'s own suiteToThree() output --
+  // see viaGeoPose()'s comment -- so it keeps its exact Cartesian construction. Its
+  // GeoPose, per P11-PHOTOREAL.md 2.3's table, is the hall/eye/standingPose().heading/
+  // 8 deg/0 range shot this already is; it is simply not re-derived through the type.
   const five: Keyframe = { position: inHall, target: hallTarget, fov: ROOM_FOV };
   const path = thresholdPath(params, suite, bedB, four, five);
 
@@ -448,20 +493,35 @@ function buildKeyframes(params: SuiteParams): Record<StageId, Keyframe> {
   // Stage 3 does NOT move, and that is load-bearing rather than conservative: orbit.ts:71-93
   // derives the whole of STAGE3_CLAMP from MASS_RADIUS and from this keyframe, so moving it
   // invalidates a derivation and a brute-force verification in another file.
-  const zero = descentStop(STAGE0_ALT, STAGE0_TILT_DEG, STAGE0_AZIMUTH_DEG, 0);
-  const one = descentStop(
-    obliqueDrop(CAMBRIDGE_EXTENT, STAGE1_TILT_DEG, DESCENT_FOV),
-    STAGE1_TILT_DEG,
-    STAGE1_AZIMUTH_DEG,
-    40,
+  // Each base stop is built exactly as before -- descentStop()/obliqueDrop() are
+  // unchanged -- and then rebuilt through its own GeoPose via viaGeoPose(), so the
+  // stage's shot is actually a GeoPose construction (P11-PHOTOREAL.md 2.3) rather
+  // than only describable as one. See viaGeoPose()'s own comment for why this is a
+  // round trip through the existing pose rather than a fresh build from
+  // STAGE{0,1,2}_AZIMUTH_DEG: those constants and GeoPose.headingDeg disagree on
+  // which side of the target is which.
+  const zero = viaGeoPose(descentStop(STAGE0_ALT, STAGE0_TILT_DEG, STAGE0_AZIMUTH_DEG, 0));
+  const one = viaGeoPose(
+    descentStop(
+      obliqueDrop(CAMBRIDGE_EXTENT, STAGE1_TILT_DEG, DESCENT_FOV),
+      STAGE1_TILT_DEG,
+      STAGE1_AZIMUTH_DEG,
+      40,
+    ),
   );
-  const two = descentStop(
-    obliqueDrop(YARD_EXTENT, STAGE2_TILT_DEG, DESCENT_FOV),
-    STAGE2_TILT_DEG,
-    STAGE2_AZIMUTH_DEG,
-    30,
+  const two = viaGeoPose(
+    descentStop(
+      obliqueDrop(YARD_EXTENT, STAGE2_TILT_DEG, DESCENT_FOV),
+      STAGE2_TILT_DEG,
+      STAGE2_AZIMUTH_DEG,
+      30,
+    ),
   );
-  const three: Keyframe = { position: [150, 110, 190], target: [0, 42, 0], fov: DESCENT_FOV };
+  const three: Keyframe = viaGeoPose({
+    position: [150, 110, 190],
+    target: [0, 42, 0],
+    fov: DESCENT_FOV,
+  });
 
   return {
     0: { ...zero, path: descentPath(zero, one) },
@@ -748,7 +808,7 @@ export function funnel(t: number): number {
 // real cycle rather than the type-only one that direction is.
 
 /**
- * Which stages need the campus, Weld's shell, and the interior mounted.
+ * Which stages need the world, Weld's shell, and the interior mounted.
  *
  * MOUNTING, NOT OPACITY, and P9 makes the distinction matter. This is a function of the stage
  * because it is read during React's render; the layers' opacities are functions of ALTITUDE
@@ -756,11 +816,40 @@ export function funnel(t: number): number {
  * layerOpacity() is the other half and the two must not be confused: this decides what exists,
  * that decides what is seen.
  *
- * THE CAMPUS IS NOW MOUNTED AT STAGE 0, which is the visible consequence of removing the cut.
- * Stage 0's path descends from 31,353,347 ft all the way to stage 1's keyframe at 16,332 ft,
- * so the globe's fade-out, the ground's arrival and the massing's arrival ALL happen inside
- * stage 0. A campus mounted only from stage 1 would pop into existence at the stage boundary,
- * which is the cut this phase exists to delete -- moved rather than removed.
+ * RENAMED FROM `campus` TO `tiles`, per docs/phases/P11-PHOTOREAL.md 3.2's own line on this
+ * function: "visibility() loses campus/globe, gains tiles." This task keeps `globe` -- Globe.tsx
+ * is untouched and still the stage-0 backdrop; retiring it for good is the later swap decision 2
+ * describes, not this bug fix -- but `campus` becomes `tiles` because this is the one flag that
+ * gates Ground/Campus/FallbackGround today and will gate Tiles.tsx once it is wired to mount
+ * conditionally (Tiles.tsx itself has no `visible` prop yet and is unconditionally mounted
+ * whenever a key is present -- see Experience.tsx's HAS_TILES_KEY comment -- so this flag is
+ * ready for it without a further change here).
+ *
+ * docs/phases/P11-PHOTOREAL.md 0.7, THE BUG THIS FIXES. `campus` used to read `stage <= 3`, so
+ * Experience.tsx unmounted Ground, Campus and FallbackGround at stage 4 -- the fly-through into
+ * Weld -- leaving the dissolving shell floating against nothing. Measured at u = 0.93: the frame
+ * was Weld's shell against empty background. `tiles` extends through stage 4 to fix exactly
+ * this, matching the user's own framing of the fix: "stage 3 and 4 should essentially just be
+ * the same thing."
+ *
+ * STAGE 0 STAYS TRUE, unchanged from `campus`'s own precedent (see the paragraph this replaces
+ * below) -- and the reasoning STRENGTHENS rather than weakens under the rename. FallbackGround's
+ * quads are gated a second time by their own per-quad altitude opacity (layerOpacity), so
+ * mounting them at orbit costs geometry only and never a draw call. The live Tiles path is the
+ * stronger case: real photorealistic 3D tiles ARE visible continuously from orbit altitude in an
+ * actual Google Earth flyby -- unlike a flat NAIP quad, showing them at stage 0 is not a
+ * placeholder cost to bound, it is decision 2's own "Orbit -> Yard, all of it." So `tiles` being
+ * true at stage 0 is doing real work for the live path and bounded-cost warm-up for the fallback
+ * path, which is a stronger position than `campus` was ever in.
+ *
+ * STAGE 5 IS FALSE, and that is a new decision this task adds (the old `campus` was already
+ * false there, but for the wrong reason -- it was simply never extended past 3). Stage 5 is
+ * first-person, standing in the hall: the camera is behind Weld's exterior walls for the whole
+ * stage, so the world outside them is never in frame. Mounting it anyway would cost Ground's
+ * quads, Campus's/FallbackGround's massing, or Tiles' whole tileset for geometry nothing can
+ * see -- the same measured argument this file's own <Labels> comment in Experience.tsx makes for
+ * why THAT is unmounted rather than merely invisible at stages 4-5. `weld` and `interior` below
+ * are what stage 5 actually needs, and neither changes here.
  *
  * WHAT THAT COSTS AT FIRST PAINT. Stage 0 is first paint (Globe.tsx records the measurement),
  * so mounting 36 extruded buildings there is not free. It is bounded by their own opacity: the
@@ -772,13 +861,13 @@ export function funnel(t: number): number {
  */
 export function visibility(stage: StageId): {
   globe: boolean;
-  campus: boolean;
+  tiles: boolean;
   weld: boolean;
   interior: boolean;
 } {
   return {
     globe: stage === 0,
-    campus: stage <= 3,
+    tiles: stage <= 4,
     weld: stage >= 2 && stage <= 4,
     // Mounted a stage early so its geometry is warm before the threshold needs it.
     interior: stage >= 3,

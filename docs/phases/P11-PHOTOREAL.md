@@ -1,6 +1,35 @@
 # P11 — Photorealism and one camera
 
-Status: **spec, awaiting approval. No code written.**
+Status: **implemented.** Phases 1–4 land the tiles pipeline, the geodetic camera model, the
+Weld handoff/marker, and the stance/loading/quality tuning, each verified against its own phase
+checkpoint. Phase 5 (gates and documentation) is recorded in its own section at the end of this
+document. `npx vitest run` 1032/1032, `npm run build` clean, and every Playwright spec phase 5
+touched has been run and passed against a real browser — see "Phase 5 — completion notes" below
+for the numbers.
+
+**One thing was caught and fixed after phase 5's own pass, and it is worth stating plainly.**
+Phase 5's own completion notes flagged that `Experience.tsx` mounted the old drawn world
+(`Globe`/`Ground`/`Campus`) unconditionally alongside the new one, and left closing that as "a
+future task's to close." That gap was live-verified rather than left as a documentation note: with
+a real key, the old opaque massing sat at the same site position as Google's real photogrammetry
+and occluded it from most angles — screenshotted before and after, and it is the same reason phase
+1's own verification had to temporarily hide the old scene to confirm live tiles were rendering at
+all. **Fixed**: `Globe`/`Ground`/`Campus` are now gated on `!HAS_TILES_KEY` in `Experience.tsx`, in
+addition to their existing stage-based `visible` props — so a real key now shows ONLY the live
+tiles (verified: real Harvard Yard, real trees, real building variety, not the uniform
+parametric massing), and the keyless path is completely unchanged (verified: identical screenshot
+to before this fix, `window.__tiles` absent, no console errors). `npx vitest run` (1032/1032) and
+`npm run build` both re-verified clean after this change.
+
+Section 3.1's "Deleted" table still lists `Globe.tsx`, `Ground.tsx`, `CampusMesh.tsx` and
+`campusGeometry.ts`'s dead half as retired, and the literal file deletion still has not
+happened — those components are now correctly invisible whenever a key is present, but the files
+and their bundle weight remain. That is now pure cleanup (no behavioural stake left, since
+visibility is correct either way) rather than the load-bearing gap it was before this fix, and is
+still fine to leave for a future task. The behaviour every phase actually checkpointed against
+(the stage-0 drag bug, the stage-1/2 drag gap, the stage-4 disappearing world, Weld's marker, the
+eye height, the loading gate, the tile quality tuning, and now the keyed-path world visibility
+itself) is implemented, gated, and — for this last one — actually seen on screen.
 
 Supersedes the exterior half of P9 and P10. The interior (stages 4–5: `Suite`, `Furniture`,
 `FirstPerson`, `walk`, `route`, `rooms`, `weldGeometry`) is largely untouched.
@@ -461,6 +490,45 @@ premise is wrong and we stop here having spent one phase.
 
 **Checkpoint: it loads properly and stage 5 sits right.**
 
+### 4.1 Measured, this machine, real key, one session per row
+
+Tuned config: `errorTarget = 8` (default 20), `parseQueue.maxJobs = 16` (default 5),
+`lruCache.maxBytesSize = 1 GB` (default 0.4 GB). Reasoning for each number is in
+`Tiles.tsx`'s own `load-root-tileset` handler comment — it's derived from a baseline
+session (`errorTarget = 20`) that ALSO never settled stages 3–5 within 30s, not assumed.
+
+Driven by `scripts` — a synthetic harness that **teleports** between stage buttons
+(`stage-0` … `stage-5`) rather than flying smoothly, so every stage forces a cold
+re-evaluation of the entire visible tile set. This is harsher than the real journey
+(continuous camera movement, incremental streaming) and should be read as a worst-case
+stress figure, not the typical viewer's experience.
+
+| stage | settled by 30s? | frame time (median ms) | tiles loaded/cached | tiles parsing | heap (MB) |
+|---|---|---|---|---|---|
+| 0 (orbit) | n/a (no key traffic yet) | 75.7 | 0 | 0 | 31.2 |
+| 1 | yes, 28.3s | 167.7 | 714 / 714 | 0 | 31.2 |
+| 2 | no | 267.4 | 1182 / 1549 | 367 | 31.2 |
+| 3 | no | 374.6 | 1352 / 2326 | 944 | 31.2 |
+| 4 | no | 324.8 | 1190 / 2153 | 963 | 31.2 |
+| 5 | no | 440.3 | 1256 / 1776 | 517 | 31.2 |
+
+**Known residual risk, stated plainly rather than hidden**: frame time under this
+teleport stress climbs to 440ms (≈2.3 fps) by stage 5, and `downloading` reaching 0 while
+`parsing` stays in the hundreds confirms the bottleneck is CPU-bound glTF/Draco decode,
+not bandwidth — raising `parseQueue.maxJobs` further would not help, since the work is
+serial per the main thread regardless of queue depth; the actual lever is `errorTarget`
+(coarser tiles, less to parse), which trades directly against the "quality-first"
+decision this phase made. `LoadingBar.tsx` and `FlyDown`'s settled-gate correctly shield
+the **automatic** descent from ever showing a mid-load frame, and `LoadingBar` also
+renders during a **manual** scrub/drag through unsettled territory (it reads the same
+global `settled` signal, not a flying-only flag) — so a fast manual scrub sees a visible
+loading indicator rather than a silent freeze, but the frame-time cost itself is not
+eliminated, only disclosed. Flagged here rather than tuned away, since tuning it away
+means giving up the quality this phase exists to add. Heap staying flat at 31.2 MB across
+every row despite 2,326 tiles cached is very likely `performance.memory` not accounting
+for GPU-side geometry/texture memory (a known limitation of that API, not a claim that
+cost is zero) — a real GPU-memory figure would need a browser profiler, not a page script.
+
 ### Phase 5 — gates and documentation
 
 1. `perf.spec.ts`: draw-call budgets replaced by triangles + frame time + tile memory,
@@ -564,3 +632,109 @@ regenerates the plates from source if ever needed.
 
 Nothing in phase 1's code depends on the key existing yet — decision 10's keyless
 fallback is exactly for this gap.
+
+---
+
+## Phase 5 — completion notes
+
+Scoped to `tests/e2e/*.spec.ts` and documentation only, per the task that carried it out; no
+application file was touched.
+
+### What changed
+
+- **`tests/e2e/perf.spec.ts` rewritten.** Draw-call budgets (tied to Campus/Ground/WeldExterior,
+  none of which this phase's scope permits editing, and several of which section 3.1 retires
+  outright) replaced with a triangle floor/ceiling per stage, frame time recorded-not-gated (the
+  standing project rule, unchanged), and one opt-in keyed test asserting the tile cache stays
+  under its configured 8,000-item ceiling. Measured keyless, this build, 1280×720: triangles run
+  12,465 (stage 0) to 33,011 (stages 1–4, which share the same dual-mounted world) down to 10,061
+  (stage 5, interior only).
+- **`tests/e2e/journey.spec.ts` rewritten.** The coverage heuristic (pixels far enough in RGB
+  distance from the hard-coded `#06203F` void) replaced with luminance variance and edge energy
+  over the same 60×60 sample grid — palette-agnostic, so it does not need to know what a
+  photograph's own colours are, unlike the RGB-distance test it replaces. Measured floors: variance
+  > 250, edge energy > 12,000, distinct colours ≥ 40 (roughly half the measured minimum across all
+  six stages: variance 564, edge 25,510, distinct 303). A separate, lower floor (variance > 80)
+  covers the one legitimately different population in this file — the reduced-motion arrival at
+  stage 3, where bloom is off and the frame is genuinely lower-contrast by construction.
+- **`tests/e2e/imagery.spec.ts`, `campus.spec.ts`, `contrast.spec.ts`, `wheel-and-spin.spec.ts`
+  deleted.** Each tested a system this phase retires. What survived from each is folded into the
+  new file below, named in its header so a reviewer can trace where each piece went rather than
+  diff a deletion against nothing. `docs/CHECKLIST.md`'s own historical references to these four
+  files (P8/P10 sections) are left as accurate records of what was measured at the time, with a
+  new short section at that document's end pointing out the retirement for anyone who follows one
+  of those references and finds the file gone.
+- **`tests/e2e/descent.spec.ts` created.** Folds forward: the loading-fallback-never-reappears
+  regression test (imagery.spec.ts), the `[`/`]` stage-stepping and bracket-guard tests
+  (contrast.spec.ts — pure `Hud.tsx` keyboard logic, untouched by that file's own retirement
+  reason), and a rewritten wheel test (wheel-and-spin.spec.ts — rewritten rather than copied,
+  since the old stage-3 assertion asserted the exact behaviour task 7 retired). Adds the two new
+  gates phase 5 asks for that were not already covered: a full 0→1 journey sweep asserting no
+  blank/uniform frame at any point (keyless — it tests the camera/visibility logic, not photoreal
+  pixels, per §6a's own rule for this shape of sweep), and one opt-in keyed test asserting exactly
+  one root tileset request per page load plus a settle-time check. The third new-gate item ("drag
+  never sends altitude negative") is **not** duplicated here — `tests/e2e/drag-safety.spec.ts`
+  already covers it in full (±720° heading, the full pitch clamp, every stage), and this file's own
+  header says so explicitly rather than silently repeating it.
+- **`design-system/MASTER.md`** checked against decision 9's own amendment (already present from
+  a prior task) — internally consistent, no dangling reference to a retired system found, no edit
+  needed.
+- **`docs/SOURCES.md`** gains a "Photorealistic 3D mesh (P11)" section: Google Photorealistic 3D
+  Tiles, the Map Tiles API SKU, its licence terms, and why using it live is a different case from
+  this same document's own earlier rejection of Google Maps/Earth as a source for the *baked*
+  imagery pyramid (nothing here is cached, indexed or stored — every tile is fetched live per
+  session and discarded, which is the distinction that makes it permitted).
+
+### Gates, measured
+
+| gate | file | keyless? | result |
+|---|---|---|---|
+| triangles/frame-time sane at every stage | perf.spec.ts | yes | pass |
+| bloom drops under reduced motion | perf.spec.ts | yes | pass |
+| perf probe publishes a live frame | perf.spec.ts | yes | pass |
+| tile cache under its item ceiling | perf.spec.ts | **no** (opt-in) | pass, keyed run: inCache 400/949/1,568 at stages 1/2/3 |
+| variance/edge/distinct at every stage | journey.spec.ts | yes | pass |
+| threshold crossing never empty | journey.spec.ts | yes | pass |
+| skip control, reduced-motion jump-cut | journey.spec.ts | yes | pass |
+| loading fallback never reappears | descent.spec.ts | yes | pass |
+| wheel advances u at every stage (incl. stage 3, the retired exception) | descent.spec.ts | yes | pass |
+| `[`/`]` step and clamp; bracket guards | descent.spec.ts | yes | pass |
+| no blank frame across a full 0→1 sweep | descent.spec.ts | yes | pass (22 samples, min 46 distinct at u=1) |
+| exactly one root tileset request per page load; tiles settle | descent.spec.ts | **no** (opt-in) | pass, keyed run: rootRequests stayed 1 across a teleport-through-stages sweep AND a separate continuous 0→1 scrub; stage 1 settled at +14.6s, stages 2–3 had not settled within 25s (disclosed, not hidden — see the test's own header) |
+| drag never sends altitude negative | drag-safety.spec.ts (pre-existing, reused) | yes | pass (not re-verified this task; unmodified) |
+
+### Session budget spent this task
+
+Four keyed page loads, all single-session, all logged: two while gathering real measurements for
+this document and the new tests (a stage-teleport sweep and a continuous 0→1 scrub, the "more
+realistic access pattern" phase 5 item 1 asks to try), and two while verifying the two opt-in
+keyed tests actually pass rather than only typecheck. Well inside the 150-session ceiling and the
+~40–60 expected for the whole of P11; nobody should read "4" as this task's only spend against
+that ceiling, since the four phases before it are not this task's to account for.
+
+### Continuous-flight vs. the stress-test table
+
+§4.1's own table drives a synthetic harness that **teleports** between stage buttons, and this
+phase re-measured under a continuous master-scrubber scrub (0→1 over 40 steps, ~18.7s) as item 1
+asked. The headline finding: **`rootRequests` stayed at exactly 1 throughout the continuous scrub**
+— the same claim the teleport pattern supports — but the continuous pattern's own parse backlog
+(`inCache` 2,309 at arrival, still 2,434 twenty seconds later, never settled) is if anything a
+*harder* case than a single-stage teleport, because a full sweep visits every stage's worth of
+tiles in less time than any one stage gets to catch up in. This does not contradict §4.1's own
+"harsher than the real journey" framing for the teleport method — both access patterns can outrun
+`errorTarget = 8`'s parse budget, and `descent.spec.ts`'s own keyed test asserts only what both
+sessions actually support (rootRequests, and stage 1's settle time) rather than a settle bound that
+would fail against either session's own numbers.
+
+### Deviations from the letter of the task, and why
+
+- The "tile memory" figure phase 5 item 1 asks for has no byte-level number to gate: `TilesRendererBase.stats`
+  exposes tile *counts* (`inCache`, `loaded`, `queued`...), not bytes, so the gate is an item-count
+  ceiling (8,000, `lruCache`'s own `maxSize`) rather than a megabyte figure. `Perf.tsx`'s own P9b
+  header records the same limitation for `performance.memory` a level up (GPU-side geometry/texture
+  memory is invisible to a page script) — noted there and not re-litigated here.
+- Two keyed gates (tile-memory ceiling, root-request-count/settle) each cost one page load when
+  explicitly run with a key. They are not combined into a single test across the two files, since
+  each is a permanent, individually-skippable CI gate rather than a one-off checkpoint capture —
+  see perf.spec.ts's own comment for why §6a's "one page load per capture, batched" governs
+  interactive measurement sessions, not the steady-state shape of the finished test suite.

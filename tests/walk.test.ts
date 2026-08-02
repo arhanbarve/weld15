@@ -245,10 +245,11 @@ const HALL_N = { u: HALL_U, v: 43.25 };
 
 describe("the numbers, and where they come from", () => {
   it("stands the walker at stages.ts's own eye height", () => {
-    // walk.ts restates 5 ft 10 in rather than importing it, because stages.ts's EYE is
+    // walk.ts restates 5 ft 2 in rather than importing it, because stages.ts's EYE is
     // module-local. This is the join that stops the two from drifting: stage 5's camera
     // is placed at floorLevel(1) + stages.ts's EYE, so the difference is that constant.
-    expect(EYE).toBeCloseTo(5 + 10 / 12, 12);
+    // WAS 5 ft 10 in; docs/phases/P11-PHOTOREAL.md decision 7 lowered it to 5 ft 2 in.
+    expect(EYE).toBeCloseTo(5 + 2 / 12, 12);
     expect(keyframes(P)[5].position[1] - floorLevel(1)).toBeCloseTo(EYE, 12);
   });
 

@@ -23,7 +23,6 @@ import { CUTAWAY_MODES, type CutawayMode } from "@/scene/cutaway";
 // import graph and would fail if it did.
 import { insideSuite, isClear, walkContext, RADIUS, type WalkState } from "@/scene/walk";
 import { HUB, places, standingPose } from "@/scene/route";
-import type { Orbit } from "@/scene/orbit";
 import type { NudgeDir } from "@/geo/drag";
 // A value import of url.ts, and it does NOT close a cycle: url.ts imports this module
 // type-only, on purpose and with a comment saying so, and a type-only import erases
@@ -73,6 +72,21 @@ export const FLY_DOWN_END: StageId = 3;
  * a missing value.
  */
 export type FirstPerson = WalkState & { room: string | null };
+
+/**
+ * The free orbit's pose at stage 3 or 4, as heading/pitch/range -- GeoPose's own field
+ * names (docs/phases/P11-PHOTOREAL.md section 2.3, src/scene/geo/rig.ts), because the
+ * camera rig this store feeds is being rebuilt on lat/lon/heading/pitch/range rather
+ * than the old azimuth/polar/radius spherical coordinates. `pitchDeg` is `90 -
+ * polarDeg` and `headingDeg` is the same compass-bearing-off-north convention
+ * `azimuthDeg` already used, so nothing about WHAT the three numbers mean changes,
+ * only their names and the sign convention of the vertical one.
+ *
+ * Declared locally rather than imported from scene/orbit.ts's `Orbit`: that module's
+ * type is still the OLD shape, read by CameraRig.tsx and Hud.tsx until a later task
+ * moves them onto the geodetic rig.
+ */
+export type Orbit = { headingDeg: number; pitchDeg: number; rangeFt: number };
 
 /**
  * The sun's default instant: 15 September 2026, 9 a.m. Cambridge time.
@@ -175,8 +189,7 @@ type Store = {
    * Null rather than a seeded Orbit because the seed is `orbitOf(keyframes[3])`
    * (or the stage-4 equivalent) and this module cannot compute it: stages.ts
    * imports StageId from here, so importing stages.ts back would be a real
-   * cycle rather than the type-only one `import type { Orbit }` above erases.
-   * Writing the seed out as three literals instead would be a second copy of a
+   * cycle. Writing the seed out as three literals instead would be a second copy of a
    * derived number, and the first drag would jerk the camera the moment the
    * two disagreed. CameraRig resolves the null.
    */
@@ -305,17 +318,6 @@ type Store = {
    * a guess about event rates and pointerdown/pointerup are facts.
    */
   scrubbing: boolean;
-
-  /**
-   * How far the viewer has turned the globe at stage 0, or null for "as stages.ts posed it".
-   *
-   * NOT CARRIED BY A LINK, on the same argument url.ts makes about `flying` and
-   * `firstPerson`: it is where the recipient is looking, not what the model is. Null rather
-   * than {0, 0} so "untouched" is a distinct state and a reset button has something to
-   * restore.
-   */
-  globeSpin: { yawDeg: number; pitchDeg: number } | null;
-  setGlobeSpin: (s: { yawDeg: number; pitchDeg: number } | null) => void;
 
   setStage: (s: StageId) => void;
   setT: (t: number) => void;
@@ -649,7 +651,6 @@ export const useStore = create<Store>((set, get) => ({
   notice: null,
   cuts: 0,
   scrubbing: false,
-  globeSpin: null,
 
   // A STAGE CHANGE NO LONGER DESTROYS THE WALKER, IT DECIDES WHETHER THERE IS ONE.
   // First person replaces the stage's camera, so a walker surviving a jump to stage 2 would
@@ -699,7 +700,6 @@ export const useStore = create<Store>((set, get) => ({
       ...orbitAfterStage(s, stage),
     })),
   setScrubbing: (scrubbing) => set({ scrubbing }),
-  setGlobeSpin: (globeSpin) => set({ globeSpin }),
   next: () =>
     set((s) => {
       const stage = Math.min(LAST_STAGE, s.stage + 1) as StageId;
@@ -952,7 +952,6 @@ export const useStore = create<Store>((set, get) => ({
       notice: "Back to the sourced dimensions and the shipped fit-out.",
       cuts: 0,
       scrubbing: false,
-      globeSpin: null,
     }),
 
   /**
