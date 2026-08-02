@@ -6,6 +6,7 @@ import { useThree } from "@react-three/fiber";
 import { useStore } from "@/state/store";
 import { isFacadeLit, sunPosition, type SunPosition } from "@/geo/solar";
 import { facadeAzimuth, gableAzimuth } from "@/geo/place";
+import { buildSuite } from "@/geo/rooms";
 import { DAY, SCAN } from "./materials";
 import { thresholdOpacity } from "./stages";
 
@@ -40,6 +41,9 @@ import { thresholdOpacity } from "./stages";
  *   sun          the one shadow caster. Direction and colour from solar.ts.
  *   window fill  two grazing directionals, one per glazed wall of the suite, which
  *                is what puts light INTO the rooms and what makes the grain read.
+ *                Scaled by each wall's own window COUNT since P14 row 11 (buildSuite()'s
+ *                rooms, not a fact place.ts's azimuths ever carried) -- the facade has
+ *                four windows to the gable's one, and both used to get the same fill.
  *
  * WHY THE WINDOW FILL IS NOT A CHEAT
  * There is no light transport here: a directional light lights every surface facing
@@ -132,8 +136,18 @@ const SHADOW_NORMAL_BIAS = 0.08;
  */
 const WINDOW_ALT_DEG = 18;
 const WINDOW_DIST = 400;
-/** Window fill when the sun is on that wall, and when only the sky is. */
-const WINDOW_SUN = 1.5;
+/**
+ * Window fill when the sun is on that wall, and when only the sky is.
+ *
+ * WINDOW_SUN dropped ~35% for P14 row 11 -- was 1.5, still one Slab per glazed
+ * wall away from actually counting a window, the direct sun overpowered the
+ * baked AO row 10 just added and the plaster tooth P10/P11 already carry,
+ * reading as flatter and whiter than either was tuned for. 0.975 is the same
+ * number this file's own convention already uses for "a documented cut, not a
+ * new invented one" (materials.ts's brick/slate/porcelain tokens are all one
+ * operation on an existing token for the same reason).
+ */
+const WINDOW_SUN = 1.5 * 0.65;
 const WINDOW_SKY = 0.45;
 
 /** Civil twilight, and the altitude by which it is fully day. */
@@ -192,6 +206,21 @@ export function cambridgeInstant(date: string, hour: number): Date {
   const [year, month, day] = date.split("-").map(Number);
   const offset = easternOffsetHours(year!, month!, day!);
   return new Date(Date.UTC(year!, month! - 1, day!) + (hour + offset) * 3_600_000);
+}
+
+/**
+ * How many windows the facade and the gable each actually have, from the suite's
+ * own rooms rather than from place.ts's azimuths (which say which way a wall
+ * faces, never how much of it is glazed). One window per room per face named in
+ * that room's own `windows` array (walls.ts emits exactly that many `window`
+ * openings), so counting rooms that name a face IS counting that wall's windows.
+ */
+export function glazingCounts(suite: { rooms: { windows: string[] }[] }): {
+  facade: number;
+  gable: number;
+} {
+  const windowsOn = (face: string) => suite.rooms.filter((r) => r.windows.includes(face)).length;
+  return { facade: windowsOn("facade"), gable: windowsOn("gable") };
 }
 
 /**
@@ -317,7 +346,26 @@ export function Lighting() {
 
   // The two walls the suite is glazed in. Both come from place.ts, so they follow
   // params.facade and weld.json's 13.2 degree axis instead of restating either.
-  const walls = [facadeAzimuth(params), gableAzimuth()];
+  //
+  // SCALED BY ACTUAL GLAZING, P14 row 11. Both walls used to get the same fill
+  // regardless of how many windows either one actually has -- at the shipped
+  // rooms.ts, the facade carries four (common1, bedA, the unknown strip, bedB)
+  // against the gable's one (bedB's own end window), a 4:1 ratio this file had
+  // no way to see, since neither `facadeAzimuth` nor `gableAzimuth` (place.ts)
+  // is a fact about window COUNT, only about which way a wall faces. `suite`
+  // (buildSuite(params), the same call Suite.tsx itself makes for its own
+  // geometry) is what actually knows: each room's own `windows` array names
+  // which of its faces is glazed, so counting rooms that name a face is
+  // counting that wall's own windows. Normalised against whichever wall has
+  // MORE of them rather than hard-coded to the facade, so a future room layout
+  // that reversed the ratio would not need this file rewritten to match.
+  const suite = useMemo(() => buildSuite(params), [params]);
+  const glazing = glazingCounts(suite);
+  const maxGlazing = Math.max(glazing.facade, glazing.gable, 1);
+  const walls = [
+    { azimuthDeg: facadeAzimuth(params), scale: glazing.facade / maxGlazing },
+    { azimuthDeg: gableAzimuth(), scale: glazing.gable / maxGlazing },
+  ];
 
   /**
    * The view beyond the glass.
@@ -369,16 +417,15 @@ export function Lighting() {
         shadow-normalBias={SHADOW_NORMAL_BIAS}
       />
 
-      {walls.map((azimuthDeg) => {
+      {walls.map(({ azimuthDeg, scale }) => {
         const p = skyDirection({ altitudeDeg: WINDOW_ALT_DEG, azimuthDeg }).multiplyScalar(
           WINDOW_DIST,
         );
         // Lit by the sun, or only by the sky. isFacadeLit answers with the real
         // self-shading test on the wall's outward normal, so this is the one place
-        // the seasonal finding reaches the render.
-        const intensity = isFacadeLit(azimuthDeg, sun)
-          ? WINDOW_SUN * overhead
-          : WINDOW_SKY * day;
+        // the seasonal finding reaches the render. `scale` is the new term: the
+        // wall with fewer windows contributes proportionally less fill.
+        const intensity = (isFacadeLit(azimuthDeg, sun) ? WINDOW_SUN * overhead : WINDOW_SKY * day) * scale;
         return (
           <directionalLight
             key={azimuthDeg}

@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { bathFixtureParts, BATH_ALONG_MIN, type FixturePart } from "@/geo/fixtures";
+import {
+  bathFixtureParts,
+  ceilingFixturePart,
+  roomRadiatorPart,
+  BATH_ALONG_MIN,
+  type FixturePart,
+} from "@/geo/fixtures";
 import { buildSuite, DEFAULT_PARAMS, type SuiteParams } from "@/geo/rooms";
 import { buildWalls } from "@/geo/walls";
 import { floorLevel } from "@/geo/place";
@@ -120,6 +126,57 @@ describe("bathFixtureParts", () => {
         if (isExpectedPair(a, b)) continue;
         expect(overlapsInPlan(a, b), `part ${i} and part ${j} collide`).toBe(false);
       }
+    }
+  });
+});
+
+describe("ceilingFixturePart", () => {
+  it("centres a square canopy on the room, hanging just under the ceiling", () => {
+    const suite = buildSuite(DEFAULT_PARAMS);
+    const bedA = suite.rooms.find((r) => r.id === "bedA")!;
+    const ceilingY = FLOOR + DEFAULT_PARAMS.ceiling;
+    const p = ceilingFixturePart(bedA, ceilingY);
+    expect(p.u + p.du / 2).toBeCloseTo(bedA.u + bedA.du / 2, 9);
+    expect(p.v + p.dv / 2).toBeCloseTo(bedA.v + bedA.dv / 2, 9);
+    expect(p.du).toBeCloseTo(p.dv, 9); // square
+    expect(p.y1).toBeLessThanOrEqual(ceilingY);
+    expect(p.y0).toBeLessThan(p.y1);
+  });
+
+  it("stays inside every room it is asked for, across every room kind", () => {
+    const suite = buildSuite(DEFAULT_PARAMS);
+    const ceilingY = FLOOR + DEFAULT_PARAMS.ceiling;
+    for (const r of suite.rooms) {
+      const p = ceilingFixturePart(r, ceilingY);
+      expect(p.u, r.id).toBeGreaterThanOrEqual(r.u - EPS);
+      expect(p.u + p.du, r.id).toBeLessThanOrEqual(r.u + r.du + EPS);
+      expect(p.v, r.id).toBeGreaterThanOrEqual(r.v - EPS);
+      expect(p.v + p.dv, r.id).toBeLessThanOrEqual(r.v + r.dv + EPS);
+    }
+  });
+});
+
+describe("roomRadiatorPart", () => {
+  it("stands against the room's own facade wall (suite u = 0's own side), centred in v", () => {
+    const suite = buildSuite(DEFAULT_PARAMS);
+    const bedA = suite.rooms.find((r) => r.id === "bedA")!;
+    expect(bedA.windows).toContain("facade");
+    const p = roomRadiatorPart(bedA, FLOOR);
+    expect(p.u).toBeGreaterThanOrEqual(bedA.u);
+    expect(p.u + p.du).toBeLessThan(bedA.u + bedA.du); // does not reach across the room
+    expect(p.v + p.dv / 2).toBeCloseTo(bedA.v + bedA.dv / 2, 9);
+    expect(p.y0).toBeCloseTo(FLOOR, 9);
+    expect(p.y1).toBeGreaterThan(p.y0);
+  });
+
+  it("stays inside every facade room it is asked for", () => {
+    const suite = buildSuite(DEFAULT_PARAMS);
+    for (const r of suite.rooms.filter((r) => r.windows.includes("facade"))) {
+      const p = roomRadiatorPart(r, FLOOR);
+      expect(p.u, r.id).toBeGreaterThanOrEqual(r.u - EPS);
+      expect(p.u + p.du, r.id).toBeLessThanOrEqual(r.u + r.du + EPS);
+      expect(p.v, r.id).toBeGreaterThanOrEqual(r.v - EPS);
+      expect(p.v + p.dv, r.id).toBeLessThanOrEqual(r.v + r.dv + EPS);
     }
   });
 });

@@ -3,12 +3,13 @@ import {
   cambridgeInstant,
   easternOffsetHours,
   skyDirection,
+  glazingCounts,
   SHADOW_HALF,
   SHADOW_PX,
 } from "@/scene/Lighting";
 import { WELD_FOOTPRINT_RADIUS } from "@/scene/orbit";
 import { sunPosition, isFacadeLit } from "@/geo/solar";
-import { DEFAULT_PARAMS } from "@/geo/rooms";
+import { DEFAULT_PARAMS, buildSuite } from "@/geo/rooms";
 import { facadeAzimuth, gableAzimuth } from "@/geo/place";
 
 /**
@@ -176,5 +177,41 @@ describe("shadow frustum covers the building", () => {
     const texelFt = (2 * SHADOW_HALF) / SHADOW_PX;
     expect(texelFt).toBeLessThan(DEFAULT_PARAMS.partition / 2);
     expect(texelFt * 12).toBeLessThan(2);
+  });
+});
+
+describe("glazingCounts: the window fill's own P14 row 11 scaling", () => {
+  it("counts four facade windows and one gable window at the shipped rooms.ts", () => {
+    // rooms.ts's own windows arrays: common1, bedA and the unknown strip each name
+    // "facade" once, bedB names both "facade" and "gable" -- four facade rooms, one
+    // gable room. Asserted against the actual suite rather than restated as a
+    // literal, so a room layout change that moved a window is what breaks this,
+    // not a copy of the same assumption.
+    const suite = buildSuite(DEFAULT_PARAMS);
+    const facadeRooms = suite.rooms.filter((r) => r.windows.includes("facade")).length;
+    const gableRooms = suite.rooms.filter((r) => r.windows.includes("gable")).length;
+    const counts = glazingCounts(suite);
+    expect(counts).toEqual({ facade: facadeRooms, gable: gableRooms });
+    expect(counts.facade).toBe(4);
+    expect(counts.gable).toBe(1);
+  });
+
+  it("gives the more-glazed wall the full-scale fill and the other a proportional cut", () => {
+    const { facade, gable } = glazingCounts(buildSuite(DEFAULT_PARAMS));
+    const max = Math.max(facade, gable, 1);
+    // The facade has more windows at the shipped defaults, so it is the one that
+    // should read as scale 1 -- not hard-coded to "facade always wins", the general
+    // property Lighting.tsx's own comment argues for.
+    expect(facade / max).toBe(1);
+    expect(gable / max).toBeCloseTo(0.25, 9);
+  });
+
+  it("never divides by zero when a suite has no windows on either wall", () => {
+    const empty = { rooms: [{ windows: [] }, { windows: [] }] };
+    const counts = glazingCounts(empty);
+    expect(counts).toEqual({ facade: 0, gable: 0 });
+    const max = Math.max(counts.facade, counts.gable, 1);
+    expect(counts.facade / max).toBe(0);
+    expect(counts.gable / max).toBe(0);
   });
 });

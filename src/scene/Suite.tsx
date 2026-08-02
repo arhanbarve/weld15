@@ -9,7 +9,7 @@ import { buildSuite, type Rect, type SuiteParams } from "@/geo/rooms";
 import { buildWalls, suiteFootprint, type Opening, type Wall } from "@/geo/walls";
 import { sashParts } from "@/geo/sash";
 import { trimParts, RAIL_H, doorCasingParts, doorLeafParts, thresholdParts } from "@/geo/trim";
-import { bathFixtureParts } from "@/geo/fixtures";
+import { bathFixtureParts, ceilingFixturePart, roomRadiatorPart } from "@/geo/fixtures";
 import { suiteToThree, floorLevel } from "@/geo/place";
 import type { Piece } from "@/geo/furniture";
 import type { DragResult } from "@/geo/drag";
@@ -780,7 +780,9 @@ type SuiteGeometry = {
   glazing: THREE.BufferGeometry | null;
   cornice: THREE.BufferGeometry | null;
   ceiling: THREE.BufferGeometry | null;
-  /** The bathroom's tile floor, porcelain wainscot, tub, lavatory and WC (P14 row 9), merged as one mesh. */
+  /** The bathroom's tile floor, porcelain wainscot, tub, lavatory and WC (P14 row 9),
+   *  plus every room's own ceiling fixture (P14 row 11) -- porcelain reused for a plain
+   *  white fixture canopy rather than opening a mesh of its own. Merged as one mesh. */
   tile: THREE.BufferGeometry | null;
   /** The bathroom's mirror -- the one fixture with a material of its own. */
   mirror: THREE.BufferGeometry | null;
@@ -797,11 +799,13 @@ function buildSuiteGeometry(params: SuiteParams, hidden: ReadonlySet<string>): S
   const { yaw } = suiteBasis(params);
   const floor = floorLevel(1);
   const wallH = params.ceiling;
+  const ceilingH = floor + params.ceiling;
 
   const oak: Slab[] = [];
   const bare: Slab[] = [];
   const mark: Slab[] = [];
   const tile: Slab[] = [];
+  const sashJoinery: Slab[] = [];
   for (const r of suite.rooms) {
     const slab: Slab = {
       u: r.u,
@@ -822,12 +826,18 @@ function buildSuiteGeometry(params: SuiteParams, hidden: ReadonlySet<string>): S
     } else {
       oak.push({ ...slab, boards: true });
     }
+    // Ceiling fixture and radiator, P14 row 11 -- every room but "unknown" gets a
+    // flush ceiling fixture (that room keeps its own stated ignorance, the same
+    // reason it has no furniture either); a radiator only if the room actually has
+    // a facade wall to stand against. Both are geo/fixtures.ts's own generic
+    // (not bathroom-specific) parts.
+    if (r.kind !== "unknown") tile.push(ceilingFixturePart(r, ceilingH));
+    if (r.windows.includes("facade")) sashJoinery.push(roomRadiatorPart(r, floor));
   }
 
   const bath = suite.rooms.find((r) => r.kind === "bath");
   const partitions: Slab[] = [];
   const masonry: Slab[] = [];
-  const sashJoinery: Slab[] = [];
   const glazing: Slab[] = [];
   const cornice: Slab[] = [];
   for (const w of walls) {
@@ -885,7 +895,6 @@ function buildSuiteGeometry(params: SuiteParams, hidden: ReadonlySet<string>): S
    * room, and in the roof-off cutaway it reads as the wall's own thickness, which
    * is worth more than a flush plate.
    */
-  const ceilingH = floor + params.ceiling;
   const ceiling: Slab[] = suiteFootprint(suite).map((f) => ({
     u: f.u,
     v: f.v,

@@ -213,3 +213,64 @@ export function bathFixtureParts(bath: Rect, floor: number): BathFixtures {
     solid: [tub, lavTop, wcBowl, radiator],
   };
 }
+
+// --- ceiling fixtures and radiators for the suite's other rooms -- P14 row 11 ---
+//
+// Neither is sourced -- the 1875 text describes room dimensions and doors, never
+// lighting or heat -- so both are ordinary present-day fittings, the same framing
+// this file's own header already gives the bathroom's fixtures. Simpler than the
+// bathroom's fit-out on purpose: these rooms are 10-20 ft across, not 6-8, so a
+// single small fixture against one wall has no realistic chance of blocking the
+// only way through it the way the bathroom's own fixtures could, and neither one
+// is added to walk.ts's collision for that reason (bathFixtureSolids() stays
+// bathroom-only).
+
+/** Canopy footprint of a flush ceiling fixture, ft square. ASSUMED. */
+const CEILING_FIXTURE_W = 1.2;
+/** How far the fixture hangs below the ceiling plate, ft. ASSUMED. */
+const CEILING_FIXTURE_H = 0.15;
+/** Clear of the ceiling plate itself, so the two do not share a face. */
+const CEILING_FIXTURE_GAP = 0.05;
+
+/**
+ * A flush ceiling fixture centred on a room, one per room. `ceilingY` is the
+ * suite's own ceiling height (floor + params.ceiling, the same value Suite.tsx's
+ * ceiling plate itself sits at) -- the fixture hangs just under it, not through it.
+ */
+export function ceilingFixturePart(room: Rect, ceilingY: number): FixturePart {
+  const cu = room.u + room.du / 2;
+  const cv = room.v + room.dv / 2;
+  return {
+    u: cu - CEILING_FIXTURE_W / 2,
+    v: cv - CEILING_FIXTURE_W / 2,
+    du: CEILING_FIXTURE_W,
+    dv: CEILING_FIXTURE_W,
+    y0: ceilingY - CEILING_FIXTURE_GAP - CEILING_FIXTURE_H,
+    y1: ceilingY - CEILING_FIXTURE_GAP,
+  };
+}
+
+/** A room radiator's footprint, ft -- smaller than the bathroom's, one per room. ASSUMED. */
+const ROOM_RADIATOR_W = 2.5;
+const ROOM_RADIATOR_D = 0.35;
+const ROOM_RADIATOR_H = 2.0;
+/** Proud of the facade wall it stands against. */
+const ROOM_RADIATOR_GAP = 0.05;
+
+/**
+ * A radiator against a room's own facade wall (suite u = 0, every room's own
+ * inward-from-the-facade origin -- rooms.ts's own header), centred on the room's
+ * v-extent. Only meaningful for a room that actually has a facade wall to stand
+ * against; callers filter by `room.windows.includes("facade")` themselves, the
+ * same test rooms.ts's own data already uses to say which rooms are on it.
+ */
+export function roomRadiatorPart(room: Rect, floor: number): FixturePart {
+  return {
+    u: room.u + ROOM_RADIATOR_GAP,
+    v: room.v + room.dv / 2 - ROOM_RADIATOR_W / 2,
+    du: ROOM_RADIATOR_D,
+    dv: ROOM_RADIATOR_W,
+    y0: floor,
+    y1: floor + ROOM_RADIATOR_H,
+  };
+}
