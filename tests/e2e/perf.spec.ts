@@ -104,7 +104,7 @@ async function openAt(page: Page, stage: number) {
  *   2        29      33,011     62.0
  *   3        29      33,011     66.2
  *   4        29      33,011     67.1
- *   5        46      10,061     67.3
+ *   5        57      60,315     244.0
  *
  * Stages 1-4 read identically because the current build keeps the SAME dual-mounted world
  * (Ground + Campus + FallbackGround, no key) through all of them -- `visibility()`'s own
@@ -113,6 +113,14 @@ async function openAt(page: Page, stage: number) {
  * §9 and this file's own predecessor both used) and ceilings are generous headroom, not a
  * tight budget -- see this file's header for why a tight call-count budget is not this
  * phase's gate.
+ *
+ * STAGE 5's ROW IS P14's FINAL FIGURE, RE-MEASURED AT ROW 12. It read 46 calls / 10,061
+ * triangles before P14 (a stage that mounted little beyond the bare interior shell); P14
+ * rows 1-11 (door and window joinery, the loggia/stair-hall/corridor beyond the entry, an
+ * outdoor backdrop through the suite's own windows, bathroom fixtures, baked per-vertex AO,
+ * ceiling fixtures and radiators) raised it to 57 calls / 60,315 triangles, still comfortably
+ * inside this row's own floor/ceiling. Stages 0-4 are untouched by P14, which is why only
+ * this one row of the table moved.
  *
  * THIS IS NOT §9'S TABLE, AND IT WILL MOVE AGAIN. Once the "switch" phase (out of scope
  * here, per this phase's do-not-touch list) deletes Globe/Ground/CampusMesh in favour of
@@ -125,7 +133,7 @@ const TRIANGLE_BUDGET: { stage: number; floor: number; ceiling: number; measured
   { stage: 2, floor: 15_000, ceiling: 150_000, measured: 33_011 },
   { stage: 3, floor: 15_000, ceiling: 150_000, measured: 33_011 },
   { stage: 4, floor: 15_000, ceiling: 150_000, measured: 33_011 },
-  { stage: 5, floor: 4_000, ceiling: 80_000, measured: 10_061 },
+  { stage: 5, floor: 4_000, ceiling: 80_000, measured: 60_315 },
 ];
 
 test("triangles stay in a sane range at every stage, and frame time is recorded", async ({ page }) => {

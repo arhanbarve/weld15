@@ -592,9 +592,18 @@ test.describe("P6 -- the suite is changeable", () => {
     // "idle" can read a few calls lower on a run whose load races the 1.4 s settle wait);
     // 57 is this build's settled ceiling, not its floor. 57 + 3 is 60, which is why the
     // ceiling moves to 62: two calls of headroom over the gesture, the same margin every
-    // previous figure here kept. P14 rows 9-11 (bathroom fixtures, baked AO, ceiling
-    // fixtures) will move this again; row 12 re-measures once, after all of them land,
-    // rather than widening a third time in between.
+    // previous figure here kept.
+    //
+    // P14 ROW 12, THE FINAL RE-MEASUREMENT: rows 9-11 (bathroom fixtures, baked AO,
+    // ceiling fixtures and radiators) added no further calls to THIS idle figure --
+    // fixtures and ceiling canopies reuse the porcelain merge, radiators the oak-toned
+    // sash-joinery merge, and baked AO is a vertex attribute, not a mesh. The one new
+    // mesh, the bathroom mirror (its own material), does not show up in the hall's own
+    // idle count because it is out of frustum from the arrival pose -- facing it directly
+    // costs one more call, the same "frustum, not a cost" finding walk.spec.ts's own
+    // draw-call test already records for first-person movement generally. So 57 idle /
+    // 62 ceiling is this phase's own settled figure, not a checkpoint expecting another
+    // widening.
     expect(midDrag - idle, `idle ${idle}, mid-drag ${midDrag}`).toBeLessThanOrEqual(3);
     expect(midDrag, `idle ${idle}, mid-drag ${midDrag}`).toBeLessThanOrEqual(62);
   });

@@ -477,4 +477,43 @@ bathroom and tells us the suite does not span the full width.
 | Hall | 28 × 3.5 | 98 sq ft | derived |
 | **Suite** | | **898 sq ft** | **224 sq ft per person for four** |
 
+---
+
+## 9. P14: present-day interior fixtures, lighting and fittings — openly assumed
+
+None of this is a claim about 1872 or 1875 Weld. The 1875 text describes room dimensions, doors and
+the building's own public spaces (the loggia, the stair halls); it says nothing at all about
+plumbing fixtures, ceiling fittings, radiators, or how bright a window should read from inside. P14
+populates the suite's interior with all four, and every dimension below is an ordinary present-day
+American fixture footprint chosen to populate the room rather than to reconstruct a historical one
+— the same framing `materials.ts`'s own porcelain comment already gives the bathroom's tile and
+wainscot. Listed here once, at the ledger, rather than only in each file's own header, so a reader
+auditing this project's numbers does not have to already know P14 exists to find them.
+
+| Item | Value | File | Basis |
+|---|---|---|---|
+| Bath tub/lavatory/WC/radiator/rail footprints | 1.2–5.0 ft per dimension | `src/geo/fixtures.ts` | ASSUMED, standard present-day fixture sizes, sized to clear the bathAlong/bathDeep slider's own 6 ft minimum (see the file's own header) |
+| Mirror material (metalness 0.9, roughness 0.05) | — | `src/scene/materials.ts` | ASSUMED aesthetic; reflects Lighting.tsx's existing room environment map rather than an invented texture |
+| Baked AO reach and floor (`AO_DEPTH_FT` 0.15 ft, `AO_MIN` 0.72) | — | `src/scene/Suite.tsx` | ASSUMED, the order of a real contact shadow at a baseboard; not measured against a photograph |
+| Stair rise/run, width, landing (`RISER_FT`, `TREAD_FT`, `STAIR_WIDTH_FT`, `LANDING_DEPTH_FT`) | — | `src/geo/common.ts` | ASSUMED. The 1875 text gives the stair HALL's own footprint (15 × 31 ft, §0 above) but never the stair itself |
+| Spine corridor width (`CORRIDOR_WIDTH_FT` = 6 ft) | 6 ft | `src/geo/common.ts` | ASSUMED. No source gives a corridor width; 6 ft is a generously walkable dorm corridor, not a measurement |
+| Ceiling fixture canopy, room radiators | 1.2–2.5 ft per dimension | `src/geo/fixtures.ts` | ASSUMED, present-day fittings; every room but the "unknown" strip (§ above — that room already keeps its own stated ignorance) gets a ceiling fixture, every room with a facade window gets a radiator |
+| `WINDOW_SUN` dropped ~35% (1.5 → 0.975) | — | `src/scene/Lighting.tsx` | ASSUMED tuning, not a source correction: the direct-sun window fill was overpowering the baked AO and plaster tooth once both existed |
+
+**One correction, not an assumption, worth logging here rather than in §1's error table because
+nobody outside this project ever published the wrong number:** `tilesCarve.ts`'s `HEIGHT_MIN` (how
+far below grade the real-photogrammetry carve reaches) moved from 5 ft below grade to grade itself.
+The 5 ft margin was this module's own invention with no source pretence, but it had a real bug in
+it: it held the carve's vertical term deeply negative for real terrain anywhere under the
+building's own footprint, which zeroed the horizontal terms that should have mattered and carved
+the ground away at full strength well past the ~2 ft feather the spec asks for. Invisible until
+P14 gave a window something to look out through. See `tilesCarve.ts`'s own comment on `HEIGHT_MIN`
+for the geometry.
+
+The building-infrastructure dimensions P14 rows 5–7 draw from (the loggia's 21 × 25 ft, the stair
+hall's 15 × 31 ft, the 44/15/25 ft chain) are NOT new assumptions — they are the same primary
+source §0 already quotes, applied to parts of the building outside the suite for the first time.
+They are listed in `src/geo/common.ts`'s own header, not repeated here, for the same reason §0's
+quotes are not repeated in every file that uses them.
+
 Four people, two doubles, roughly 420 sq ft of common space. This is a good draw.
