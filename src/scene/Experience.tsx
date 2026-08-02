@@ -14,8 +14,7 @@ import { Ground } from "./Ground";
 import { Labels } from "./Labels";
 import { Campus } from "./Campus";
 import { WeldMarker } from "./WeldMarker";
-import { FallbackGround } from "./FallbackGround";
-import { Tiles } from "./Tiles";
+import { Outlook } from "./Outlook";
 import { WeldExterior } from "./WeldExterior";
 import { Suite } from "./Suite";
 import { CommonParts } from "./CommonParts";
@@ -190,14 +189,13 @@ export default function Experience() {
               the hall, behind the walls the ring and pin sit outside of, so there is nothing left
               for either to mark from in there. */}
           <WeldMarker visible={stage >= 2 && stage <= 4} />
-          {/* `<Tiles>` has no `visible` prop of its own -- it is unconditionally mounted whenever
-              a key is present, which is already the "real tiles are visible from orbit all the
-              way down" behaviour `tiles`'s own comment in stages.ts argues for, so there is
-              nothing to gate here. `<FallbackGround>` does have one, and takes `vis.tiles` like
-              Ground and Campus, for the same §0.7 fix -- and is the ONLY world-geometry mounted
-              on the keyless path, now that Globe/Ground/Campus are gated off above whenever a key
-              is present. */}
-          {HAS_TILES_KEY ? <Tiles /> : <FallbackGround visible={vis.tiles} />}
+          {/* Outlook.tsx owns the HAS_TILES_KEY branch itself now (P14 row 8) -- it is the
+              ONLY world-geometry mounted on the keyless path, now that Globe/Ground/Campus
+              are gated off above whenever a key is present, and it is what stage 5's own
+              windows now look out onto, `tiles` having been extended to cover that stage
+              too. See its own header for why that earned a component rather than another
+              line in this file's ternary. */}
+          <Outlook visible={vis.tiles} />
           {/* CONDITIONALLY MOUNTED, not merely made invisible, and that is a measured decision.
               drei's <Html> portals a real DOM node and repositions it every frame; five of them
               kept running at stages 4 and 5, where no place label can be on screen at all, and the

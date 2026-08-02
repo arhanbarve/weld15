@@ -965,14 +965,21 @@ export function funnel(t: number): number {
  * true at stage 0 is doing real work for the live path and bounded-cost warm-up for the fallback
  * path, which is a stronger position than `campus` was ever in.
  *
- * STAGE 5 IS FALSE, and that is a new decision this task adds (the old `campus` was already
- * false there, but for the wrong reason -- it was simply never extended past 3). Stage 5 is
- * first-person, standing in the hall: the camera is behind Weld's exterior walls for the whole
- * stage, so the world outside them is never in frame. Mounting it anyway would cost Ground's
- * quads, Campus's/FallbackGround's massing, or Tiles' whole tileset for geometry nothing can
- * see -- the same measured argument this file's own <Labels> comment in Experience.tsx makes for
- * why THAT is unmounted rather than merely invisible at stages 4-5. `weld` and `interior` below
- * are what stage 5 actually needs, and neither changes here.
+ * STAGE 5 IS NOW TRUE TOO -- P14 row 8 reverses the paragraph this replaces. That
+ * reasoning ("the camera is behind Weld's exterior walls for the whole stage, so the world
+ * outside them is never in frame") held exactly until sash.ts's window fix: Suite.tsx's
+ * glazing sits in a real hole in the wall now, not a solid panel, so a window IS a frame
+ * onto whatever `tiles` mounts. Leaving `tiles` false at stage 5 is what made every window
+ * read as a flat sky-blue panel (Lighting.tsx's own comment on `scene.background` names
+ * this exact defect). `weld` stays the stage window it always was -- the parametric shell
+ * is still an editing/model-mode convenience, not stage 5's own exterior -- and `interior`
+ * is unchanged; only what a WINDOW can now see is new.
+ *
+ * WHAT THAT COSTS. FallbackGround is two shader-tinted ground quads plus one merged campus
+ * mesh (CampusMesh.tsx/FallbackGround.tsx load `campus.glb` as a single THREE.Mesh, not one
+ * per building) -- 3 draw calls, keyless. Outlook.tsx mounts it (or live Tiles, keyed)
+ * exactly where Experience.tsx used to stop at stage 4; see its own header for why this
+ * needed a component of its own rather than another line in the existing `tiles` ternary.
  *
  * WHAT THAT COSTS AT FIRST PAINT. Stage 0 is first paint (Globe.tsx records the measurement),
  * so mounting 36 extruded buildings there is not free. It is bounded by their own opacity: the
@@ -990,7 +997,7 @@ export function visibility(stage: StageId): {
 } {
   return {
     globe: stage === 0,
-    tiles: stage <= 4,
+    tiles: stage <= 5,
     weld: stage >= 2 && stage <= 4,
     // Mounted a stage early so its geometry is warm before the threshold needs it.
     interior: stage >= 3,

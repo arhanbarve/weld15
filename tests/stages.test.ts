@@ -607,14 +607,11 @@ describe("visibility", () => {
     // genuinely visible from orbit altitude in a real flyby, unlike a flat NAIP quad, so stage
     // 0 is no longer just a bounded-cost warm-up, it is decision 2's "Orbit -> Yard, all of it."
     expect(visibility(0).tiles).toBe(true);
-    // NOW TRUE THROUGH STAGE 4 -- this is §0.7's fix. The world must not disappear during the
-    // fly-through into Weld: stage 3 and stage 4 are meant to read as one continuous move.
-    for (const s of [1, 2, 3, 4] as StageId[]) expect(visibility(s).tiles).toBe(true);
-    // Off only at stage 5, where the camera stands first-person inside the hall, behind
-    // Weld's exterior walls for the whole stage -- the world outside them is never in frame,
-    // so mounting it would cost draw calls for geometry nothing can see (the same argument
-    // Experience.tsx's own <Labels> comment makes for that component at stages 4-5).
-    expect(visibility(5).tiles).toBe(false);
+    // TRUE THROUGH EVERY STAGE, including 5 -- P14 row 8. The world must not disappear
+    // during the fly-through into Weld (§0.7's fix, stages 3-4), and now it must not
+    // disappear once the camera is inside either: a window is a real hole in the wall
+    // (sash.ts), not a solid panel, so stage 5 has something to look through it AT.
+    for (const s of [1, 2, 3, 4, 5] as StageId[]) expect(visibility(s).tiles).toBe(true);
   });
 
   it("mounts the interior a stage before the threshold needs it", () => {
