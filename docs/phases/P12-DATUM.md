@@ -73,6 +73,18 @@ Widener's roof once the tiles were at their real height, and the stage-3 frame b
 skylight (screenshotted). It is now `obliqueDrop(270, 45, 45)` at azimuth 38.3: 205 ft up,
 range 230 ft, inside `STAGE3_CLAMP`'s 115–345 ft and 2–75°.
 
+**Stage 4's stand-off had to rise, for the same class of reason.** The threshold begins 124 ft
+outside bedroom B's gable at a height of `ridge / 2` — 55 ft above grade, chosen when the only
+things in the scene were this project's own massing and a ground plane. Google's Yard has elms
+in it. Measured along the approach corridor itself (±25 ft either side of the line from the
+stand-off to Weld's centre, 1,628 tiles settled): canopy tops run **50.8 to 59.9 ft over the
+first 39%** of the run in, so the camera began the crossing inside a tree — screenshotted, half
+the frame was leaves. The stand-off is now `ridge * 0.8`, i.e. 80.6 ft above grade: clear of the
+worst canopy by 20 ft and still under the 85.4 ft ridge, so the approach looks slightly UP at
+the roofline. The aim rose with it, `ridge / 4` to `ridge / 2` — lifting only the camera would
+have pitched the shot 21° down and pushed the ridge off the top edge. Weld's own mesh tops out
+at 81.2 ft in the same measurement, which is the same number from the other direction.
+
 ---
 
 ## 2. The measurement

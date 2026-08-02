@@ -403,18 +403,38 @@ function buildKeyframes(params: SuiteParams): Record<StageId, Keyframe> {
   // height plus headroom, divided by the tangent of the half fov. Written as a
   // function of GABLE_FOV so the two cannot drift apart, which is how the 40
   // survived a change of fov in the first place.
+  //
+  // ABOVE THE TREES SINCE P12, WHICH IS A FACT ABOUT CAMBRIDGE AND NOT A FRAMING TASTE.
+  // The height was ridge/2, i.e. 55 ft above grade, chosen when the only things in the
+  // scene were this project's own massing and a ground plane. Google's photogrammetry has
+  // the Yard's elms in it, and geo/frame.ts's datum put them at their real height:
+  // measured along this exact approach corridor (scripts/_probe-approach, +/-25 ft either
+  // side of the line from the stand-off to Weld's centre, 1,628 tiles settled), canopy tops
+  // run 50.8 to 59.9 ft over the first 39% of the run in. A camera at 55 ft starts the
+  // threshold INSIDE a tree -- screenshotted, half the frame is leaves.
+  //
+  // 0.8 * ridge is 68.3 ft above the first floor, 80.6 ft above grade: clear of the 59.9 ft
+  // worst canopy by 20 ft, and still under the 85.4 ft ridge so the approach looks slightly
+  // UP at the roofline rather than down onto it. Weld's own mesh tops out at 81.2 ft in the
+  // same measurement, which is the same number from the other direction.
   const gableOutside = suiteToThree(
     bedB.u + bedB.du / 2,
     params.sectionLength + GABLE_BACK,
-    floor + WELD.ridge / 2,
+    floor + WELD.ridge * 0.8,
     params,
   );
   // Into bedroom B, but aimed high enough that the approach looks at the building
   // and not at the ground in front of it. The blend to stage 5 brings the eye down.
+  //
+  // RAISED WITH THE STAND-OFF, ridge/4 to ridge/2, and it has to move with it: the aim sets
+  // where the frame is centred, and lifting only the camera would have pitched the shot 21
+  // degrees down and pushed the ridge off the top edge. At these two heights the view runs
+  // 11.7 degrees below horizontal, so the 50 degree fov holds the gable from +2 degrees at
+  // the ridge to -33 at the ground line, inside a frame spanning +13.3 to -36.7.
   const insideBedB = suiteToThree(
     bedB.u + bedB.du / 2,
     bedB.v + bedB.dv - 4,
-    floor + WELD.ridge / 4,
+    floor + WELD.ridge / 2,
     params,
   );
   // STAGE 5 STANDS IN THE HALL, WHICH IS THE DEBT P7 PAYS BACK.
