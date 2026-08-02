@@ -101,9 +101,23 @@ export function sashParts(width: number, sill: number, head: number, sashDepth: 
   const lightW = width / n;
   const parts: SashPart[] = [];
 
+  // Architrave: two jamb legs and a head, NOT a solid panel over the opening. A
+  // single box spanning the full width and the full sill-to-head range was what
+  // shipped before this fix -- an 8+ sq ft slab of oak standing in front of the
+  // sash and the glass, boarding over every window in the model. There is no
+  // bottom leg: the sill board immediately below is the opening's bottom edge,
+  // exactly as a real double-hung window has no casing under the sill.
+  parts.push({
+    u: -CASING_W, v: -CASING_PR, du: CASING_W, dv: CASING_PR,
+    y0: sill - CASING_W, y1: head + CASING_W, material: "joinery",
+  });
+  parts.push({
+    u: width, v: -CASING_PR, du: CASING_W, dv: CASING_PR,
+    y0: sill - CASING_W, y1: head + CASING_W, material: "joinery",
+  });
   parts.push({
     u: -CASING_W, v: -CASING_PR, du: width + 2 * CASING_W, dv: CASING_PR,
-    y0: sill - CASING_W, y1: head + CASING_W, material: "joinery",
+    y0: head, y1: head + CASING_W, material: "joinery",
   });
   parts.push({
     u: -CASING_W, v: -SILL_PR - SILL_NOSE, du: width + 2 * CASING_W, dv: SILL_PR + SILL_NOSE,
