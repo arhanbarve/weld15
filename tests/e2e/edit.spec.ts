@@ -577,20 +577,23 @@ test.describe("P6 -- the suite is changeable", () => {
     const midDrag = await calls();
     await page.mouse.up();
 
-    // Measured on this build: 46 idle at stage 5, and three more while a gesture is live --
-    // still the same +3 a ghost and an outline plus the frame's own bookkeeping cost
-    // before P10, so a live gesture's overhead did not move; only the idle floor did.
+    // Measured on this build: 50 idle at stage 5, and three more while a gesture is live --
+    // still the same +3 a ghost and an outline plus the frame's own bookkeeping cost every
+    // prior figure here found, so a live gesture's overhead has never moved; only the idle
+    // floor keeps rising as the suite gains real geometry.
     //
-    // Idle rose from 38 to 46 with P10: real furniture geometry (11 batches by kind AND
-    // material, up from 8) and interior sash joinery/glazing/cornice (geo/sash.ts,
-    // geo/trim.ts) replaced the old shared-unit-box furniture and flat window panes.
-    // NOTHING is a surprise here -- every one of those additions is exactly what P10 set
-    // out to draw, each measured and recorded in its own commit. 46 + 3 is 49, which is
-    // why the ceiling moves to 50: the same two calls of headroom over the gesture the
-    // previous figure kept. Still well clear of campus.spec.ts's 30, which covers stages
-    // 1 to 3 where nothing casts.
+    // Idle rose from 46 to 50 with P14 rows 1-6: door casing, a hung-open leaf and a
+    // threshold per doorway, a tile floor and wainscot for the bathroom, and -- the +3 of
+    // the four -- CommonParts.tsx (the loggia, stair hall, stair and corridor beyond the
+    // suite's own entry, mounted at stage 5 so that door opens onto something). NOTHING
+    // here is a surprise: every addition is exactly what those commits set out to draw,
+    // each measured and recorded there. 50 + 3 is 53, which is why the ceiling moves to
+    // 55: two calls of headroom over the gesture, the same margin every previous figure
+    // here kept. P14 rows 8-11 (an outlook backdrop, bathroom fixtures, ceiling fixtures)
+    // will move this again; row 12 re-measures once, after all of them land, rather than
+    // widening a third time in between.
     expect(midDrag - idle, `idle ${idle}, mid-drag ${midDrag}`).toBeLessThanOrEqual(3);
-    expect(midDrag, `idle ${idle}, mid-drag ${midDrag}`).toBeLessThanOrEqual(50);
+    expect(midDrag, `idle ${idle}, mid-drag ${midDrag}`).toBeLessThanOrEqual(55);
   });
 
   test("the room is lit with real shadows, and they are paid for once", async ({ page }) => {
@@ -617,10 +620,10 @@ test.describe("P6 -- the suite is changeable", () => {
     // shows up here as a decision.
     expect(p.casters, `casters ${p.casters}`).toBeGreaterThanOrEqual(8);
     expect(p.casters, `casters ${p.casters}`).toBeLessThanOrEqual(14);
-    // And the cost is the measured one, not a surprise. 46 shipped with P10 (was 38; see
-    // the drag-budget test above for what moved); 50 leaves room for a gesture's ghost
-    // and outline.
+    // And the cost is the measured one, not a surprise. 50 shipped with P14 rows 1-6 (was
+    // 46 with P10; see the drag-budget test above for what moved); 55 leaves room for a
+    // gesture's ghost and outline.
     expect(p.calls, `calls ${p.calls}`).toBeGreaterThan(30);
-    expect(p.calls, `calls ${p.calls}`).toBeLessThanOrEqual(50);
+    expect(p.calls, `calls ${p.calls}`).toBeLessThanOrEqual(55);
   });
 });

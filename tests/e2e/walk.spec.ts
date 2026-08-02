@@ -564,23 +564,23 @@ test.describe("P7 -- somebody can stand in Weld 15 and walk it", () => {
     const walkingPerf = await perfOf(page);
 
     /*
-     * 50, matching edit.spec.ts's own ceiling for the same stage (raised there in P10 for
+     * 55, matching edit.spec.ts's own ceiling for the same stage (raised there in P14 for
      * the same reason).
      *
-     * RAISED FROM 40 (P7) TO 50 (P10). MEASURED on this build at 1280 x 720, camera
-     * settled: 46 idle at stage 5, 43 while walking. First person adds NO geometry --
-     * `geometries` and `casters` are unchanged, it moves the camera and nothing else -- so
-     * what the walking figure shows is the frustum, not a cost.
+     * RAISED FROM 50 (P10) TO 55 (P14 rows 1-6). MEASURED on this build at 1280 x 720,
+     * camera settled: 50 idle at stage 5, 46 while walking. First person adds NO geometry
+     * -- `geometries` and `casters` are unchanged, it moves the camera and nothing else --
+     * so what the walking figure shows is the frustum, not a cost.
      *
-     * The 46 is itself new: real furniture (geo/pieces.ts, batched by kind AND material --
-     * 11 batches, up from 8), interior sash joinery/glazing (geo/sash.ts) and
-     * baseboard/rail/cornice (geo/trim.ts) replaced the old shared-unit-box furniture and
-     * flat window panes -- every one of those additions is what the phase set out to draw.
-     * 46 + edit.spec.ts's live-gesture headroom of 3 is 49, which is why both ceilings now
-     * agree at 50 rather than disagreeing by one call the way 38/40 and 41 did.
+     * The 50 is itself new: door casing, a hung-open leaf and a threshold per doorway
+     * (geo/trim.ts), a tile floor and wainscot for the bathroom, and CommonParts.tsx (the
+     * loggia, stair hall, stair and corridor beyond the suite's own entry, mounted at
+     * stage 5) -- every one of those additions is what those P14 commits set out to draw.
+     * 50 + edit.spec.ts's live-gesture headroom of 3 is 53, which is why both ceilings now
+     * agree at 55 rather than disagreeing the way earlier phases' figures briefly did.
      */
     console.log(`draw calls: idle ${idle.calls}, walking ${walkingPerf.calls}`);
-    expect(walkingPerf.calls, `walking ${walkingPerf.calls}`).toBeLessThanOrEqual(50);
+    expect(walkingPerf.calls, `walking ${walkingPerf.calls}`).toBeLessThanOrEqual(55);
     expect(
       walkingPerf.calls - idle.calls,
       `idle ${idle.calls}, walking ${walkingPerf.calls}`,

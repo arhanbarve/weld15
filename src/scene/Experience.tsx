@@ -18,6 +18,7 @@ import { FallbackGround } from "./FallbackGround";
 import { Tiles } from "./Tiles";
 import { WeldExterior } from "./WeldExterior";
 import { Suite } from "./Suite";
+import { CommonParts } from "./CommonParts";
 import { Effects } from "./Effects";
 import { Perf } from "./Perf";
 import { Hud } from "@/ui/Hud";
@@ -221,6 +222,12 @@ export default function Experience() {
               two buildings trading places. `vis.weld` is kept as the stage window it has
               always been; `model` narrows it. */}
           <WeldExterior visible={vis.weld && model} opacity={shell} />
+          {/* The loggia, stair hall, stair and corridor beyond the suite's own
+              entry door (P14 rows 5-6). Stage 5 only for now: it exists so the
+              entry reads as a real doorway rather than a crack onto sky, which
+              only matters once the camera is inside the suite looking at that
+              door. */}
+          <CommonParts visible={stage === LAST_STAGE} params={params} />
           <Suite
             visible={vis.interior}
             opacity={interiorOpacity}
