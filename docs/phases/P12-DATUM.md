@@ -1,6 +1,6 @@
 # P12 — The datum, and one Weld instead of two
 
-Status: **implemented**, unit suite 1037/1037. Three defects, one of which explains the other
+Status: **implemented**, unit suite 1037/1037, keyless e2e 72 passed / 3 skipped / 0 failed. Three defects, one of which explains the other
 two being invisible until now. Everything here was measured in a browser against live Google
 Photorealistic 3D Tiles, not reasoned about.
 
@@ -125,3 +125,51 @@ ridges off, against a real 85.4 ft ridge. A datum still 64 ft out would have rea
   fixed on the way past: `thresholdOpacity` returns `interior: 0` below stage 4 and `<Suite>`
   returns null under 0.001 opacity, so every cutaway at stage 3 used to open onto an EMPTY
   building.
+
+---
+
+## 4. The e2e suite, and what was wrong with it
+
+The suite is **keyless by default** (P11 §6a): `NEXT_PUBLIC_GOOGLE_MAPS_KEY= npx playwright
+test`, with three keyed-only gates skipping themselves. Run it keyed and the drag-safety
+sweeps time out on tile streaming and half the pixel gates sample a half-loaded frame — worth
+knowing, because that is how it was first run during this phase and it produced nine failures
+that had nothing to do with the code.
+
+Run correctly, the branch inherited **one real failure and one switched-off gate**, both
+fixed here, and P12's own regression (one) was found by running the merge base with the work
+stashed and comparing.
+
+| gate | was | now |
+|---|---|---|
+| `edit.spec` — each cutaway mode changes the frame | failing on `main`, deterministically | fixed: measured from stage 3 |
+| `journey-continuity.spec` — scrubbing never pops the camera | `test.skip` since it was written | on, and passing |
+| `journey.spec` — reduced motion jump-cuts | P12 regression | fixed: asserts the camera, then the frame |
+| `perf.spec` — triangles stay in a sane range | flaked 1 run in 3 | fixed: `settled()` waits for the scene |
+
+**The cutaway gate was measuring the wrong stage.** It asserted that `wallsDown` differs from
+`none` by more than 0.5 mean luminance while standing in the hall — where a cutaway drops
+walls that are behind the camera or out of frame. Measured, keyless, same 60×60 grid:
+
+| stage | none | roofOff | wallsDown | section |
+|---|---|---|---|---|
+| 5 (the hall) | 210.70 | 211.02 | 210.83 | 211.02 |
+| 3 (outside) | 83.82 | 78.52 | 79.64 | 80.44 |
+
+So the floor was unreachable at stage 5 (real delta 0.13) and clears at stage 3 with 8× margin
+(4.18). Stage 3 is also where the feature is for — and, thanks to §1's interior fix, where it
+now shows something.
+
+**The continuity gate had never run.** It carried `test.skip` and a note saying the master
+slider "does not exist yet in this checkout"; the slider landed with P10 and the note went
+stale, so the gate sat off through P10 and P11 while the camera it guards was rebuilt twice.
+Turned on, its metric turned out to be unrunnable as written — raw step length against 3× the
+sweep's median, on a descent whose legs are deliberately weighted by decades of altitude, so
+step 0 moved 625,173 ft against a median of 1,736 and was correct to. It now measures each
+step against **its own neighbours**, which is what a pop is and needs no scale. Measured worst
+local ratios: 5.27 anywhere (the funnel's own smoothstep accelerating inside the threshold),
+2.61 at a stage boundary, 4.79 at the 4→5 arrival where the walker takes the camera over.
+
+**One keyed gate is unverified**: `perf.spec`'s tile-cache ceiling. Left unrun on purpose —
+this phase's measurement campaign spent most of a day's 3D Tiles root-request quota, and that
+gate tests cache bookkeeping unrelated to anything here.

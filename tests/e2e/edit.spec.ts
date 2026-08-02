@@ -487,6 +487,32 @@ test.describe("P6 -- the suite is changeable", () => {
     page,
   }) => {
     await openInTheRoom(page);
+
+    /**
+     * MEASURED FROM STAGE 3, NOT FROM INSIDE THE HALL, and the move is the fix rather than
+     * a convenience. openInTheRoom() lands at stage 5, where the camera stands in a 4.5 ft
+     * corridor -- and from in there a cutaway has almost nothing to show, because the walls
+     * it drops are the ones behind the camera or out of frame. Measured, keyless, this
+     * build, mean luminance over the same 60x60 grid `frame()` samples:
+     *
+     *   stage 5   none 210.70   roofOff 211.02   wallsDown 210.83   section 211.02
+     *   stage 3   none  83.82   roofOff  78.52   wallsDown  79.64   section  80.44
+     *
+     * So the 0.5 floor below was unreachable at stage 5 (the real delta is 0.13, and this
+     * assertion had been failing on it) and clears comfortably at stage 3 (4.18). Stage 3
+     * is also where the feature is FOR: cutaway.ts's header opens with "a closed box of
+     * 1.5 ft masonry shows nothing from outside", which is a statement about looking at the
+     * building, not about standing in it.
+     *
+     * Worth recording that this became a real view only in P12: `thresholdOpacity` returns
+     * `interior: 0` below stage 4 and `<Suite>` returns null under 0.001 opacity, so before
+     * Experience.tsx started forcing the interior up in model mode, a cutaway at stage 3
+     * opened onto an empty shell. See docs/phases/P12-DATUM.md.
+     */
+    await page.getByTestId("stage-3").click();
+    await expect.poll(async () => (await weld(page)).stage, { timeout: 15_000 }).toBe(3);
+    await page.waitForTimeout(1400);
+
     const shots: Record<string, { mean: number; distinct: number }> = {};
     for (const mode of ["none", "roofOff", "wallsDown", "section"]) {
       await page.getByTestId(`cutaway-${mode}`).click();

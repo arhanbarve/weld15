@@ -43,13 +43,26 @@ const perf = (page: Page): Promise<Perf> =>
   page.evaluate(() => (window as unknown as { __perf: Perf }).__perf);
 
 /**
- * `__perf`, once it has stopped changing. Unchanged from the pre-P11 version of this file --
- * see its own long-standing rationale: a fixed-time wait can sample a frame that has not
- * actually rendered (`triangles: 1`), which no bound, tight or loose, should be asked to
- * tolerate.
+ * `__perf`, once it has stopped changing -- and, when the caller names a floor, once the
+ * scene it is measuring has actually drawn.
+ *
+ * The long-standing rationale is unchanged: a fixed-time wait can sample a frame that has
+ * not rendered (`triangles: 1`), which no bound should be asked to tolerate. What P12 adds
+ * is that "stopped changing" is not sufficient on its own. Two CONSECUTIVE reads can both
+ * land mid-load and agree with each other -- measured: a cold `page.goto()` followed by a
+ * stage-3 click returned 363 triangles twice in a row, then 32,595 a moment later, and the
+ * run failed against a floor of 15,000 while two neighbouring runs of the same commit passed
+ * at 32,595. Equality across 150 ms says the probe is stable, not that the scene is up.
+ *
+ * So a caller that knows what the frame should contain passes its floor, and this keeps
+ * polling until a settled read clears it. The 9 s budget is unchanged and so is the failure
+ * mode: if the scene genuinely never draws, the last read is returned and the caller's own
+ * assertion fails on it with its own message, rather than this helper deciding what a
+ * missing scene means.
  */
-async function settled(page: Page, what: string): Promise<Perf> {
+async function settled(page: Page, what: string, floor = 0): Promise<Perf> {
   let prev: Perf | null = null;
+  let lastStable: Perf | null = null;
   for (let i = 0; i < 60; i++) {
     const p = await perf(page);
     if (
@@ -60,11 +73,13 @@ async function settled(page: Page, what: string): Promise<Perf> {
       prev.calls === p.calls &&
       prev.triangles === p.triangles
     ) {
-      return p;
+      lastStable = p;
+      if (p.triangles >= floor) return p;
     }
     prev = p ?? null;
     await page.waitForTimeout(150);
   }
+  if (lastStable) return lastStable;
   throw new Error(
     `${what}: __perf never settled over 9 s. Last read: ${JSON.stringify(prev)}. ` +
       `A read of 1 triangle or 1 call means the frame had not rendered.`,
@@ -117,7 +132,7 @@ test("triangles stay in a sane range at every stage, and frame time is recorded"
   const report: string[] = [];
   for (const b of TRIANGLE_BUDGET) {
     await openAt(page, b.stage);
-    const p = await settled(page, `stage ${b.stage}`);
+    const p = await settled(page, `stage ${b.stage}`, b.floor);
     report.push(`stage ${b.stage}: ${p.triangles} tris, ${p.calls} calls, ${p.medianMs}ms`);
     expect(
       p.triangles,
