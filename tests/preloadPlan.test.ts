@@ -21,15 +21,13 @@ describe("preloadPoses", () => {
     }
   });
 
-  it("altitude decreases monotonically down to the loggia's own grade crossing", () => {
-    // Not the whole path any more (P14 rows 5-7): the last leg climbs the modelled stair
-    // from the loggia's grade-level arch crossing up to the stair hall's own floor level
-    // (stages.ts's thresholdPath(), eyeGround -> eyeUpstairs), so the very end of the
-    // descent has a real, small altitude RISE rather than a continued fall. That climb
-    // lands inside the final batch regardless (POSES_PER_BATCH groups it with the rest of
-    // the lowest-altitude samples), so it costs the coarse-to-fine batching order nothing --
-    // this test now only asserts the part of the premise that still holds: every sample up
-    // to the lowest point of the whole path is strictly lower than the one before it.
+  it("altitude decreases monotonically down to the lowest point of the path", () => {
+    // Found rather than assumed to be the last sample: the entry approach (stages.ts's
+    // thresholdPath()) is a single eye height the whole way in, so the whole path is
+    // monotonic at the shipped params, but this does not hard-code that shape -- a future
+    // path with its own climb near the threshold would still only need the part of the
+    // premise that always holds: every sample up to the lowest point is strictly lower
+    // than the one before it.
     let minIdx = 0;
     for (let i = 1; i < poses.length; i++) {
       if (poses[i]!.altFt < poses[minIdx]!.altFt) minIdx = i;

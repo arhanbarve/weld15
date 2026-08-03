@@ -12,7 +12,7 @@
  * THRESHOLD_SPAN 0.9 are already generous shares of the bar for how little altitude they
  * cross) and starve stage 0's 3.28 decades.
  *
- * ORBIT IS ALWAYS NULL. Every sampled pose is journeyPose(kf, stage, t, false, null, null) --
+ * ORBIT IS ALWAYS NULL. Every sampled pose is journeyPose(kf, stage, t, false, null, null, null) --
  * the stage's own default framing, never a live drag. A heading drag to an orbit the
  * preloader never sampled still streams; docs/phases/P13-PRELOAD.md section 1 accepts this
  * ("descent path only", decision 1) rather than trying to cover every possible orbit at every
@@ -84,14 +84,6 @@ export const TOTAL_BATCHES = Math.ceil(N_POSES / POSES_PER_BATCH);
  * in u; since u and altitude both decrease monotonically along the descent (stages.ts's own
  * "descends monotonically" regression fence), sampling in ascending u already IS descending
  * altitude, so no separate sort is needed.
- *
- * ONE EXCEPTION, NOT A CONTRADICTION: the last leg climbs the modelled stair from the
- * loggia's own grade-level arch crossing up to the stair hall's floor level (P14 rows 5-7,
- * stages.ts's thresholdPath(), eyeGround -> eyeUpstairs), so the final handful of samples
- * rise rather than keep falling. That climb lands entirely inside the last batch alongside
- * the rest of the lowest-altitude samples, so batch-level ordering -- the thing this
- * comment and errorTarget's step-down actually depend on -- is unaffected; only a
- * pose-by-pose comparison at the very tail would notice.
  */
 /**
  * Kept strictly below 1 when resolving (stage, t): journey.ts's fromJourney maps u = 1 to
@@ -127,7 +119,7 @@ export function preloadPoses(params: SuiteParams): PreloadPose[] {
   for (let i = 0; i < N_POSES; i++) {
     const u = i / (N_POSES - 1);
     const { stage, t } = fromJourney(Math.min(u, 1 - STAGE5_EPS), params);
-    const pose = journeyPose(kf, stage, t, false, null, null);
+    const pose = journeyPose(kf, stage, t, false, null, null, null);
     out.push({
       u,
       stage,
@@ -154,7 +146,7 @@ export function preloadPoses(params: SuiteParams): PreloadPose[] {
       }
     }
     used.add(nearest);
-    const pose = journeyPose(kf, stage, 0, false, null, null);
+    const pose = journeyPose(kf, stage, 0, false, null, null, null);
     out[nearest] = {
       ...out[nearest]!,
       stage,

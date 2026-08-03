@@ -12,29 +12,13 @@
 
 import { buildSuite } from "@/geo/rooms";
 import { suiteToThree, floorLevel, WELD } from "@/geo/place";
-import type { Suite, SuiteParams } from "@/geo/rooms";
-import { buildingToSite, toThree, type Vec3 } from "@/geo/frames";
-import {
-  loggiaFootprint,
-  stairHallFootprint,
-  suiteEntryStandingPositions,
-} from "@/geo/common";
+import type { Rect, Suite, SuiteParams } from "@/geo/rooms";
+import type { Vec3 } from "@/geo/frames";
 import type { StageId } from "@/state/store";
-import { standingPose } from "./route";
+import { HUB, route, standingPose } from "./route";
 import { EYE } from "./walk";
 import { R_EARTH_FT } from "./altitude";
 import { poseToKeyframe, keyframeToPose, type GeoPose } from "./geo/rig";
-
-/** A building-frame point plus a height to three.js world space -- geo/common.ts's own frame, converted the same way suiteToThree() converts the suite's. */
-function buildingToThree(u: number, v: number, z: number): Vec3 {
-  const s = buildingToSite({ u, v });
-  return toThree(s.x, s.y, z);
-}
-
-/** Straight-line distance between two world points, all three axes -- the threshold path's climb makes height part of the arc length now, not just plan. */
-function dist3(a: Vec3, b: Vec3): number {
-  return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
-}
 
 /**
  * One camera pose, plus -- for the one stage that has a path rather than a place -- the
@@ -381,11 +365,12 @@ export const SHELL_GONE = 0.7;
  *
  * ONE ENTRY, keyed by identity rather than by value. Identity is the right test for the
  * reason UrlSync's key() gives: every writer of `params` replaces the object rather
- * than mutating it -- setParams spreads, url.ts assembles a fresh one, and every test
- * writes `{ ...DEFAULT_PARAMS, x }` -- so a hit means the same suite and a miss costs
- * one recompute. One entry is enough because the four callers (CameraRig, Hud, A11yAlt,
- * DragLayer) all read the same object out of the same store on the same frame; two
- * params objects alternating per frame is not a state this app can reach.
+ * than mutating it -- resetAll() hands back a fresh DEFAULT_PARAMS, url.ts assembles a
+ * fresh one, and every test writes `{ ...DEFAULT_PARAMS, x }` -- so a hit means the
+ * same suite and a miss costs one recompute. One entry is enough because the callers
+ * (CameraRig, Hud, A11yAlt) all
+ * read the same object out of the same store on the same frame; two params objects
+ * alternating per frame is not a state this app can reach.
  */
 const CACHE: { params: SuiteParams | null; kf: Record<StageId, Keyframe> | null } = {
   params: null,
@@ -402,22 +387,10 @@ export function keyframes(params: SuiteParams): Record<StageId, Keyframe> {
 
 function buildKeyframes(params: SuiteParams): Record<StageId, Keyframe> {
   const suite = buildSuite(params);
+  const bedB = suite.rooms.find((r) => r.id === "bedB")!;
   const floor = floorLevel(1);
-  const loggia = loggiaFootprint(0);
-  const loggiaV = loggia.v + loggia.dv / 2;
 
-  // Outside the west front, far enough back that Weld reads as a building.
-  //
-  // P14 ROW 7 MOVED THIS FROM THE NORTH GABLE TO THE WEST FRONT -- the
-  // building's real main entrance (weld.json's own 1875 text: "two arches
-  // into a 21 x 25 ft marble-paved loggia"), so the journey arrives through a
-  // door rather than through solid masonry. GABLE_BACK, GABLE_FOV and the
-  // 0.8 * ridge stand-off height are ALL UNCHANGED -- only the anchor point
-  // moves, from bedB's centreline at the gable to the loggia's own centreline
-  // at its west wall -- so orbit.ts's STAGE4_CLAMP (2 * GABLE_BACK,
-  // MASSING_CENTER-relative) still bounds a sensible range and nothing about
-  // the tree-canopy clearance argument below changes: it was never about
-  // which side of the building the camera stands on, only about how high.
+  // Outside the gable, far enough back that Weld reads as a building.
   //
   // This used to sit 40 ft out at eye height, and that was a wall rather than a
   // shot. At the 50 degree vertical fov below, 40 ft frames 0.93 * 40 = 37 ft of a
@@ -439,37 +412,31 @@ function buildKeyframes(params: SuiteParams): Record<StageId, Keyframe> {
   // measured along this exact approach corridor (scripts/_probe-approach, +/-25 ft either
   // side of the line from the stand-off to Weld's centre, 1,628 tiles settled), canopy tops
   // run 50.8 to 59.9 ft over the first 39% of the run in. A camera at 55 ft starts the
-  // threshold INSIDE a tree -- screenshotted, half the frame is leaves. NOT RE-MEASURED for
-  // the west front specifically -- flagged for whoever next has a keyed session to confirm,
-  // since the Yard's own elms sit east and north of Weld and the west approach may clear
-  // canopy by a different margin than this figure records.
+  // threshold INSIDE a tree -- screenshotted, half the frame is leaves.
   //
   // 0.8 * ridge is 68.3 ft above the first floor, 80.6 ft above grade: clear of the 59.9 ft
   // worst canopy by 20 ft, and still under the 85.4 ft ridge so the approach looks slightly
   // UP at the roofline rather than down onto it. Weld's own mesh tops out at 81.2 ft in the
   // same measurement, which is the same number from the other direction.
-  const loggiaOutside = buildingToThree(loggia.u - GABLE_BACK, loggiaV, floor + WELD.ridge * 0.8);
-  // THROUGH the loggia to the stair hall beyond it, not the loggia's own centre --
-  // the loggia projects west of Weld's real massing (it is an entrance vestibule,
-  // outside the GIS ring tests/stages.test.ts checks kf[4].target against), so a
-  // target inside IT is not a target inside the BUILDING. The stair hall is: it
-  // sits on the building's own axis, inside the ring, and it is genuinely where
-  // this approach is headed, so aiming there is the honest shot rather than a
-  // target picked to pass a test.
-  //
-  // Aimed high enough that the approach looks at the building and not at the
-  // ground in front of it. The blend to stage 5 brings the eye down.
+  const gableOutside = suiteToThree(
+    bedB.u + bedB.du / 2,
+    params.sectionLength + GABLE_BACK,
+    floor + WELD.ridge * 0.8,
+    params,
+  );
+  // Into bedroom B, but aimed high enough that the approach looks at the building
+  // and not at the ground in front of it. The blend to stage 5 brings the eye down.
   //
   // RAISED WITH THE STAND-OFF, ridge/4 to ridge/2, and it has to move with it: the aim sets
   // where the frame is centred, and lifting only the camera would have pitched the shot 21
   // degrees down and pushed the ridge off the top edge. At these two heights the view runs
   // 11.7 degrees below horizontal, so the 50 degree fov holds the gable from +2 degrees at
   // the ridge to -33 at the ground line, inside a frame spanning +13.3 to -36.7.
-  const stairHallForAim = stairHallFootprint(0);
-  const intoLoggia = buildingToThree(
-    stairHallForAim.u + stairHallForAim.du / 2,
-    stairHallForAim.v + stairHallForAim.dv / 2,
+  const insideBedB = suiteToThree(
+    bedB.u + bedB.du / 2,
+    bedB.v + bedB.dv - 4,
     floor + WELD.ridge / 2,
+    params,
   );
   // STAGE 5 STANDS IN THE HALL, WHICH IS THE DEBT P7 PAYS BACK.
   //
@@ -531,14 +498,14 @@ function buildKeyframes(params: SuiteParams): Record<StageId, Keyframe> {
   // Also rebuilt through its own GeoPose, for the same reason the descent stops are --
   // it is a plain two-point shot with no orbit constants to conflict with, so the round
   // trip is pure margin here rather than a sign-convention dodge.
-  const four: Keyframe = viaGeoPose({ position: loggiaOutside, target: intoLoggia, fov: GABLE_FOV });
+  const four: Keyframe = viaGeoPose({ position: gableOutside, target: insideBedB, fov: GABLE_FOV });
   // kf[5] is NOT run through viaGeoPose. tests/stages.test.ts asserts it bit-for-bit
   // (`toBe`, not `toBeCloseTo`) equal to standingPose()'s own suiteToThree() output --
   // see viaGeoPose()'s comment -- so it keeps its exact Cartesian construction. Its
   // GeoPose, per P11-PHOTOREAL.md 2.3's table, is the hall/eye/standingPose().heading/
   // 8 deg/0 range shot this already is; it is simply not re-derived through the type.
   const five: Keyframe = { position: inHall, target: hallTarget, fov: ROOM_FOV };
-  const path = thresholdPath(params, four, five);
+  const path = thresholdPath(params, suite, bedB, four, five);
 
   // STAGES 0, 1 AND 2 ARE NOW DERIVED, AND STAGE 0 CHANGES UNITS.
   //
@@ -622,94 +589,58 @@ function buildKeyframes(params: SuiteParams): Record<StageId, Keyframe> {
 }
 
 /**
- * Stage 4's path (P14 row 7): outside the west front, through the loggia's own arch, across
- * its floor, into the stair hall, up the stair, along the corridor, through the suite's own
- * entry, and into the hall.
+ * Stage 4's path: outside the gable, through it into bedroom B, out through bedroom B's
+ * own door, and into the hall.
  *
- * SEVEN WAYPOINTS, NOT TWO, and every one of them is derived from geo/common.ts rather than
- * placed. This REPLACES the P2-P12 path, which crossed the north gable into bedroom B and
- * used route.ts's routeRooms() to cross the one doorway from there to the hall. The new
- * path needs no such interior routing: the suite's own entry (d4) opens DIRECTLY into the
- * hall -- rooms.ts's own suite has no room between them -- so the only "interior route" is
- * the straight line from just inside that door to kf[5]'s own standing position, both
- * points already confirmed inside the one room by suiteEntryStandingPositions()'s own
- * construction (the same STANDOFF_MARGIN clearance route.ts's thresholdOf() gives every
- * OTHER doorway, applied to the one door that function excludes because "outside" is not a
- * room this model has).
+ * FIVE OR MORE WAYPOINTS, NOT TWO, and every one of them is derived rather than placed.
+ * route() supplies the interior ones -- the centre of bedroom B, a standing position
+ * either side of the doorway between it and the hall, and the centre of the hall -- and
+ * its guarantee is the one that matters here: each of its segments lies inside a single
+ * convex room, or crosses one doorway perpendicular to the band it is cut in and no
+ * wider than the opening. So no segment can be nearer a wall than the standoff
+ * route.ts's STANDOFF_MARGIN puts on it, which is RADIUS + 0.25 = 1 ft, i.e. twice the
+ * near plane. That is what makes the empty frame impossible by construction rather than
+ * by luck; the numbers on kf[5] above are the luck it replaces.
  *
- * MIXED FRAMES, ON PURPOSE. The loggia, stair hall and corridor are building-frame
- * (geo/common.ts owns no suite frame); the last two waypoints (just inside the entry, and
- * kf[5] itself) are suite-frame, as they always were. Nothing downstream cares: every
- * waypoint becomes a plain world Vec3 before the polyline math ever runs, and a world
- * position does not remember which frame built it.
+ * THE ONE WAYPOINT THIS ADDS is the crossing itself: the gable's interior face, on the
+ * approach's own centreline, at eye height. It is there so that the flight through the
+ * masonry is perpendicular to it and lands where the walk begins, rather than entering
+ * at whatever angle a line from 124 ft out happens to make -- which, measured, is what
+ * put the straight blend into the hall at u 17.64 instead of into the room the shot is
+ * framed on.
  *
- * THE CLIMB. geo/common.ts's stair hall and corridor sit at floorLevel(1) -- one storey up,
- * per weld.json's own floor_to_floor_ft -- while the loggia is at grade. Eye height rises
- * from EYE (grade) to floorLevel(1) + EYE across the loggia-to-stair-hall leg and holds
- * level from there in, which is a camera FLYING the climb rather than a walker's foot
- * striking every one of stairSteps()'s risers -- appropriate for a scripted approach, and
- * consistent with the whole of stages 0-4 already being a flight rather than a walk.
- *
- * WHEN EACH WAYPOINT IS REACHED. The arch crossing is pinned at SHELL_GONE, so the camera
- * passes the loggia's own outer wall on exactly the frame the shell finishes dissolving --
+ * WHEN EACH WAYPOINT IS REACHED. The crossing is pinned at SHELL_GONE, so the camera
+ * passes the plane of the gable on exactly the frame the brick finishes dissolving --
  * one number for two things that have to agree, in the manner of REDUCED_CUT below. The
- * remaining waypoints then share what is left of t by ARC LENGTH (now in full 3D, height
- * included, since this path climbs), so the walk from the arch to the hall is at a
- * constant speed.
+ * interior waypoints then share what is left of t by ARC LENGTH, so the walk from the
+ * gable to the hall is at a constant speed. Measured at the shipped params: 23.83 ft of
+ * interior over 0.3 of t, against 123.62 ft of approach over 0.7.
  *
- * NULL WHEN THE ENTRY CANNOT BE FOUND OR THE PATH HAS NO LENGTH. geo/common.ts's own
- * suiteEntryStandingPositions() throws if d4 does not exist (an extreme slider that
- * collapses the hall's own party wall to nothing), which is the right behaviour for a
- * caller that expects a real suite -- but keyframes() is called on the way to the STORE
- * finding out whether a suite is legal at all, and must answer rather than throw the way
- * the old route()-returns-null path never did. So this catches that one failure mode and
- * returns null, exactly the fallback cameraKeyframe() already has for "no route".
+ * NULL WHEN THERE IS NO ROUTE, and cameraKeyframe() then falls back to the straight
+ * blend. A slider can put bedroom B and the hall in the same place -- legDepth 19 with
+ * bedDepth 16 overlaps them, and buildOpenings() then hangs no door between the two --
+ * so route() returns null for four of the eighteen params sets swept above. Those suites
+ * are illegal and the store refuses them; keyframes() is called on the way to finding
+ * that out, so it must answer rather than throw.
  */
-function thresholdPath(params: SuiteParams, four: Keyframe, five: Keyframe): PathStop[] | null {
-  let corridor: ReturnType<typeof suiteEntryStandingPositions>;
-  try {
-    corridor = suiteEntryStandingPositions(params);
-  } catch {
-    return null;
-  }
+function thresholdPath(
+  params: SuiteParams,
+  suite: Suite,
+  bedB: Rect,
+  four: Keyframe,
+  five: Keyframe,
+): PathStop[] | null {
+  const waypoints = route(bedB.id, HUB, suite);
+  if (!waypoints || waypoints.length < 2) return null;
 
-  const loggia = loggiaFootprint(0);
-  const loggiaV = loggia.v + loggia.dv / 2;
-  const stairHall = stairHallFootprint(0);
-  const eyeGround = EYE;
-  const eyeUpstairs = floorLevel(1) + EYE;
+  const eye = floorLevel(1) + EYE;
+  const crossing = { u: bedB.u + bedB.du / 2, v: params.sectionLength };
+  const plan = [crossing, ...waypoints];
 
-  // The loggia's own outer (west) wall, on the approach's centreline, at grade eye
-  // height -- this path's equivalent of the old crossing at the gable's interior face,
-  // and pinned at SHELL_GONE for the same reason: the flight through the arch lands
-  // exactly on the frame the shell finishes dissolving.
-  const archCrossing = buildingToThree(loggia.u, loggiaV, eyeGround);
-  const loggiaCentre = buildingToThree(loggia.u + loggia.du / 2, loggiaV, eyeGround);
-  // The climb happens here: still building-frame, but the eye rises from grade to
-  // floorLevel(1) across this one waypoint, at the stair hall's own centre.
-  const stairHallCentre = buildingToThree(
-    stairHall.u + stairHall.du / 2,
-    stairHall.v + stairHall.dv / 2,
-    (eyeGround + eyeUpstairs) / 2,
-  );
-  const corridorNearStair = buildingToThree(0, stairHall.v + stairHall.dv, eyeUpstairs);
-  const corridorNearEntry = buildingToThree(corridor.corridorSide.u, corridor.corridorSide.v, eyeUpstairs);
-  const insideEntry = suiteToThree(corridor.hallSide.u, corridor.hallSide.v, eyeUpstairs, params);
-
-  const world: Vec3[] = [
-    archCrossing,
-    loggiaCentre,
-    stairHallCentre,
-    corridorNearStair,
-    corridorNearEntry,
-    insideEntry,
-    five.position,
-  ];
-
-  const legs = world.slice(1).map((p, i) => dist3(p, world[i]!));
+  const legs = plan.slice(1).map((p, i) => Math.hypot(p.u - plan[i]!.u, p.v - plan[i]!.v));
   const total = legs.reduce((a, b) => a + b, 0);
-  // A zero-length leg somewhere means two of these waypoints coincide, which is not a
-  // suite this project can walk. Refuse rather than divide by it.
+  // A zero-length interior leg means the hall's centre coincides with the gable, which is
+  // not a suite. Refuse rather than divide by it.
   if (!(total > 0)) return null;
 
   const at = [SHELL_GONE];
@@ -719,12 +650,13 @@ function thresholdPath(params: SuiteParams, four: Keyframe, five: Keyframe): Pat
     at.push(SHELL_GONE + (1 - SHELL_GONE) * (run / total));
   }
 
+  const world = plan.map((p) => suiteToThree(p.u, p.v, eye, params));
   const stops: PathStop[] = [{ at: 0, frame: four }];
-  for (let i = 0; i < world.length; i++) {
+  for (let i = 0; i < plan.length; i++) {
     // The last stop IS kf[5], the object rather than a copy of its numbers, so that
     // cameraKeyframe(kf, 4, 1) and kf[5] are the same pose exactly and the stage
     // boundary cannot show a jump of a thousandth of a foot.
-    if (i === world.length - 1) {
+    if (i === plan.length - 1) {
       stops.push({ at: 1, frame: five });
       break;
     }

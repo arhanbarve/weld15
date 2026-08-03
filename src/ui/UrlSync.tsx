@@ -58,15 +58,14 @@ export function UrlSync() {
     /**
      * The editable state, observable from outside.
      *
-     * Same device as window.__cam, window.__perf and DragLayer's window.__drag, and for
-     * the same reason: the model is a WebGL canvas, so a gate that wants to know
-     * whether a slider moved a wall has no DOM to read.
+     * Same device as window.__cam and window.__perf, and for the same reason: the
+     * model is a WebGL canvas, so a gate that wants to know whether a slider moved
+     * a wall has no DOM to read.
      *
      * Published on EVERY store change and not only when the URL is rewritten, because
-     * two of the fields a gate needs -- `selected` and `notice` -- are deliberately not
-     * carried by a link, so they never trigger a write. `q` is whatever the last write
-     * produced, which is what makes it comparable against the address bar rather than a
-     * second opinion about it.
+     * `notice` is a field a gate needs that is deliberately not carried by a link, so it
+     * never triggers a write. `q` is whatever the last write produced, which is what
+     * makes it comparable against the address bar rather than a second opinion about it.
      *
      * WHY `t` IS HERE, AND WHAT IT COSTS
      * It was left out on the suspicion that it changes every frame, which would make a
@@ -103,7 +102,6 @@ export function UrlSync() {
         cutaway: s.cutaway,
         occupancy: s.occupancy,
         pieces: s.pieces.length,
-        selected: s.selected,
         notice: s.notice,
         orbit: s.orbit,
         reducedMotion: s.reducedMotion,
@@ -116,10 +114,9 @@ export function UrlSync() {
      * encode() returns "" for a snapshot the format cannot carry, and that is not
      * treated as an error either: it means "not shareable", so the parameter is
      * dropped rather than replaced with something that would decode to a different
-     * suite. Every state this app can reach through its own controls is encodable --
-     * setParams() refuses anything url.ts would refuse -- so "" is a belt on top of a
-     * brace, and what it costs when it fires is a link that opens at the defaults
-     * instead of a link that lies.
+     * suite. Every state this app can reach through its own controls is encodable,
+     * so "" is a belt on top of a brace, and what it costs when it fires is a link
+     * that opens at the defaults instead of a link that lies.
      */
     const write = () => {
       const s = useStore.getState();
@@ -155,9 +152,9 @@ export function UrlSync() {
      * wrong here: an orbit drag writes the store on every frame, and stringifying 29
      * pieces sixty times a second to discover that none of them moved is real work
      * done to learn nothing. Every one of these is replaced rather than mutated when
-     * it changes -- setParams spreads, the piece list is rebuilt by map, setOrbit is
-     * handed a fresh object -- so reference identity is exactly the right test, and it
-     * is one comparison per field.
+     * it changes -- resetAll() hands back a fresh params object, the piece list is
+     * rebuilt by map, setOrbit is handed a fresh object -- so reference identity is
+     * exactly the right test, and it is one comparison per field.
      */
     const key = () => {
       const s = useStore.getState();

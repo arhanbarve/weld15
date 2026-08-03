@@ -213,13 +213,12 @@ export function firstPersonPose(
 /**
  * What a gate can read from outside, and why it is a separate publisher from window.__cam.
  *
- * Same device as window.__drag: the thing under test is inside a canvas, and a walker
- * leaves no element behind. What matters here is that the position is published in the
- * SUITE's own frame, in feet, so that tests/e2e/walk.spec.ts can check it against
- * src/geo/collide.ts and src/geo/walls.ts in node rather than trusting a second opinion
- * computed in the page -- edit.spec.ts's header records why a probe that grades its own
- * homework is a weakness. `clearance` and `room` are the app's own answers and are used
- * for identity and bookkeeping, exactly as __drag's ids are.
+ * The thing under test is inside a canvas, and a walker leaves no element behind. What
+ * matters here is that the position is published in the SUITE's own frame, in feet, so
+ * that tests/e2e/walk.spec.ts can check it against src/geo/collide.ts and
+ * src/geo/walls.ts in node rather than trusting a second opinion computed in the page --
+ * a probe that grades its own homework is a weakness. `clearance` and `room` are the
+ * app's own answers, used for identity and bookkeeping.
  */
 type WalkProbe = {
   active: boolean;
@@ -333,15 +332,7 @@ export function FirstPerson() {
   /**
    * Pointer lock, and the two ways it can go wrong.
    *
-   * REQUESTED FROM A DOUBLE-CLICK, not a single click or a pointerdown (D5). A single click
-   * cannot both lock the pointer AND pick a furniture piece: this listener is a raw DOM
-   * listener on the canvas, while DragLayer sees the same DOM event through React-Three-
-   * Fiber's synthetic event system, so calling stopPropagation() in either one does not
-   * suppress the other. If a click both locked and picked, the moment you pressed Escape to
-   * release the lock and then clicked a bed, that same click would silently re-lock the
-   * pointer -- making furniture editing unreachable with zero clicks. `dblclick` is a
-   * gesture DragLayer never listens for, so it is unambiguous: single clicks and drags
-   * always belong to furniture, and a double-click always takes the mouse for looking.
+   * REQUESTED FROM A DOUBLE-CLICK, not a single click or a pointerdown (D5).
    *
    * THE PROMISE IS CAUGHT. requestPointerLock() returns a promise in current Chrome and
    * rejects when the document is not permitted to lock, and an unhandled rejection is a
@@ -351,8 +342,7 @@ export function FirstPerson() {
    *
    * ESCAPE JUST GIVES THE MOUSE BACK. Losing the lock used to leave first person entirely;
    * that action is gone, because the walker is a property of stage 5 now, not a session you
-   * are in. onLockChange below only reflects the browser's own lock state into the store,
-   * so Experience.tsx can hand the pointer to furniture editing instead.
+   * are in. onLockChange below only reflects the browser's own lock state into the store.
    */
   useEffect(() => {
     if (!active) return;
@@ -413,23 +403,11 @@ export function FirstPerson() {
 
     const ctxNow = contextFor(params);
     const keys = [...held.current];
-    /**
-     * Arrows yield to a selection (D6). Selection only ever happens by pointer pick
-     * (DragLayer's onSelect), so a keyboard-only viewer never has one and loses nothing
-     * by this. Read fresh via getState() rather than closed over from render, so a
-     * deselect -- Panel's own control, or a click on empty floor -- hands the arrows back
-     * on the very next frame. w/a/s/d/q/e/r/f are never affected: they are the walker's
-     * alone, whatever is selected.
-     */
-    const selected = useStore.getState().selected;
-    const isArrow = (k: string) =>
-      k === "ArrowUp" || k === "ArrowDown" || k === "ArrowLeft" || k === "ArrowRight";
     let forward = 0;
     let turn = 0;
     let strafe = 0;
     let pitchKey = 0;
     for (const k of keys) {
-      if (selected !== null && isArrow(k)) continue;
       forward += FORWARD_KEYS[k] ?? 0;
       turn += TURN_KEYS[k] ?? 0;
       strafe += STRAFE_KEYS[k] ?? 0;

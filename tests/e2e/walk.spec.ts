@@ -22,9 +22,9 @@ test.setTimeout(120_000);
  *
  * WHY THE ASSERTIONS ARE MADE IN NODE AGAINST THE PROBE'S NUMBERS
  * The walker leaves no element behind, so the observable surface is a probe -- window.__walk,
- * published by FirstPerson.tsx, in the SUITE's own frame in feet -- exactly as window.__drag
- * carries a dragged piece. edit.spec.ts's header names the weakness in that: a probe can
- * agree with a broken renderer. It is answered here the way it is answered there, by not
+ * published by FirstPerson.tsx, in the SUITE's own frame in feet. edit.spec.ts's header
+ * names the weakness in that: a probe can agree with a broken renderer. It is answered
+ * here the way it is answered there, by not
  * asking the app for the verdict. The probe supplies raw coordinates; the containment and
  * clearance checks are recomputed in this file from src/geo/walls.ts, src/geo/collide.ts and
  * src/scene/walk.ts, so a walker that reported a clearance of +5 while standing in a

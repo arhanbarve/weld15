@@ -17,7 +17,7 @@ import { pieceMatrix } from "@/scene/Furniture";
  * about the piece's own unrotated centre would produce whenever du != dv.
  * Getting this wrong either turns an asymmetric part (a headboard, a bank of
  * drawers) the wrong way, or leaves the rendered piece's footprint disagreeing
- * with the box drag.ts and DragLayer already agree it occupies.
+ * with the box collide.ts already says it occupies.
  *
  * The check: build the SAME kind's full nominal footprint as one local box,
  * transform it by pieceMatrix() at the piece's real yaw, and compare its

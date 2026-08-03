@@ -37,8 +37,8 @@ import { materials } from "./materials";
  * true rotation "composes its own translation on top". pieceMatrix() is that
  * translation: pieceBox(p)'s own centre is exactly where a true rotation about
  * the piece's real geometric centre has to land for the rendered assembly to
- * occupy precisely the box collide.ts, drag.ts and DragLayer's arithmetic pick
- * already agree it occupies -- proven for all four yaws in
+ * occupy precisely the box collide.ts's arithmetic already agrees it occupies
+ * -- proven for all four yaws in
  * tests/furniture-transform.test.ts, which is what a bed 6.833 ft along u
  * coming out 6.833 ft along v (rather than swapped, rotated, and in the right
  * place) would fail. What is NOT read is pieceBox()'s du/dv as a SCALE: the

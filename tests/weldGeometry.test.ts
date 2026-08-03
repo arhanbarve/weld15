@@ -892,8 +892,7 @@ describe("the cutaway opens the shell", () => {
   const kf = keyframes(DEFAULT_PARAMS);
   /** Stage 3: the dollhouse camera, off Weld's south-east quarter. */
   const STAGE3 = kf[3].position;
-  /** Stage 4: P14's loggia-approach anchor -- far out and elevated, square on the west
-   *  front's loggia rather than the north gable the suite is at. */
+  /** Stage 4: square on the north gable, which is the end the suite is at. */
   const STAGE4 = kf[4].position;
 
   /** The ring in the building frame, vertex for vertex with weldGeometry's own LOOP. */
@@ -989,12 +988,7 @@ describe("the cutaway opens the shell", () => {
     const parts = (mode: CutawayMode, cam: [number, number, number]) =>
       Object.values(massesFor(cutFor(mode, cam))).filter((g) => g !== null).length;
     expect(MODES.map((m) => parts(m, STAGE3))).toEqual([4, 2, 2, 1]);
-    // STAGE4 diverges from STAGE3 at "section" only, since P14: the loggia anchor sits
-    // on the far side of the section plane from where the old gable anchor did (half.keep
-    // flips sign), and from there none of the suite's 5 window bays are wholly on the
-    // camera's own side of the plane -- so all 5 survive undropped (2 parts: walls, bays)
-    // where STAGE3 drops all 5 (1 part: walls only).
-    expect(MODES.map((m) => parts(m, STAGE4))).toEqual([4, 2, 2, 2]);
+    expect(MODES.map((m) => parts(m, STAGE4))).toEqual([4, 2, 2, 1]);
   });
 
   it("takes the eaves lid off with the roof and leaves the grade cap on", () => {
@@ -1093,12 +1087,9 @@ describe("the cutaway opens the shell", () => {
   });
 
   it("takes a bay down with the shell wall it is a hole in", () => {
-    // STAGE4 no longer approaches via the gable (P14 moved it to the loggia, on the west
-    // front), so this camera is built locally: squarely on the gable bay's own wall, the
-    // way the old stage-4 anchor used to sit, so the assertion below still has a real
-    // wall-with-a-window to test against. The gable bay's own wall goes and the bay goes
-    // with it. Left standing it is an 8 x 10.75 ft slab of slate hanging in the hole it
-    // was a window in.
+    // From stage 4 the camera is square on the north gable, so the gable bay's own wall
+    // goes and the bay goes with it. Left standing it is an 8 x 10.75 ft slab of slate
+    // hanging in the hole it was a window in.
     //
     // EXACTLY that one, which is the assertion and not a detail. Every other bay is a
     // facade window whose own wall runs the other way and is still standing, and the
@@ -1108,8 +1099,7 @@ describe("the cutaway opens the shell", () => {
     // moved. nearestEdge() carries the measurement.
     const rects = bayRects(DEFAULT_PARAMS);
     const gableBay = rects.reduce((a, b, i) => (b.v > rects[a]!.v ? i : a), 0);
-    const onTheGable = camAt(rects[gableBay]!.u, rects[gableBay]!.v + 50, 30);
-    const cut = cutFor("wallsDown", onTheGable);
+    const cut = cutFor("wallsDown", STAGE4);
     expect([...cut.bays]).toEqual([gableBay]);
     // The reveals that survive are emitted, and only those: six quads a box, so 12
     // triangles each.
@@ -1274,13 +1264,7 @@ describe("the cutaway opens the shell", () => {
     });
 
     it("notices one part exchanged for another, in either set", () => {
-      // STAGE4 (the loggia anchor) drops no bay in wallsDown -- see "takes a bay down"
-      // above -- so this needs a camera squarely on a window's own wall too, same as
-      // that test builds locally.
-      const rects = bayRects(DEFAULT_PARAMS);
-      const gableBay = rects.reduce((a, b, i) => (b.v > rects[a]!.v ? i : a), 0);
-      const onTheGable = camAt(rects[gableBay]!.u, rects[gableBay]!.v + 50, 30);
-      const cut = cutFor("wallsDown", onTheGable);
+      const cut = cutFor("wallsDown", STAGE4);
       expect(cut.walls.size).toBeGreaterThan(0);
       expect(cut.bays.size).toBeGreaterThan(0);
       // An index no ring edge and no bay has, swapped in for one that is there: the sets

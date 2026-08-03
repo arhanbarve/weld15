@@ -12,9 +12,7 @@ import { trimParts, RAIL_H, doorCasingParts, doorLeafParts, thresholdParts } fro
 import { bathFixtureParts, ceilingFixturePart, roomRadiatorPart } from "@/geo/fixtures";
 import { suiteToThree, floorLevel } from "@/geo/place";
 import type { Piece } from "@/geo/furniture";
-import type { DragResult } from "@/geo/drag";
 import { hiddenWalls, type CutawayMode } from "./cutaway";
-import { DragLayer } from "./DragLayer";
 import { materials, scaleFloorUv } from "./materials";
 import { Furniture } from "./Furniture";
 
@@ -239,13 +237,33 @@ export function aoSegments(extentFt: number): number {
 export function applyAoColor(geometry: THREE.BufferGeometry, s: Slab): void {
   const position = geometry.getAttribute("position");
   const half: [number, number, number] = [s.du / 2, (s.y1 - s.y0) / 2, s.dv / 2];
+  // A box mesh has no true interior vertex -- every one sits on some face, pinned
+  // at that face's axis extreme -- so at least one axis must always be excluded or
+  // every vertex reads a 0 edge distance regardless of the box's real size. The
+  // thinnest axis is that mandatory exclusion, same as before.
+  //
+  // But a floor or baseboard is thin along exactly ONE axis, while sash joinery
+  // (stiles, muntins, casing, the sill board) is moulding: thin along TWO axes at
+  // once. Leaving a second thin axis in the min() caps its own edge distance at its
+  // own tiny half-extent -- a 0.17ft-wide stile can never read further than 0.085ft
+  // from its own edge on that axis, and since it has no interior vertex either (its
+  // width clears no aoSegments() threshold), EVERY vertex sits at that 0.085ft
+  // extreme, zeroing the edge distance uniformly regardless of the genuine gradient
+  // its actual length has room for. So any OTHER axis that is independently thin
+  // (at or under AO_DEPTH_FT) is excluded too -- except never all three: a box thin
+  // on every axis still needs one axis left to darken uniformly toward AO_MIN.
   const thinnest = half.indexOf(Math.min(...half));
+  const excluded = new Set<number>([thinnest]);
+  for (let axis = 0; axis < 3; axis++) {
+    if (axis !== thinnest && half[axis]! <= AO_DEPTH_FT) excluded.add(axis);
+  }
+  if (excluded.size === 3) excluded.delete(half.indexOf(Math.max(...half)));
   const colors = new Float32Array(position.count * 3);
   for (let i = 0; i < position.count; i++) {
     const p: [number, number, number] = [position.getX(i), position.getY(i), position.getZ(i)];
     let edge = Infinity;
     for (let axis = 0; axis < 3; axis++) {
-      if (axis === thinnest) continue;
+      if (excluded.has(axis)) continue;
       edge = Math.min(edge, half[axis]! - Math.abs(p[axis]!));
     }
     const t = Math.min(1, Math.max(0, edge / AO_DEPTH_FT));
@@ -694,6 +712,11 @@ export function doorLeafSlabs(
     const target = byId.get(targetId ?? "");
     if (!target) continue; // neither name is a room this suite has modelled
     const isEntry = !byId.has(o.connects[1] ?? "");
+    // Only the suite's own entry gets a leaf. Every interior doorway stays a
+    // plain open gap -- no leaf, no casing, no threshold board (see the
+    // trimOpenings filter in buildSuiteGeometry()) -- so the front door is the
+    // only door left visible anywhere in the suite.
+    if (!isEntry) continue;
     const w = walls.find((x) => x.id === o.wallId);
     // A hidden wall is not drawn -- see the note on the main wall loop in
     // buildSuiteGeometry() -- and its leaf goes with it, for the same reason:
@@ -801,6 +824,14 @@ function buildSuiteGeometry(params: SuiteParams, hidden: ReadonlySet<string>): S
   const wallH = params.ceiling;
   const ceilingH = floor + params.ceiling;
 
+  // Casing and threshold render off THIS list, not `openings` -- every interior
+  // door is dropped from it (its wall band still gets cut open by `openings`
+  // below, so the doorway stays walkable), leaving the suite's own entry as the
+  // only door with a casing or a threshold board anywhere in the suite. See
+  // doorLeafSlabs()'s matching `isEntry` skip for the leaf itself.
+  const roomIds = new Set(suite.rooms.map((r) => r.id));
+  const trimOpenings = openings.filter((o) => o.kind !== "door" || !roomIds.has(o.connects[1] ?? ""));
+
   const oak: Slab[] = [];
   const bare: Slab[] = [];
   const mark: Slab[] = [];
@@ -853,13 +884,14 @@ function buildSuiteGeometry(params: SuiteParams, hidden: ReadonlySet<string>): S
     const sash = sashSlabs(w, cuts, suite.rooms, floor);
     sashJoinery.push(...sash.joinery);
     glazing.push(...sash.glass);
-    const trim = roomTrimSlabs(w, cuts, suite.rooms, floor, wallH);
+    const trimCuts = cutsFor(w, trimOpenings, wallH);
+    const trim = roomTrimSlabs(w, trimCuts, suite.rooms, floor, wallH);
     sashJoinery.push(...trim.joinery);
     cornice.push(...trim.plaster);
     // Threshold boards are oak, same as the floor either side of them, so they
     // join the SAME merged geometry rather than opening a mesh of their own --
     // the doorway reads as two rooms without costing a draw call for it.
-    oak.push(...thresholdSlabs(w, cuts, floor));
+    oak.push(...thresholdSlabs(w, trimCuts, floor));
     if (bath) tile.push(...bathWainscotSlab(w, cuts, bath, floor));
   }
   // Fixtures (P14 row 9), walked once like the leaf below rather than per wall: they
@@ -989,16 +1021,6 @@ function useSuitePalette(opacity: number) {
 
 const NO_WALLS: ReadonlySet<string> = new Set();
 
-/**
- * Callbacks for a Suite mounted without an editor above it.
- *
- * Module constants rather than inline arrows, so that a Suite rendered read-only --
- * which is every stage before 5, and every test that mounts it for its geometry -- does
- * not hand DragLayer a new function identity on every render and defeat its memos.
- */
-const NO_SELECT = () => {};
-const NO_RESULT = () => {};
-
 /** Two sets of wall ids, compared by content. */
 function sameWalls(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
   if (a.size !== b.size) return false;
@@ -1086,10 +1108,6 @@ export function Suite({
   pieces,
   cutaway = "none",
   furniture = true,
-  edit = false,
-  selected = null,
-  onSelect,
-  onResult,
   onHiddenWalls,
 }: {
   visible: boolean;
@@ -1099,11 +1117,6 @@ export function Suite({
   pieces: Piece[];
   cutaway?: CutawayMode;
   furniture?: boolean;
-  /** Whether the pointer can pick up and move a piece. */
-  edit?: boolean;
-  selected?: string | null;
-  onSelect?: (id: string | null) => void;
-  onResult?: (id: string, r: DragResult) => void;
   /** Reported upward so the HUD can say what is currently hidden. */
   onHiddenWalls?: (ids: ReadonlySet<string>) => void;
 }) {
@@ -1175,24 +1188,6 @@ export function Suite({
       {furniture ? (
         <Furniture opacity={opacity} params={params} yaw={geo.yaw} pieces={pieces} />
       ) : null}
-      {/* The drag layer is mounted HERE and not in Experience, because DragLayer's
-          contract is that its suite, openings, pieces and yaw all describe the same
-          params -- drag.ts throws if an opening names a wall the suite has not got.
-          This component already holds all four for one `params`, so passing them from
-          one place is what makes disagreement impossible rather than merely unlikely.
-          `shape` and `geo.yaw` come from the same memo chain the walls were built
-          from. */}
-      <DragLayer
-        enabled={edit && visible && opacity > 0.99}
-        params={params}
-        suite={shape.suite}
-        pieces={pieces}
-        openings={shape.openings}
-        yaw={geo.yaw}
-        selected={selected}
-        onSelect={onSelect ?? NO_SELECT}
-        onResult={onResult ?? NO_RESULT}
-      />
     </group>
   );
 }

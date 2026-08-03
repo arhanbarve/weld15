@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import * as THREE from "three";
-import { buildSuite, DEFAULT_PARAMS, type Rect } from "@/geo/rooms";
+import { buildSuite, DEFAULT_PARAMS } from "@/geo/rooms";
 import { buildWalls } from "@/geo/walls";
 import { suiteToThree, floorLevel } from "@/geo/place";
 import {
@@ -182,59 +182,10 @@ describe("door leaf placement in the world", () => {
       : [new THREE.Vector3(0, 0, -s.dv / 2), new THREE.Vector3(0, 0, s.dv / 2)];
   }
 
-  /** A room's footprint as a world-space quad, corners in suiteToThree()'s own
-   *  frame -- the same frame toWorldXZ() returns, so pointInPolygon() can
-   *  compare the two directly with no intermediate frame at all. */
-  function worldQuad(r: Rect): [number, number][] {
-    const corners: [number, number][] = [
-      [r.u, r.v],
-      [r.u + r.du, r.v],
-      [r.u + r.du, r.v + r.dv],
-      [r.u, r.v + r.dv],
-    ];
-    return corners.map(([u, v]) => {
-      const w = suiteToThree(u, v, floor, params);
-      return [w[0], w[2]] as [number, number];
-    });
-  }
-
   const closed = doorLeafSlabs(walls, openings, suite.rooms, floor, wallH, new Set(), 0);
   const open = doorLeafSlabs(walls, openings, suite.rooms, floor, wallH, new Set(), 100);
 
-  /**
-   * Which room a door's leaf swings against, mirroring doorLeafSlabs()'s own
-   * fallback: every interior door names a real room second (`connects[1]`);
-   * the suite's own entry names "outside" (walk.ts's token for the
-   * unmodelled stair hall) there, and hangs its leaf against `connects[0]`
-   * (the hall) instead, nearly shut -- P14 row 3, ENTRY_AJAR_DEG.
-   */
-  function targetOf(o: (typeof openings)[number]): Rect | undefined {
-    const id = byId.has(o.connects[1] ?? "") ? o.connects[1] : o.connects[0];
-    return byId.get(id ?? "");
-  }
-
-  const doorsWithLeaves = openings.filter((o) => o.kind === "door" && targetOf(o));
-  const entryIdx = doorsWithLeaves.findIndex((o) => !byId.has(o.connects[1] ?? ""));
-
-  it("produces one leaf per door opening -- every door in this suite names a real room on one side or the other", () => {
-    expect(open.length).toBe(doorsWithLeaves.length);
-    expect(closed.length).toBe(open.length);
-    expect(open.length).toBeGreaterThan(0);
-  });
-
-  it("hangs the suite's own entry nearly shut, not wide open like the rest", () => {
-    expect(entryIdx, "no door in this suite names an unmodelled room").toBeGreaterThanOrEqual(0);
-    const [aClosed, bClosed] = worldEnds(closed[entryIdx]!);
-    const [aOpen, bOpen] = worldEnds(open[entryIdx]!);
-    const distA = Math.hypot(aOpen.x - aClosed.x, aOpen.z - aClosed.z);
-    const distB = Math.hypot(bOpen.x - bClosed.x, bOpen.z - bClosed.z);
-    const swing = Math.max(distA, distB);
-    // A leaf's free end sweeps close to leafW*sin(angle) from its 0 deg pose.
-    // At 100 deg (every interior door) that is ~2.8 ft; at ENTRY_AJAR_DEG (12
-    // deg) it is ~0.6 ft. Asserting well under the interior figure is the
-    // point: the entry reads as barely open, not as a fire door propped wide.
-    expect(swing, `entry leaf swung ${swing.toFixed(2)} ft, as far as an interior door`).toBeLessThan(1);
-  });
+  const entryOpening = openings.find((o) => o.kind === "door" && !byId.has(o.connects[1] ?? ""));
 
   /** Both ends of a Slab's long axis, in WORLD (x, z), as a fixed-size tuple --
    *  `.map()` on a tuple loses its tuple-ness in TS, which is what made the
@@ -245,72 +196,27 @@ describe("door leaf placement in the world", () => {
     return [toWorldXZ(a, s), toWorldXZ(b, s)];
   }
 
-  it("keeps every leaf's hinge fixed while its free end swings a real distance", () => {
-    for (let i = 0; i < open.length; i++) {
-      const [aClosed, bClosed] = worldEnds(closed[i]!);
-      const [aOpen, bOpen] = worldEnds(open[i]!);
-      const distA = Math.hypot(aOpen.x - aClosed.x, aOpen.z - aClosed.z);
-      const distB = Math.hypot(bOpen.x - bClosed.x, bOpen.z - bClosed.z);
-      expect(Math.min(distA, distB), `leaf ${i}: hinge moved`).toBeLessThan(0.2);
-      // The entry swings only ENTRY_AJAR_DEG, not OPEN_DEG -- its own "hangs
-      // nearly shut" test above covers the magnitude; this loop still checks
-      // its hinge stays put, which does not depend on the angle.
-      if (i === entryIdx) continue;
-      expect(Math.max(distA, distB), `leaf ${i}: free end barely moved`).toBeGreaterThan(1.5);
-    }
+  it("produces exactly one leaf -- the suite's own entry -- and none for any interior door", () => {
+    expect(entryOpening, "no door in this suite names an unmodelled room").toBeDefined();
+    expect(open.length).toBe(1);
+    expect(closed.length).toBe(1);
+    const interiorDoors = openings.filter((o) => o.kind === "door" && o.id !== entryOpening!.id);
+    expect(interiorDoors.length, "this suite should still have interior doorways, just no leaves for them").toBeGreaterThan(0);
   });
 
-  /**
-   * Which case (alongV, which side of the band the target room sits on) each
-   * emitted leaf actually is, derived the same way Suite.tsx's own
-   * roomIsOnLowSide() does -- so this test does not have to hard-code which
-   * array index belongs to which door, only assert that every case this
-   * suite's doors actually produce is covered by at least one leaf.
-   */
-  function caseOf(o: (typeof openings)[number]): { alongV: boolean; roomLow: boolean } | null {
-    const target = targetOf(o);
-    if (!target) return null;
-    const w = walls.find((x) => x.id === o.wallId)!;
-    const alongV = w.dv >= w.du;
-    const mid = alongV ? w.u + w.du / 2 : w.v + w.dv / 2;
-    const centre = alongV ? target.u + target.du / 2 : target.v + target.dv / 2;
-    return { alongV, roomLow: centre <= mid };
-  }
-
-  const cases = doorsWithLeaves.map((o, i) => ({ o, i, c: caseOf(o)! }));
-  const seen = new Set(cases.map((c) => `${c.c.alongV}:${c.c.roomLow}`));
-
-  it("this suite's doors exercise both alongV values and both room sides", () => {
-    // Confirms the fixture is testing what it claims to: at least one door on
-    // an alongV band with its target on the low side, one with it on the
-    // high side (the reflection branch), and one on a !alongV band.
-    expect(seen.has("true:true"), "no alongV, room-low case").toBe(true);
-    expect(seen.has("true:false"), "no alongV, room-high case").toBe(true);
-    expect(seen.has("false:true"), "no !alongV, room-low case").toBe(true);
+  it("hangs the suite's own entry nearly shut, not wide open", () => {
+    const [aClosed, bClosed] = worldEnds(closed[0]!);
+    const [aOpen, bOpen] = worldEnds(open[0]!);
+    const distA = Math.hypot(aOpen.x - aClosed.x, aOpen.z - aClosed.z);
+    const distB = Math.hypot(bOpen.x - bClosed.x, bOpen.z - bClosed.z);
+    expect(Math.min(distA, distB), "entry leaf: hinge moved").toBeLessThan(0.2);
+    const swing = Math.max(distA, distB);
+    // A leaf's free end sweeps close to leafW*sin(angle) from its 0 deg pose.
+    // At ENTRY_AJAR_DEG (12 deg) that is ~0.6 ft, well under a wide-open
+    // door's ~2.8 ft -- the point being that the entry reads as barely open,
+    // not as a fire door propped wide.
+    expect(swing, `entry leaf swung ${swing.toFixed(2)} ft, as far as a wide-open door`).toBeLessThan(1);
   });
-
-  for (const { o, i, c } of cases) {
-    // The entry is excluded here: at only ENTRY_AJAR_DEG (12 deg), the "free"
-    // end and the hinge end are both within a foot of the closed pose, and
-    // distinguishing which is which by "which moved more" -- fine at the
-    // interior doors' full 100 deg swing -- is noise at that scale. Its own
-    // "hangs nearly shut" test above checks the magnitude that actually
-    // matters for this one door without needing to pick a side.
-    if (i === entryIdx) continue;
-    it(`${o.id} (${o.connects.join("-")}), alongV=${c.alongV} roomLow=${c.roomLow}: open leaf's free end lands in its target room`, () => {
-      const target = targetOf(o)!;
-      const quad = worldQuad(target);
-      const [aClosed, bClosed] = worldEnds(closed[i]!);
-      const [aOpen, bOpen] = worldEnds(open[i]!);
-      const distA = Math.hypot(aOpen.x - aClosed.x, aOpen.z - aClosed.z);
-      const distB = Math.hypot(bOpen.x - bClosed.x, bOpen.z - bClosed.z);
-      const far = distA >= distB ? aOpen : bOpen;
-      expect(
-        pointInPolygon([far.x, far.z], quad),
-        `${o.id}'s free end (${far.x.toFixed(1)}, ${far.z.toFixed(1)}) is not inside ${target.id}`,
-      ).toBe(true);
-    });
-  }
 });
 
 /**

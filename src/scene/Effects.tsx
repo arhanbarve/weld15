@@ -35,10 +35,18 @@ import { useStore } from "@/state/store";
  * the load-bearing walk and perf suites for a subtle contact-shadow improvement.
  * The environment map and the plaster tooth (both one-time costs, not a
  * per-frame pass) stayed.
+ *
+ * `active` IS FALSE AT THE LAST STAGE, ON PURPOSE. The threshold is tuned for Weld's
+ * white highlighted edges seen from outside (stages 0-4, where `visibility()`'s own
+ * `weld` window lives) -- indoors, the same 0.75 cutoff catches the bathroom's bright
+ * porcelain and its mirror (materials.ts's own `mirror`, which reflects a bright
+ * environment map by design) and blooms the sink, a fixture this effect was never
+ * meant to touch. Suite.tsx's interior only ever reaches full opacity at the last
+ * stage, so that is exactly where this effect needs to stand down.
  */
-export function Effects() {
+export function Effects({ active = true }: { active?: boolean }) {
   const reduced = useStore((s) => s.reducedMotion);
-  if (reduced) return null;
+  if (reduced || !active) return null;
   return (
     <EffectComposer>
       <Bloom luminanceThreshold={0.75} luminanceSmoothing={0.25} intensity={0.7} mipmapBlur />

@@ -1,14 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { FLY_DOWN_END, LAST_STAGE, STAGES, pieceLabel, useStore, type StageId } from "@/state/store";
+import { FLY_DOWN_END, LAST_STAGE, STAGES, useStore, type StageId } from "@/state/store";
 import { buildSuite } from "@/geo/rooms";
 import { footprintArea } from "@/geo/walls";
 import { Panel } from "./Panel";
 import { STAGE3_CLAMP, clampOrbit, orbitOf, type Orbit } from "@/scene/orbit";
 import { keyframes, visibility } from "@/scene/stages";
 import { fromJourney } from "@/scene/journey";
-import type { NudgeDir } from "@/geo/drag";
 import { UrlSync } from "./UrlSync";
 import { Sources } from "./Sources";
 import { ImageryChip } from "./ImageryChip";
@@ -145,28 +144,6 @@ const NUDGE_BY_KEY: Record<string, Nudge> = {
 };
 
 /**
- * Arrow keys to a piece move, in the SUITE frame.
- *
- * u is inward from the facade and v is north along the section, so the mapping to
- * screen arrows is a choice and it is made here once. Up and down are v, because the
- * section is the long axis and the camera at stage 5 looks along it; left and right are
- * u. The pointer path lands in the same coordinates through cameraInSuite(), so the two
- * inputs move a piece the same way.
- *
- * `r` rotates. A quarter turn is drag.ts's tryRotate() and it is on a letter rather
- * than on a modified arrow because a modifier plus an arrow is a screen-reader
- * shortcut on more than one platform.
- */
-const PIECE_KEYS: Record<string, NudgeDir | "rotate"> = {
-  ArrowUp: "v+",
-  ArrowDown: "v-",
-  ArrowRight: "u+",
-  ArrowLeft: "u-",
-  r: "rotate",
-  R: "rotate",
-};
-
-/**
  * Apply one press to the orbit.
  *
  * The orbit is read from the store HERE rather than taken from a render, for the
@@ -234,7 +211,6 @@ export function Hud() {
   const hour = useStore((s) => s.hour);
   const setDate = useStore((s) => s.setDate);
   const setHour = useStore((s) => s.setHour);
-  const selected = useStore((s) => s.selected);
   const params = useStore((s) => s.params);
   const orbit = useStore((s) => s.orbit);
   const setOrbit = useStore((s) => s.setOrbit);
@@ -246,12 +222,8 @@ export function Hud() {
   // the panel's own controls take counts. Read here rather than inside A11yAlt because
   // that component takes every fact as a prop and imports no store -- its header says why.
   const pieces = useStore((s) => s.pieces);
-  const setParams = useStore((s) => s.setParams);
   const notice = useStore((s) => s.notice);
-  const select = useStore((s) => s.select);
   const setNotice = useStore((s) => s.setNotice);
-  const rotate = useStore((s) => s.rotate);
-  const nudgePiece = useStore((s) => s.nudge);
   const refit = useStore((s) => s.refit);
   const resetAll = useStore((s) => s.resetAll);
   /**
@@ -279,16 +251,6 @@ export function Hud() {
    */
   const suite = useMemo(() => buildSuite(params), [params]);
   const area = useMemo(() => footprintArea(suite), [suite]);
-
-  /**
-   * The selected piece's name, in words.
-   *
-   * Panel takes a label rather than an id because "bedA-bed-0" is a key, not a name, and
-   * the panel is the one place a person reads it. pieceLabel() lives in the store beside
-   * the refusal wording for the same reason: one spelling, so the button and the notice
-   * that follows it agree.
-   */
-  const selectedLabel = selected ? pieceLabel(suite, selected) : null;
 
   /**
    * Put the current link on the clipboard, and say what happened either way.
@@ -380,60 +342,17 @@ export function Hud() {
   }, [stage, orbit]);
 
   /**
-   * Arrow keys move the SELECTED PIECE, once there is one and once the room is on
-   * screen.
-   *
-   * On the window rather than on a container, because the piece being moved is in the
-   * canvas and the canvas cannot hold focus meaningfully -- there is nothing inside it
-   * to focus. That makes the two guards below load-bearing rather than defensive:
-   *
-   *   the stage gate  arrow keys belong to the orbit group at stage 3, which handles
-   *                   them on its own element. Two handlers claiming ArrowLeft would
-   *                   orbit the camera AND move a bed on one press.
-   *   the target gate a range input uses arrows to change its own value, and every
-   *                   dimension in the panel is a range input. Claiming the key while
-   *                   one has focus would make the sliders unusable by keyboard, which
-   *                   is the exact accessibility failure this project keeps finding.
-   *
-   * It calls the same nudge() the panel's buttons call, which is the same nudge()
-   * drag.ts exports -- one code path, three inputs. docs/phases/P6.md's risk table
-   * names "keyboard path is an afterthought" and this is the mitigation it asks for.
-   */
-  useEffect(() => {
-    // NO walking guard, and this is D6's rule, not an oversight: FirstPerson.tsx also
-    // claims the arrow keys at stage 5, but Step 4 made IT yield -- it reads `selected`
-    // from the store at frame time and skips the arrows itself when a piece is selected.
-    // So `selected` is the single arbiter of which handler owns an arrow press, not a
-    // `walking` boolean here; keyboard nudge and walking coexist without conflict because
-    // there is exactly one place that decides, and this effect does not need to be it.
-    if (stage !== LAST_STAGE || !selected) return;
-    const onKey = (e: KeyboardEvent) => {
-      const dir = PIECE_KEYS[e.key];
-      if (!dir) return;
-      const el = e.target as HTMLElement | null;
-      const tag = el?.tagName;
-      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || el?.isContentEditable) return;
-      e.preventDefault();
-      if (dir === "rotate") useStore.getState().rotate(selected);
-      else useStore.getState().nudge(selected, dir);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [stage, selected]);
-
-  /**
    * `[` and `]` step the stage, which MASTER.md asks for by name.
    *
    * On the window for the reason the piece keys above are: the thing being moved is the
    * camera and the canvas has nothing inside it to focus. The guard set is therefore
    * load-bearing in the same way, and it is deliberately NOT the same set:
    *
-   *   NO stage gate    and this is the difference worth stating. The piece handler is
-   *                    mounted only at the last stage because arrow keys belong to the
+   *   NO stage gate    and this is the difference worth stating. Arrow keys belong to the
    *                    orbit group at stage 3 and to the walker at stage 5. Stage
    *                    navigation is meaningful at every one of the six, and no other
-   *                    handler in the app claims a bracket -- ORBIT_CONTROLS' keys and
-   *                    PIECE_KEYS above are the whole set, and neither contains one.
+   *                    handler in the app claims a bracket -- ORBIT_CONTROLS' keys are
+   *                    the whole set, and it does not contain one.
    *   the target gate  same gate, same reason, and here it is the one that matters most:
    *                    `[` typed into a field must never move the camera. The stage-4
    *                    threshold slider and the two sun controls are all <input>, and a
@@ -451,10 +370,10 @@ export function Hud() {
    *                    platform. Claiming the unmodified key only means a viewer going
    *                    back through history does not also lose their stage on the way.
    *
-   * `e.key`, not `e.code`: MASTER names the characters, and PIECE_KEYS and NUDGE_BY_KEY
-   * are both keyed the same way, so a layout that puts `[` elsewhere still works. `{` and
-   * `}` are absent on purpose -- they are a different keystroke, unlike `=`/`+`, where
-   * ORBIT_CONTROLS carries both because the UNSHIFTED press is the one people make.
+   * `e.key`, not `e.code`: MASTER names the characters, so a layout that puts `[`
+   * elsewhere still works. `{` and `}` are absent on purpose -- they are a different
+   * keystroke, unlike `=`/`+`, where ORBIT_CONTROLS carries both because the UNSHIFTED
+   * press is the one people make.
    */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -481,11 +400,10 @@ export function Hud() {
    * ON THE WINDOW because the six buttons that used to carry them are gone -- P10 took every
    * on-screen control off the canvas at this stage -- and the canvas cannot hold focus
    * meaningfully: there is nothing inside it to focus. Which is what makes the guards
-   * load-bearing rather than defensive, exactly as they are on the two handlers above:
+   * load-bearing rather than defensive, exactly as they are on the handler above:
    *
-   *   the stage gate   arrow keys belong to the walker at stage 5 and to a selected piece
-   *                    at stage 5; mounting by stage rather than branching inside keeps one
-   *                    owner per key per stage.
+   *   the stage gate   arrow keys belong to the walker at stage 5; mounting by stage
+   *                    rather than branching inside keeps one owner per key per stage.
    *   the target gate  every dimension in the panel is a range input, the master scrubber is
    *                    one, and both sun controls are. Claiming an arrow while one has focus
    *                    would make them unusable by keyboard, which is the exact failure this
@@ -778,8 +696,6 @@ export function Hud() {
         <Panel
           open={panelOpen}
           onToggle={() => setPanelOpen((v) => !v)}
-          params={params}
-          onParam={setParams}
           occupancy={occupancy}
           onOccupancy={setOccupancy}
           cutaway={cutaway}
@@ -788,11 +704,6 @@ export function Hud() {
           // which a cutaway can change anything. Read from the same predicate the scene
           // uses rather than written out as `stage >= 3`, so the two cannot drift.
           cutawayEnabled={visibility(stage).interior}
-          selected={selected}
-          selectedLabel={selectedLabel}
-          onRotate={() => selected && rotate(selected)}
-          onNudge={(dir) => selected && nudgePiece(selected, dir)}
-          onDeselect={() => select(null)}
           notice={notice}
           onRefit={refit}
           onCopyLink={copyLink}

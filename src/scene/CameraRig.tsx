@@ -206,6 +206,7 @@ export function CameraRig() {
   const setHighContrast = useStore((s) => s.setHighContrast);
   const orbit = useStore((s) => s.orbit);
   const orbitStage = useStore((s) => s.orbitStage);
+  const orbitSeedT = useStore((s) => s.orbitSeedT);
   const setOrbit = useStore((s) => s.setOrbit);
   const setJourney = useStore((s) => s.setJourney);
   const setScrubbing = useStore((s) => s.setScrubbing);
@@ -429,13 +430,13 @@ export function CameraRig() {
 
     // Everything but the walker is journeyPose's (scene/pose.ts) job now -- lifted verbatim
     // from this branch, see that file's own header for why and tests/pose.test.ts for the
-    // equivalence fence. `orbit`/`orbitStage` pass straight through: journeyPose reads the
-    // exact gate this component always applied (a live orbit only counts when it belongs to
-    // the CURRENT stage).
+    // equivalence fence. `orbit`/`orbitStage`/`orbitSeedT` pass straight through: journeyPose
+    // reads the exact gate this component always applied (a live orbit only counts when it
+    // belongs to the CURRENT stage), plus the seed t its own decay fades the hold against.
     const posed =
       walker !== null
         ? { ...firstPersonPose(walker, params), fov: kf[LAST_STAGE].fov }
-        : journeyPose(kf, stage, t, reduced, orbit, orbitStage);
+        : journeyPose(kf, stage, t, reduced, orbit, orbitStage, orbitSeedT);
 
     const wantPos = new THREE.Vector3(...posed.position);
     const wantTarget = new THREE.Vector3(...posed.target);

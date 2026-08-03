@@ -1,29 +1,13 @@
 import { create } from "zustand";
-import { placeIsLegal } from "@/geo/collide";
-// tryMove() is deliberately absent: the pointer path calls it in DragLayer, where the
-// candidate position lives, and hands the result here through commit(). Calling it a
-// second time in the store would let the ghost and the stored piece disagree about a
-// snap, which is the one discrepancy a drag cannot show you.
-import { nudge as nudgePiece, tryRotate, type DragCtx, type DragResult } from "@/geo/drag";
-import { layout, pieceBox, type Piece } from "@/geo/furniture";
-import {
-  buildSuite,
-  DEFAULT_PARAMS,
-  findOverlaps,
-  unreachableRooms,
-  type Suite,
-  type SuiteParams,
-} from "@/geo/rooms";
-import { buildWalls } from "@/geo/walls";
-import { MAX_SECTION_LENGTH } from "@/geo/place";
+import { layout, type Piece } from "@/geo/furniture";
+import { buildSuite, DEFAULT_PARAMS, type Suite, type SuiteParams } from "@/geo/rooms";
 import { CUTAWAY_MODES, type CutawayMode } from "@/scene/cutaway";
 // Value imports of two more scene modules, on the same footing as cutaway.ts above:
 // walk.ts and route.ts are deliberately three-free and say so in their headers, so this
 // does not drag the renderer into the state layer -- tests/place.test.ts walks the real
 // import graph and would fail if it did.
-import { insideSuite, isClear, walkContext, RADIUS, type WalkState } from "@/scene/walk";
+import { isClear, walkContext, RADIUS, type WalkState } from "@/scene/walk";
 import { HUB, places, standingPose } from "@/scene/route";
-import type { NudgeDir } from "@/geo/drag";
 // A value import of url.ts, and it does NOT close a cycle: url.ts imports this module
 // type-only, on purpose and with a comment saying so, and a type-only import erases
 // at runtime. What is bought is that the store's opening state and the format's
@@ -160,7 +144,7 @@ type Store = {
   /**
    * Whether the automatic descent is running.
    *
-   * NOT CARRIED BY A LINK, on the same argument `selected` and `firstPerson` are not: a link is
+   * NOT CARRIED BY A LINK, on the same argument `firstPerson` is not: a link is
    * a place, and "currently moving" is not a place. A recipient of a shared URL should arrive at
    * the stop, not two seconds into a flight toward it.
    */
@@ -210,6 +194,21 @@ type Store = {
    * action routes through.
    */
   orbitStage: StageId | null;
+  /**
+   * The stage-local `t` at the moment `orbit` was last set, or null when `orbit` is.
+   *
+   * Stages 0-2 are a path: t drives how far along it the camera has flown, and wheel
+   * zoom is exactly that -- advancing t, not `orbit`. A drag freezes heading/pitch/
+   * range at whatever the path pose was at the moment it started, and without this
+   * field the freeze would hold literally forever: wheeling further would keep
+   * advancing t while the rendered pose stayed pinned to the drag's own t, reading as
+   * a zoom that has stopped working until the stage itself changes and the orbit is
+   * dropped outright -- a hard pop instead of the drag simply wearing off. pose.ts's
+   * pathStagePose reads `t - orbitSeedT` to fade the held orbit back to the live path
+   * pose over ORBIT_DECAY_SPAN, so resuming the wheel after a drag eases back to the
+   * guided framing instead of freezing or popping.
+   */
+  orbitSeedT: number | null;
 
   /**
    * How much of the shell is taken away so the plan can be read. Four modes, from
@@ -273,21 +272,17 @@ type Store = {
    * `firstPerson` is deliberately absent from url.ts's key() so no walk rewrites the
    * address bar sixty times a second.
    *
-   * NOT CARRIED BY A LINK, for the reason `selected` is not: it is where the recipient is
-   * standing, not what the model is.
+   * NOT CARRIED BY A LINK: it is where the recipient is standing, not what the
+   * model is.
    */
   firstPerson: FirstPerson | null;
-
-  /** The piece the panel and the keyboard act on, or null. */
-  selected: string | null;
 
   /**
    * The last thing that was refused or dropped, in words, or null.
    *
-   * A string and not a code, because there is exactly one consumer -- a live region
-   * -- and the wording depends on which ids came back from drag.ts. Cleared on the
-   * next successful action, so it reads as the state of the last attempt rather than
-   * as a log.
+   * A string and not a code, because there is exactly one consumer -- a live region.
+   * Cleared on the next successful action, so it reads as the state of the last
+   * attempt rather than as a log.
    */
   notice: string | null;
 
@@ -350,14 +345,12 @@ type Store = {
   setHighContrast: (v: boolean) => void;
   /** Set from `pointerlockchange`. See `pointerLocked` above for why it lives nowhere else. */
   setPointerLocked: (v: boolean) => void;
-  setParams: (p: Partial<SuiteParams>) => void;
   setDate: (d: string) => void;
   setHour: (h: number) => void;
   setOrbit: (o: Orbit | null) => void;
   setCutaway: (v: CutawayMode) => void;
 
   setOccupancy: (n: number) => void;
-  select: (id: string | null) => void;
   setNotice: (m: string | null) => void;
 
   /** Stand up in the suite: seed the walker at the hall, or say why nobody can. */
@@ -365,20 +358,6 @@ type Store = {
   /** One frame of walking, from FirstPerson.tsx. */
   setWalk: (s: FirstPerson) => void;
 
-  /**
-   * Commit a move the pointer path has already had accepted by drag.ts.
-   *
-   * The DragResult arrives rather than being recomputed, so the piece that is stored
-   * is the one the ghost showed: recomputing here would run tryMove() a second time
-   * against a context assembled a second way, and the two could disagree about a
-   * snap. A refusal is worded and dropped, which is what makes a rejection visible
-   * instead of swallowed.
-   */
-  commit: (id: string, r: DragResult) => void;
-  /** Rotate the selected piece a quarter turn, or say why not. */
-  rotate: (id: string) => void;
-  /** One grid step, the keyboard's path and the panel buttons' path both. */
-  nudge: (id: string, dir: NudgeDir) => void;
   /** Throw the arrangement away and re-run layout() at the current occupancy. */
   refit: () => void;
   /** Everything back to the shipped defaults, arrangement included. */
@@ -416,126 +395,12 @@ export const OCCUPANCY_RANGE = { min: 1, max: 4 } as const;
  */
 export const DEFAULT_OCCUPANCY = 4;
 
-/**
- * drag.ts's context for a params/pieces pair.
- *
- * buildWalls() is called for the openings and not for the walls: drag.ts needs to
- * know where the doorways are so that blocks-door can be checked, and there is no
- * cheaper way to ask. It is pure arithmetic over seven rooms, so calling it per
- * action rather than caching it is not the expensive part of a drag; a stale cache
- * behind a slider would be.
- */
-function ctxOf(params: SuiteParams, pieces: Piece[]): DragCtx {
-  const suite = buildSuite(params);
-  return { suite, pieces, openings: buildWalls(suite).openings };
-}
-
 /** "bedroom A bed 0" out of "bedA-bed-0", for anything a person has to read. */
 export function pieceLabel(suite: Suite, id: string): string {
   const p = /^(.+)-([a-z]+)-(\d+)$/.exec(id);
   if (!p) return id;
   const room = suite.rooms.find((r) => r.id === p[1]);
   return `${room ? room.label : p[1]} ${p[2]} ${p[3]}`;
-}
-
-/**
- * A refusal in words, naming what it hit.
- *
- * drag.ts guarantees `against` is non-empty and is always ids, and documents the
- * shape per reason: the overlapped pieces for a collision, the room left for
- * outside-room, and for blocks-door the door followed by the two rooms it joins --
- * which is why that branch reads as a sentence about circulation rather than as a
- * list. Wording it here, once, rather than in the panel, is what keeps the pointer
- * path and the keyboard path saying the same thing about the same refusal.
- */
-function wordRefusal(suite: Suite, what: string, r: Extract<DragResult, { ok: false }>): string {
-  const name = (id: string) => suite.rooms.find((x) => x.id === id)?.label ?? id;
-  if (r.reason === "collision") {
-    return `${what} would overlap ${r.against.map((id) => pieceLabel(suite, id)).join(", ")}.`;
-  }
-  if (r.reason === "outside-room") {
-    return `${what} would leave ${name(r.against[0]!)}.`;
-  }
-  const [door, ...rooms] = r.against;
-  const between = rooms.length === 2 ? ` between ${name(rooms[0]!)} and ${name(rooms[1]!)}` : "";
-  return `${what} would block the door${between} (${door}).`;
-}
-
-/**
- * Whether a params patch describes a suite at all, and what is wrong if not.
- *
- * The four gates are the ones the project already relies on, in the order that puts
- * the cheapest first: a non-positive length, a section past Weld's waist, a room
- * whose extent has gone negative, rooms inside each other, and a room nothing can
- * reach. url.ts's suiteOf() runs the same set on the way in from a link, and the
- * reason it runs in two places is that the two doors are genuinely different: a link
- * is untrusted input and a slider is a person asking a question. What they share is
- * that neither may produce a suite a viewer cannot tell is broken.
- *
- * Returns the message rather than throwing, because the caller's job is to word it
- * and refuse -- not to fail.
- */
-function whyIllegal(params: SuiteParams): string | null {
-  for (const [k, v] of Object.entries(params)) {
-    if (typeof v === "number" && !(Number.isFinite(v) && v > 0)) {
-      return `${k} has to be a positive length.`;
-    }
-  }
-  if (params.sectionLength > MAX_SECTION_LENGTH) {
-    return (
-      `A ${params.sectionLength.toFixed(1)} ft section is wider than Weld's waist ` +
-      `(${MAX_SECTION_LENGTH.toFixed(1)} ft), so the facade would be drawn outside the building.`
-    );
-  }
-
-  let suite: Suite;
-  try {
-    suite = buildSuite(params);
-  } catch (e) {
-    return e instanceof Error ? e.message : "That suite cannot be built.";
-  }
-
-  const collapsed = suite.rooms.find((r) => !(r.du > 0) || !(r.dv > 0));
-  if (collapsed) return `${collapsed.label} would have no floor left.`;
-  const overlap = findOverlaps(suite.rooms)[0];
-  if (overlap) {
-    const label = (id: string) => suite.rooms.find((r) => r.id === id)?.label ?? id;
-    return `${label(overlap[0])} and ${label(overlap[1])} would overlap.`;
-  }
-  const stranded = unreachableRooms(suite);
-  if (stranded.length > 0) {
-    const label = (id: string) => suite.rooms.find((r) => r.id === id)?.label ?? id;
-    return `${stranded.map(label).join(", ")} could not be reached.`;
-  }
-  return null;
-}
-
-/**
- * The pieces that still stand up in a new suite, and the ones that do not.
- *
- * A slider that shrinks a bedroom under its beds has to either refuse or drop, and
- * say which -- docs/phases/P6.md names silently overlapping furniture as the failure.
- * Dropping is the right half of that choice for a legal suite: refusing would mean a
- * dimension the audit tags INFERRED could not be corrected at all while a bed
- * happened to be standing in the way, which is the opposite of what the sliders are
- * for. The names come back so the notice can say what went.
- *
- * Checked in the same order and by the same function as a drag, placeIsLegal(), so a
- * piece cannot survive a slider into a position the pointer would refuse.
- */
-function survivors(params: SuiteParams, pieces: Piece[]): { kept: Piece[]; lost: Piece[] } {
-  const suite = buildSuite(params);
-  const kept: Piece[] = [];
-  const lost: Piece[] = [];
-  for (const p of pieces) {
-    const room = suite.rooms.find((r) => r.id === p.room);
-    if (room && placeIsLegal(pieceBox(p), room, kept.filter((q) => q.room === p.room).map(pieceBox)).ok) {
-      kept.push(p);
-    } else {
-      lost.push(p);
-    }
-  }
-  return { kept, lost };
 }
 
 /**
@@ -588,13 +453,13 @@ function noRoomToStand(what: string): string {
  * reverse.
  */
 function orbitAfterStage(
-  s: { orbit: Orbit | null; orbitStage: StageId | null },
+  s: { orbit: Orbit | null; orbitStage: StageId | null; orbitSeedT: number | null },
   newStage: StageId,
-): { orbit: Orbit | null; orbitStage: StageId | null } {
+): { orbit: Orbit | null; orbitStage: StageId | null; orbitSeedT: number | null } {
   if ((newStage === 3 || newStage === 4) && s.orbitStage !== null && s.orbitStage !== newStage) {
-    return { orbit: null, orbitStage: null };
+    return { orbit: null, orbitStage: null, orbitSeedT: null };
   }
-  return { orbit: s.orbit, orbitStage: s.orbitStage };
+  return { orbit: s.orbit, orbitStage: s.orbitStage, orbitSeedT: s.orbitSeedT };
 }
 
 /**
@@ -603,8 +468,8 @@ function orbitAfterStage(
  * ONE IMPLEMENTATION FOR TWO CALLERS THAT MUST NOT DISAGREE: `enterFirstPerson()` below is
  * a thin wrapper over this, and so is every place a stage transition used to write
  * `firstPerson: null`. Writing the seed loop twice -- once for the button, once for the
- * seven transitions -- is exactly the kind of drift this file's own DragResult comment
- * warns about elsewhere: two computations of one answer, and no guarantee they agree.
+ * seven transitions -- is exactly the drift a shared helper exists to prevent: two
+ * computations of one answer, and no guarantee they agree.
  *
  * Null for every stage but LAST_STAGE, because standing is a property of being at stage 5
  * and not a thing any other stage has. Where it IS stage 5, this is `enterFirstPerson()`'s
@@ -643,11 +508,11 @@ export const useStore = create<Store>((set, get) => ({
   hour: DEFAULT_HOUR,
   orbit: null,
   orbitStage: null,
+  orbitSeedT: null,
   cutaway: "none",
   pieces: DEFAULT_SNAPSHOT.pieces,
   occupancy: DEFAULT_OCCUPANCY,
   firstPerson: null,
-  selected: null,
   notice: null,
   cuts: 0,
   scrubbing: false,
@@ -746,74 +611,6 @@ export const useStore = create<Store>((set, get) => ({
   // Same footing as setHighContrast just above: one writer, no validation, no notice, and
   // not reachable from a URL -- see `pointerLocked`'s own docblock for why.
   setPointerLocked: (pointerLocked) => set({ pointerLocked }),
-  /**
-   * Move a dimension, and answer for the furniture standing on it.
-   *
-   * Three outcomes, and the middle one is the whole point of the phase:
-   *   refused  the patch does not describe a suite. Nothing changes and the notice
-   *            says what would have been wrong. A viewer cannot tell a broken model
-   *            from a correct one by looking, so it must not be rendered at all.
-   *   dropped  the suite is legal but some piece no longer fits in it. The params
-   *            move, the piece goes, and the notice names it.
-   *   clean    the params move.
-   *
-   * The selection is cleared when what it pointed at has gone, because a panel
-   * offering to rotate a piece that is no longer in the room is worse than no panel.
-   */
-  setParams: (p) => {
-    const s = get();
-    const params = { ...s.params, ...p };
-    const bad = whyIllegal(params);
-    if (bad) {
-      set({ notice: `Refused: ${bad}` });
-      return;
-    }
-    const { kept, lost } = survivors(params, s.pieces);
-    const suite = buildSuite(params);
-    /**
-     * The VIEWER is furniture too, for this one purpose.
-     *
-     * A dimension slider can close a wall onto the position somebody is standing at, and
-     * walk.ts is explicit about the consequence: from a position that is not clear, step()
-     * returns where it started, every frame, forever. So the walker is checked against the
-     * new suite exactly as the pieces are, and RE-SEEDED with a sentence rather than left
-     * wedged -- walkerFor() is the same verified-seed loop enterFirstPerson() uses, so a
-     * slider that closes one room does not strand the viewer as long as another room in
-     * the suite is still standable. Only when nothing is does this fall back to the
-     * existing refusal wording and a null walker -- the same choice, and for the same
-     * reason, as the pieces above: refusing the slider itself would mean a dimension the
-     * audit tags INFERRED could not be corrected while somebody happened to be standing in
-     * the way.
-     *
-     * The context is built only when there is a walker to check, because this runs on
-     * every pointer move of every one of the fifteen sliders.
-     */
-    const wedged =
-      s.firstPerson !== null &&
-      !(() => {
-        const ctx = walkContext(suite);
-        return insideSuite(s.firstPerson!.p, ctx) && isClear(s.firstPerson!.p, ctx);
-      })();
-    const reseed = wedged ? walkerFor(LAST_STAGE, params) : null;
-    const dropped =
-      lost.length === 0
-        ? null
-        : `${lost.map((q) => pieceLabel(suite, q.id)).join(", ")} no longer ` +
-          `${lost.length === 1 ? "fits" : "fit"} and ${lost.length === 1 ? "was" : "were"} removed.`;
-    const stood = !wedged
-      ? null
-      : reseed
-        ? `A wall closed onto where you were standing, so you were moved to ` +
-          `${suite.rooms.find((r) => r.id === reseed.room)?.label ?? "another room"}.`
-        : `Refused: ${noRoomToStand("Every room in this suite")}`;
-    set({
-      params,
-      pieces: kept,
-      firstPerson: wedged ? reseed : s.firstPerson,
-      selected: s.selected && kept.some((q) => q.id === s.selected) ? s.selected : null,
-      notice: [dropped, stood].filter((x) => x !== null).join(" ") || null,
-    });
-  },
   setDate: (date) => set({ date }),
   // Clamped like setT, and to 24 rather than 23: the top of the range is midnight
   // at the end of the day, which is a real reading of the clock and the one hour a
@@ -823,7 +620,8 @@ export const useStore = create<Store>((set, get) => ({
   // cannot import at runtime for the reason given on `orbit` above, and a second
   // implementation of the clamp is exactly the drift the clamp exists to stop.
   // CameraRig passes every value through clampOrbit before it arrives.
-  setOrbit: (orbit) => set((s) => ({ orbit, orbitStage: orbit ? s.stage : null })),
+  setOrbit: (orbit) =>
+    set((s) => ({ orbit, orbitStage: orbit ? s.stage : null, orbitSeedT: orbit ? s.t : null })),
   // Validated rather than trusted: this is reached from a URL as well as from a
   // button, and pick() in url.ts guards the wire format but not a later caller.
   setCutaway: (cutaway) =>
@@ -836,7 +634,6 @@ export const useStore = create<Store>((set, get) => ({
     set({
       occupancy: Math.min(OCCUPANCY_RANGE.max, Math.max(OCCUPANCY_RANGE.min, Math.round(n))),
     }),
-  select: (selected) => set({ selected }),
   setNotice: (notice) => set({ notice }),
 
   /**
@@ -846,11 +643,8 @@ export const useStore = create<Store>((set, get) => ({
    * with every stage transition below -- there is no spawn() in walk.ts and step()'s
    * guarantee is conditional on starting from a clear position, so a seed has to be
    * verified rather than assumed, and a dimension slider can leave the hall narrower than
-   * the walker is wide. What this adds over walkerFor() is the two things only a caller
-   * asking on purpose needs: a refusal written in words when nothing in the suite is
-   * standable, and dropping the selection, because the arrow keys change hands -- Hud.tsx
-   * gives them to the walker while first person is on, so a piece left selected would be a
-   * piece whose keyboard controls have silently stopped working.
+   * the walker is wide. What this adds over walkerFor() is the refusal written in words
+   * when nothing in the suite is standable.
    *
    * NO NOTICE ON SUCCESS (D7). The keys are written down in the HUD row already; a toast
    * on every arrival at stage 5 -- every stage change, every `]`, every link opened there
@@ -865,7 +659,6 @@ export const useStore = create<Store>((set, get) => ({
     }
     set({
       firstPerson: seed,
-      selected: null,
       // Walking and flying both own the camera. FirstPerson.tsx writes the walker and
       // CameraRig copies it, so two things must not own the camera at once.
       flying: false,
@@ -884,34 +677,6 @@ export const useStore = create<Store>((set, get) => ({
   // header exists to forbid.
   setWalk: (firstPerson) => set({ firstPerson }),
 
-  commit: (id, r) => {
-    const s = get();
-    if (r.ok) {
-      set({
-        pieces: s.pieces.map((p) => (p.id === id ? r.piece : p)),
-        selected: id,
-        notice: null,
-      });
-      return;
-    }
-    const suite = buildSuite(s.params);
-    set({ notice: wordRefusal(suite, pieceLabel(suite, id), r) });
-  },
-
-  rotate: (id) => {
-    const s = get();
-    const piece = s.pieces.find((p) => p.id === id);
-    if (!piece) return;
-    get().commit(id, tryRotate(piece, ctxOf(s.params, s.pieces)));
-  },
-
-  nudge: (id, dir) => {
-    const s = get();
-    const piece = s.pieces.find((p) => p.id === id);
-    if (!piece) return;
-    get().commit(id, nudgePiece(piece, dir, ctxOf(s.params, s.pieces)));
-  },
-
   /**
    * Re-run layout() at the current params and bed count.
    *
@@ -926,7 +691,6 @@ export const useStore = create<Store>((set, get) => ({
     const s = get();
     set({
       pieces: layout(buildSuite(s.params), { beds: s.occupancy }),
-      selected: null,
       notice: `Re-fitted for ${s.occupancy} student${s.occupancy === 1 ? "" : "s"}.`,
     });
   },
@@ -944,11 +708,11 @@ export const useStore = create<Store>((set, get) => ({
       hour: DEFAULT_HOUR,
       orbit: null,
       orbitStage: null,
+      orbitSeedT: null,
       // params are being reset too, so the seed has to use the NEW ones -- get().stage
       // rather than a captured value, since resetAll is a plain object literal and there
       // is no function-form set() argument to read it off.
       firstPerson: walkerFor(get().stage, DEFAULT_PARAMS),
-      selected: null,
       notice: "Back to the sourced dimensions and the shipped fit-out.",
       cuts: 0,
       scrubbing: false,
@@ -957,8 +721,8 @@ export const useStore = create<Store>((set, get) => ({
   /**
    * The URL's boot path: eight fields at once, no validation.
    *
-   * No validation because decode() has already run all of it -- the same suite gates
-   * whyIllegal() runs, plus placeIsLegal() per piece -- and re-checking here would be
+   * No validation because decode() has already run all of it -- url.ts's own suiteOf()
+   * runs the same suite gates, plus placeIsLegal() per piece -- and re-checking here would be
    * a second implementation of a contract that is already property-tested. What this
    * must NOT touch is reducedMotion -- or highContrast, which arrived later on exactly
    * the same footing: both come from the recipient's own media query, and url.ts refuses
@@ -979,18 +743,20 @@ export const useStore = create<Store>((set, get) => ({
       // link's own `stage` field names is, by construction, the stage this orbit was
       // captured at -- there is nowhere else it could have come from.
       orbitStage: s.orbit ? s.stage : null,
+      // Same reasoning as orbitStage: a link's orbit is exactly as fresh as the t it
+      // arrives with, so that is the seed pose.ts's decay measures forward from.
+      orbitSeedT: s.orbit ? s.t : null,
       // Set, NOT re-fitted. `pieces` above is the sender's actual arrangement and it
       // arrives whole; running layout() at this occupancy instead would throw away
       // every piece they moved. So the two arrive independently, exactly as they sat
       // in the sender's own store -- which is also why setOccupancy does not re-fit.
       occupancy: s.occupancy,
-      // NOT cleared for the reason `selected` is -- a link that opens at stage 5 opens
-      // standing, exactly as any other arrival there does. walkerFor() takes the
-      // INCOMING params, s.params, not the store's current ones: the suite the walker is
-      // checked against is the one the link describes, which is the whole point of `s`
-      // being a parameter here rather than get()'s own state.
+      // A link that opens at stage 5 opens standing, exactly as any other arrival
+      // there does. walkerFor() takes the INCOMING params, s.params, not the store's
+      // current ones: the suite the walker is checked against is the one the link
+      // describes, which is the whole point of `s` being a parameter here rather
+      // than get()'s own state.
       firstPerson: walkerFor(s.stage, s.params),
-      selected: null,
       flying: false,
       notice: null,
     }),

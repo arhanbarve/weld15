@@ -42,10 +42,10 @@ function position(stage: StageId, t: number): number {
 /**
  * window.__journey, for the e2e gates.
  *
- * Same device as CameraRig's window.__cam, Perf's window.__perf and DragLayer's
- * window.__drag: a gate driving the slider by u needs boundaries(params) to compute a
- * target for a given (stage, t), and the alternative is a second implementation of
- * journey.ts's mapping in test code. Cleaned up on unmount, like window.__drag.
+ * Same device as CameraRig's window.__cam and Perf's window.__perf: a gate driving
+ * the slider by u needs boundaries(params) to compute a target for a given (stage, t),
+ * and the alternative is a second implementation of journey.ts's mapping in test code.
+ * Cleaned up on unmount, like those two.
  */
 export function JourneyBar({ stage, t, params, onScrub, onScrubbing, onPickStage }: Props) {
   useEffect(() => {

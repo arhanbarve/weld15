@@ -93,10 +93,6 @@ export default function Experience() {
   const reduced = useStore((s) => s.reducedMotion);
   const cutaway = useStore((s) => s.cutaway);
   const pieces = useStore((s) => s.pieces);
-  const selected = useStore((s) => s.selected);
-  const pointerLocked = useStore((s) => s.pointerLocked);
-  const select = useStore((s) => s.select);
-  const commit = useStore((s) => s.commit);
 
   const vis = visibility(stage);
   const { shell, interior } = thresholdOpacity(stage, t, reduced);
@@ -239,75 +235,9 @@ export default function Experience() {
             params={params}
             pieces={pieces}
             cutaway={cutaway}
-            // Editing at the last stage only. The interior is mounted a stage early so
-            // its geometry is warm and it is visible through the threshold at stage 4,
-            // but at both of those the camera is outside or moving, and a pointer down
-            // on a floor plane 40 ft away picks a piece the viewer cannot see. The
-            // dimension sliders are not gated this way: correcting a number is
-            // meaningful from anywhere, and it is only the pointer pick that needs the
-            // camera to be in the room.
-            //
-            // WHAT THIS COSTS, MEASURED RATHER THAN GUESSED, AND P7 CHANGED THE NUMBER.
-            // It used to read: stage 5 stands inside bedroom B, so the pointer can only
-            // reach bedroom B's furniture -- projecting bedA-bed-0's corner puts it at
-            // (1574, -57) on a 1280 x 720 viewport, off the top-right of the screen and
-            // behind a wall besides -- and 4 of 29 pieces were in frame at all.
-            //
-            // Stage 5 now stands in the hall (stages.ts records why), and re-measured the
-            // same way -- projecting each piece's anchor through DragLayer's own
-            // screenOf() and asking document.elementFromPoint what is on top -- 17 of the
-            // 29 are in frame and unobstructed: bedroom A's desk, two chairs and a
-            // dresser, all six pieces in the common room, and all seven in K, most of
-            // them seen through the doorways down the length of the hall. The 12 that are
-            // not are bedroom A's two beds and its other desk and dresser, which project
-            // off the left edge, and the whole of bedroom B, which is behind the camera.
-            //
-            // RE-CONFIRMED AT P10 STEP 11, SAME 17, DIFFERENT OCCLUDER. The dock (Hud.tsx)
-            // is now a single fixed panel at top right, `x 1058..1426`, every stage, rather
-            // than the roaming per-stage HUD this comment originally measured against --
-            // and it happens to sit clear of all 17 reachable anchors' projected positions,
-            // so the count did not move. Re-run per piece (`window.__drag`, the same probe
-            // `scripts/p10-measure.mjs`'s `reach` section uses) rather than assumed, because
-            // P10 also moved the camera controls onto the window and it was not obvious in
-            // advance that nothing in the top-right corner would clip a piece the old HUD
-            // never stood over.
-            //
-            // That test is a projection and not a depth test, which is worth saying: a
-            // piece can be "unobstructed" by that criterion and still be behind a wall.
-            // What it bounds is which pieces the pointer can be aimed at, which is the
-            // question this gate is about.
-            //
-            // The fix is the dollhouse view -- edit from stage 3 with a cutaway on --
-            // and it is no longer blocked: WeldExterior reads `cutaway` and cuts the
-            // shell, so the brick comes off the half you are looking into.
-            //
-            // IT IS STILL NOT `stage >= 3 && cutaway !== "none"`, AND THE REASON IS
-            // MEASURED. Only `section` opens the suite. From the stage-3 keyframe
-            // wallsDown drops 9 of 56 ring edges -- 97.9 ft of the 440.3 ft perimeter,
-            // all of it south of v = 19.9, while the suite's own windows are at
-            // v 33.7-70.9 -- so it opens the empty half of the building and leaves the
-            // suite behind brick. Gating edit on "any cutaway" would put the pointer
-            // back to picking pieces the viewer cannot see, which is the bug this
-            // comment exists to record. `stage >= 3 && cutaway === "section"` is the
-            // honest condition, and turning it on wants a look at what the pointer
-            // actually hits from an orbiting camera rather than a one-line change here.
-            // AND NOT WHILE THE POINTER IS LOCKED, rather than not while walking. The
-            // pointer belongs to look while it is locked and to furniture editing while
-            // it is not -- a walker can stand at stage 5 with the mouse still free
-            // (before the first double-click, or after an Escape), and there is no
-            // reason to refuse editing in that state. The arrow keys follow whatever is
-            // selected regardless (FirstPerson.tsx's arrows-yield-to-selection check):
-            // selection only ever happens by pointer pick, so a keyboard-only viewer
-            // never has one and the walker keeps the arrows throughout. enterFirstPerson()
-            // still drops the selection on arrival, so no panel is left offering to move
-            // a piece the moment editing becomes unreachable.
-            edit={stage === LAST_STAGE && !pointerLocked}
-            selected={selected}
-            onSelect={select}
-            onResult={commit}
           />
 
-          <Effects />
+          <Effects active={stage !== LAST_STAGE} />
         </Canvas>
       </div>
       <div className="vignette" aria-hidden="true" />

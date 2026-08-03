@@ -1,9 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { buildSuite, DEFAULT_PARAMS } from "@/geo/rooms";
-import { doorLandings, layout, pieceBox } from "@/geo/furniture";
+import { layout, pieceBox } from "@/geo/furniture";
 import { containedBy } from "@/geo/collide";
-import { tryMove } from "@/geo/drag";
-import { buildWalls } from "@/geo/walls";
 import { CUTAWAY_MODES } from "@/scene/cutaway";
 import { OCCUPANCY_RANGE, DEFAULT_OCCUPANCY, pieceLabel, useStore } from "@/state/store";
 import { clearance, isClear, walkContext } from "@/scene/walk";
@@ -11,19 +9,12 @@ import { standIn, standingPose } from "@/scene/route";
 import { DEFAULT_SNAPSHOT, decode, encode } from "@/state/url";
 
 /**
- * The editable store: what a slider is allowed to do to the furniture standing on it.
+ * The editable store: occupancy, refit, reset, cutaway, and first-person seeding.
  *
- * The three outcomes of setParams() are the substance here, and the middle one is the
- * reason P6 exists. A dimension the audit tags INFERRED has to be correctable, so a
- * patch that produces a legal suite must go through even if a bed is standing in the
- * way -- and then it must SAY that the bed went. The two failures being tested against
- * are the opposite pairing: silently overlapping furniture, which is the failure
- * docs/phases/P6.md names, and a slider that cannot be moved at all because something
- * is on it.
- *
- * Every fixture below is a measured outcome, not a guess. The patches were probed
- * against the real recipes and the counts and names recorded; a recipe change that
- * moves them should show up here as a diff to read rather than as a test to re-green.
+ * `params` itself is fixed at DEFAULT_PARAMS now -- there is no longer any action that
+ * patches it at runtime, so the tests here that move `params` do it by writing the
+ * store's state directly (`useStore.setState({ params: ... })`), the same way a
+ * hand-edited URL or a future feature would arrive at a non-default suite.
  */
 
 /** The store is a module singleton, so every test starts from the shipped defaults. */
@@ -38,7 +29,6 @@ describe("the shipped opening state", () => {
     expect(s.pieces).toBe(DEFAULT_SNAPSHOT.pieces);
     expect(s.cutaway).toBe("none");
     expect(s.occupancy).toBe(DEFAULT_OCCUPANCY);
-    expect(s.selected).toBe(null);
     // High contrast opens OFF, and this assertion is about the default rather than about
     // the feature: Hud.tsx seeds the flag from `prefers-contrast: more`, and a store that
     // shipped `true` would put every viewer in high contrast on a machine with no such
@@ -73,212 +63,6 @@ describe("the shipped opening state", () => {
     expect(bedsAt(OCCUPANCY_RANGE.max)).toBe(OCCUPANCY_RANGE.max);
     expect(bedsAt(OCCUPANCY_RANGE.max + 1)).toBe(OCCUPANCY_RANGE.max);
     expect(bedsAt(6), "quints and sextuplets are not expressible today").toBe(4);
-  });
-});
-
-describe("setParams refuses a suite that is not a suite", () => {
-  /**
-   * Each of these is a different gate in whyIllegal(), in the order the function
-   * checks them, and each message names the thing that would have been wrong. A
-   * viewer cannot tell a broken model from a correct one by looking at it, which is
-   * why refusing is the answer rather than rendering it with a warning.
-   */
-  const refusals = [
-    { patch: { bathDeep: 20 }, says: /Unknown would have no floor left/ },
-    { patch: { sectionLength: 60 }, says: /wider than Weld's waist/ },
-    { patch: { legDepth: 18 }, says: /Hall and Bedroom A would overlap/ },
-    { patch: { ceiling: 0 }, says: /ceiling has to be a positive length/ },
-  ] as const;
-
-  for (const { patch, says } of refusals) {
-    it(`refuses ${JSON.stringify(patch)} and says why`, () => {
-      const before = useStore.getState();
-      useStore.getState().setParams(patch);
-      const after = useStore.getState();
-      expect(after.notice).toMatch(says);
-      expect(after.notice).toMatch(/^Refused: /);
-      // Nothing moved. Not the params, and not the furniture either -- a refusal
-      // that dropped a piece on the way out would be the worst of both answers.
-      expect(after.params).toEqual(before.params);
-      expect(after.pieces).toBe(before.pieces);
-    });
-  }
-});
-
-describe("setParams drops what no longer fits, and names it", () => {
-  /**
-   * Measured outcomes. The counts come from running these patches against the
-   * recipes, so they are a record of what the geometry does rather than a bound
-   * somebody chose.
-   */
-  const drops = [
-    // The bedrooms get shallower than the bed-dresser-chair-desk band needs, so both
-    // desks and both chairs go in each room. Eight pieces, symmetric across A and B,
-    // which is itself a check: an asymmetric result here would mean the two bedrooms
-    // had stopped being mirror images.
-    { patch: { bedDepth: 12 }, left: 21, names: [/Bedroom A desk 0/, /Bedroom B chair 1/] },
-    // One bedroom gets shorter along the section, so the SECOND of each pair goes --
-    // fitOut places in priority order, so what is lost is the furniture the room
-    // could least afford, not an arbitrary one.
-    { patch: { bedAAlong: 8 }, left: 26, names: [/Bedroom A bed 1/, /Bedroom A dresser 1/] },
-    // The common room shrinking moves bedroom A along v as well, because the along-
-    // hall chain is one sum: a slider on one room is not local to that room.
-    { patch: { commonAlong: 12 }, left: 24, names: [/Common room shelf 1/, /Bedroom A bed 1/] },
-  ] as const;
-
-  for (const { patch, left, names } of drops) {
-    it(`${JSON.stringify(patch)} leaves ${left} pieces`, () => {
-      const before = useStore.getState().pieces.length;
-      expect(before).toBe(29);
-      useStore.getState().setParams(patch);
-      const after = useStore.getState();
-      expect(after.pieces.length).toBe(left);
-      expect(after.params).toMatchObject(patch);
-      for (const n of names) expect(after.notice).toMatch(n);
-      expect(after.notice).toMatch(/no longer fit and were removed/);
-
-      // The survivors are not merely fewer: every one of them stands inside its own
-      // room in the NEW suite. This is the assertion that would catch a drop pass
-      // that counted correctly and kept the wrong pieces.
-      const suite = buildSuite(after.params);
-      for (const p of after.pieces) {
-        const room = suite.rooms.find((r) => r.id === p.room)!;
-        expect(containedBy(pieceBox(p), room), pieceLabel(suite, p.id)).toBe(true);
-      }
-    });
-  }
-
-  it("keeps everything when the change does not touch the floor plan", () => {
-    // Non-vacuity for the whole block above: if survivors() dropped pieces
-    // indiscriminately these would go too. The ceiling is a height and bathDeep 8 is
-    // the top of the audit's own bracket, so both are legal and neither moves a room
-    // out from under a piece.
-    for (const patch of [{ ceiling: 9 }, { bathDeep: 8 }] as const) {
-      useStore.getState().resetAll();
-      useStore.getState().setParams(patch);
-      const after = useStore.getState();
-      expect(after.pieces.length, JSON.stringify(patch)).toBe(29);
-      expect(after.notice).toBe(null);
-    }
-  });
-
-  it("clears the selection when the selected piece is one of the dropped", () => {
-    useStore.getState().select("bedA-desk-0");
-    useStore.getState().setParams({ bedDepth: 12 });
-    expect(useStore.getState().selected).toBe(null);
-  });
-
-  it("keeps a selection that survived", () => {
-    // The other half of the branch. bedA-bed-0 is the first bed placed and stays.
-    useStore.getState().select("bedA-bed-0");
-    useStore.getState().setParams({ bedDepth: 12 });
-    expect(useStore.getState().pieces.some((p) => p.id === "bedA-bed-0")).toBe(true);
-    expect(useStore.getState().selected).toBe("bedA-bed-0");
-  });
-});
-
-describe("moving one piece", () => {
-  it("nudges it a grid step and clears the notice", () => {
-    useStore.setState({ notice: "stale" });
-    const before = useStore.getState().pieces.find((p) => p.id === "bedA-bed-0")!;
-    useStore.getState().nudge("bedA-bed-0", "v+");
-    const after = useStore.getState().pieces.find((p) => p.id === "bedA-bed-0")!;
-    expect(after.v).toBeGreaterThan(before.v);
-    expect(useStore.getState().notice).toBe(null);
-    expect(useStore.getState().selected).toBe("bedA-bed-0");
-  });
-
-  it("words a refusal in terms of what it hit, rather than swallowing it", () => {
-    // Driven until something refuses rather than assuming a particular step does:
-    // the arrangement is the recipes' business and it moves. What is asserted is that
-    // a refusal, when it comes, names something -- a room, a piece or a door -- and
-    // that the piece did not move on the frame it was refused.
-    // v+, not u-. The bed stands flush against the facade at u 0, so nudging it west
-    // is caught by snapToWalls() and comes back accepted-but-unmoved for ever --
-    // which is correct behaviour and useless as a refusal fixture. Along v it runs
-    // into the second bed instead, and that is a refusal drag.ts has to name.
-    let refused: string | null = null;
-    for (let i = 0; i < 40 && refused === null; i++) {
-      const before = useStore.getState().pieces.find((p) => p.id === "bedA-bed-0")!;
-      useStore.getState().nudge("bedA-bed-0", "v+");
-      const after = useStore.getState().pieces.find((p) => p.id === "bedA-bed-0")!;
-      const notice = useStore.getState().notice;
-      if (notice) {
-        refused = notice;
-        expect(after, "the piece must not move on the frame it was refused").toEqual(before);
-      }
-    }
-    expect(refused, "20 ft north of its corner is out of a 10 ft bedroom").not.toBe(null);
-    expect(refused).toMatch(/would (leave|overlap|block)/);
-    // Naming something is the contract, not just refusing: drag.ts guarantees
-    // `against` is non-empty, and a message with no subject in it would mean the
-    // wording dropped what the geometry knew.
-    expect(refused).toMatch(/Bedroom A|bed|door/);
-  });
-
-  it("words a blocked doorway as a sentence about circulation", () => {
-    /*
-     * The wording gate for the one refusal that is about the suite rather than about a
-     * piece. drag.ts returns `["d1", "hall", "bath"]` -- the door, then the two rooms it
-     * joins -- precisely so that this can read as "would block the door between the hall
-     * and the bathroom" rather than as an id, and this is where that promise is kept.
-     *
-     * It lives here rather than in tests/e2e/edit.spec.ts, where docs/phases/P6.md's
-     * fourth gate originally put it, because a doorway landing sits at the edge of a room
-     * and the stage-5 camera does not show the edges: reaching one through the UI takes up
-     * to 120 nudge presses against a 62 ms frame. The rule itself is pinned in
-     * drag.test.ts, the chain from pointer to visible text is pinned in the e2e refusal
-     * gate, and what is left -- the sentence -- is pinned here in a millisecond.
-     *
-     * Searched rather than aimed: doorLandings() is layout()'s business and moves.
-     */
-    const suite = buildSuite();
-    const landings = doorLandings(suite);
-    expect(landings.length, "the suite has doorways").toBeGreaterThan(0);
-
-    let notice: string | null = null;
-    outer: for (const p of useStore.getState().pieces) {
-      for (const landing of landings) {
-        // Aim the piece's anchor at the middle of a landing. tryMove snaps, so this is a
-        // request rather than a placement, which is exactly what a drag is.
-        useStore.getState().resetAll();
-        useStore.setState({ notice: null });
-        const before = useStore.getState().pieces.find((q) => q.id === p.id)!;
-        useStore.getState().commit(
-          p.id,
-          tryMove(
-            before,
-            { u: landing.u + landing.du / 2, v: landing.v + landing.dv / 2 },
-            {
-              suite,
-              pieces: useStore.getState().pieces,
-              openings: buildWalls(suite).openings,
-            },
-          ),
-        );
-        const n = useStore.getState().notice;
-        if (n && /block the door/.test(n)) {
-          notice = n;
-          break outer;
-        }
-      }
-    }
-
-    expect(notice, "some piece can be asked to stand in some doorway").not.toBeNull();
-    // The shape of the sentence, not one particular door: which door a given piece can be
-    // pushed into depends on the fit-out.
-    expect(notice).toMatch(/would block the door between .+ and .+ \(d\d+\)\.$/);
-    // And it names ROOMS, not ids: "hall" would mean the label lookup silently fell
-    // through to the id, which is the failure this assertion exists for.
-    expect(notice).not.toMatch(/between (hall|bath|bedA|bedB|common1|k) /);
-  });
-
-  it("does nothing at all for an id that is not in the suite", () => {
-    const before = useStore.getState();
-    useStore.getState().nudge("nowhere-bed-0", "u+");
-    useStore.getState().rotate("nowhere-bed-0");
-    expect(useStore.getState().pieces).toBe(before.pieces);
-    expect(useStore.getState().notice).toBe(null);
   });
 });
 
@@ -354,16 +138,16 @@ describe("hydrate", () => {
 
 describe("resetAll", () => {
   it("puts every editable field back, including the arrangement", () => {
-    useStore.getState().setParams({ ceiling: 9 });
+    useStore.setState({ params: { ...DEFAULT_PARAMS, ceiling: 9 } });
     useStore.getState().setCutaway("section");
     useStore.getState().setHour(2);
-    useStore.getState().nudge("bedA-bed-0", "v+");
+    useStore.getState().setOccupancy(2);
+    useStore.getState().refit();
     useStore.getState().resetAll();
     const s = useStore.getState();
     expect(s.params).toEqual(DEFAULT_PARAMS);
     expect(s.pieces).toBe(DEFAULT_SNAPSHOT.pieces);
     expect(s.cutaway).toBe("none");
-    expect(s.selected).toBe(null);
     expect(s.notice).toMatch(/sourced dimensions/);
   });
 });
@@ -392,7 +176,7 @@ describe("high contrast", () => {
 
   it("survives resetAll, because a reset is about the model and not about the reader", () => {
     useStore.getState().setHighContrast(true);
-    useStore.getState().setParams({ ceiling: 9 });
+    useStore.setState({ params: { ...DEFAULT_PARAMS, ceiling: 9 } });
     useStore.getState().resetAll();
     // The model went back; the preference did not. A "start over" that switched somebody's
     // high contrast off would be the app overruling them.
@@ -453,14 +237,6 @@ describe("first person", () => {
     expect(useStore.getState().notice).toBe(null);
   });
 
-  it("gives the arrow keys' owner nothing to fight over", () => {
-    // Hud.tsx hands the arrow keys to the walker while first person is on, so a piece left
-    // selected would be a piece whose keyboard controls had silently stopped working.
-    useStore.getState().select("bedB-bed-0");
-    useStore.getState().enterFirstPerson();
-    expect(useStore.getState().selected).toBe(null);
-  });
-
   it("seeds on arrival at stage 5, by every path, and drops on departure", () => {
     const standingSomewhere = () => {
       const fp = useStore.getState().firstPerson;
@@ -517,15 +293,12 @@ describe("first person", () => {
 
   it("skips a hall nobody can stand in, and refuses when no room will do", () => {
     /*
-     * THE PARAMS ARE FORCED PAST setParams() HERE, and that is the point of the comment
-     * rather than a shortcut. walk.ts's precondition is that a seed must be clear, and no
-     * suite the sliders can reach has an unstandable hall: the hall's width bottoms out at
-     * Panel.tsx's 3 ft, which leaves 0.75 ft of clearance, and its length is tied to the
-     * bedroom chain -- every commonAlong from 30 to 43 ft was swept and all twelve were
-     * refused with "Bedroom B would have no floor left" before the hall got short. So the
-     * fall-through is a guard on a documented precondition rather than on a reachable
-     * state, and the only way to exercise it is to write the params in directly, which is
-     * what a hand-edited URL or a future slider range would do.
+     * THE PARAMS ARE WRITTEN DIRECTLY HERE, and that is the point of the comment rather
+     * than a shortcut. walk.ts's precondition is that a seed must be clear, and params is
+     * fixed at DEFAULT_PARAMS in this app now -- there is no control left that can reach
+     * an unstandable hall. So the fall-through is a guard on a documented precondition
+     * rather than on a reachable state, and the only way to exercise it is to write the
+     * params in directly, which is what a hand-edited URL would do.
      *
      * MEASURED at hallWidth 1: the hall's centre has -0.25 ft of clearance and bedroom A's
      * has 4.25, so the seed falls through to bedroom A rather than wedging in the hall.
@@ -562,42 +335,6 @@ describe("first person", () => {
     expect(useStore.getState().notice).toMatch(/^Refused: Every room in this suite is narrower/);
   });
 
-  it("re-seeds the walker when a slider closes a wall onto it, and says where", () => {
-    /*
-     * The viewer is furniture too, for this one purpose, and re-seeding rather than
-     * dropping is the same choice setParams() makes about a bed: refusing the slider would
-     * mean a dimension the audit tags INFERRED could not be corrected while somebody
-     * happened to be standing in the way. walkerFor() is the same verified-seed loop
-     * enterFirstPerson() uses, so the viewer lands somewhere standable rather than losing
-     * the walker outright, as long as some room still is.
-     *
-     * MEASURED: standing at the centre of bedroom B, (8, 39), a section shortened from
-     * 44 ft to 38 ft brings the gable south past that point, and the hall is still
-     * standable in the resulting suite. setWalk() places the walker directly, the way
-     * goToPlace() used to before it was deleted -- there is no other action left that
-     * jump-cuts a walker to a named room.
-     */
-    useStore.getState().setWalk({ p: { u: 8, v: 39 }, heading: 0, pitch: 0, room: "bedB" });
-    useStore.getState().setParams({ sectionLength: 38 });
-    expect(useStore.getState().params.sectionLength, "the slider was not refused").toBe(38);
-    const fp = useStore.getState().firstPerson;
-    expect(fp, "moved rather than dropped -- another room is still standable").not.toBeNull();
-    expect(fp!.room).toBe("hall");
-    expect(isClear(fp!.p, walkContext(buildSuite(useStore.getState().params)))).toBe(true);
-    expect(useStore.getState().notice).toMatch(
-      /A wall closed onto where you were standing, so you were moved to Hall\./,
-    );
-  });
-
-  it("leaves a walker alone when the slider does not reach it", () => {
-    // The guard against fixing the wedge by moving the walker on every slider move, which
-    // would make the dimensions unusable from inside the room.
-    useStore.getState().setWalk({ p: { u: 8, v: 39 }, heading: 0, pitch: 0, room: "bedB" });
-    const before = useStore.getState().firstPerson;
-    useStore.getState().setParams({ ceiling: 9 });
-    expect(useStore.getState().firstPerson).toBe(before);
-    expect(useStore.getState().notice).toBe(null);
-  });
 });
 
 /**
@@ -776,12 +513,13 @@ describe("orbit survives only a return to its own anchor stage", () => {
     expect(useStore.getState().orbit).toEqual(SOME_ORBIT);
   });
 
-  it("resetAll clears both fields", () => {
+  it("resetAll clears all three fields", () => {
     useStore.getState().setStage(3);
     useStore.getState().setOrbit(SOME_ORBIT);
     useStore.getState().resetAll();
     expect(useStore.getState().orbit).toBeNull();
     expect(useStore.getState().orbitStage).toBeNull();
+    expect(useStore.getState().orbitSeedT).toBeNull();
   });
 
   it("hydrate derives orbitStage from the incoming stage, not the wire format", () => {
@@ -797,6 +535,67 @@ describe("orbit survives only a return to its own anchor stage", () => {
       occupancy: 4,
     });
     expect(useStore.getState().orbitStage).toBe(4);
+  });
+
+  /**
+   * orbitSeedT: the stage-local t pose.ts's decay measures a resumed wheel forward from
+   * (see pose.ts's own header on the fix this field exists for).
+   */
+  it("setOrbit seeds orbitSeedT from the current t, and clears it with the orbit", () => {
+    useStore.getState().setStage(1);
+    useStore.getState().setT(0.4);
+    useStore.getState().setOrbit(SOME_ORBIT);
+    expect(useStore.getState().orbitSeedT).toBe(0.4);
+
+    useStore.getState().setOrbit(null);
+    expect(useStore.getState().orbitSeedT).toBeNull();
+  });
+
+  it("re-seeds orbitSeedT on every fresh drag, not just the first", () => {
+    useStore.getState().setStage(1);
+    useStore.getState().setT(0.1);
+    useStore.getState().setOrbit(SOME_ORBIT);
+    expect(useStore.getState().orbitSeedT).toBe(0.1);
+
+    // t moves on (the wheel), then a second drag re-seeds from where it now is.
+    useStore.getState().setT(0.6);
+    useStore.getState().setOrbit({ ...SOME_ORBIT, headingDeg: 99 });
+    expect(useStore.getState().orbitSeedT).toBe(0.6);
+  });
+
+  it("clearing the orbit on a stage mismatch clears orbitSeedT with it", () => {
+    useStore.getState().setStage(3);
+    useStore.getState().setOrbit(SOME_ORBIT);
+    useStore.getState().setStage(4);
+    expect(useStore.getState().orbitSeedT).toBeNull();
+  });
+
+  it("hydrate seeds orbitSeedT from the incoming t, the same way orbitStage comes from the incoming stage", () => {
+    useStore.getState().hydrate({
+      stage: 4,
+      t: 0.5,
+      params: DEFAULT_SNAPSHOT.params,
+      pieces: DEFAULT_SNAPSHOT.pieces,
+      cutaway: "none",
+      hour: 9,
+      date: "2026-07-31",
+      orbit: SOME_ORBIT,
+      occupancy: 4,
+    });
+    expect(useStore.getState().orbitSeedT).toBe(0.5);
+
+    useStore.getState().hydrate({
+      stage: 2,
+      t: 0.3,
+      params: DEFAULT_SNAPSHOT.params,
+      pieces: DEFAULT_SNAPSHOT.pieces,
+      cutaway: "none",
+      hour: 9,
+      date: "2026-07-31",
+      orbit: null,
+      occupancy: 4,
+    });
+    expect(useStore.getState().orbitSeedT).toBeNull();
   });
 });
 
