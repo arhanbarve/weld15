@@ -508,16 +508,26 @@ function sashSlabs(
 function roomTrimSlabs(
   w: Wall,
   cuts: Cut[],
+  casingCuts: Cut[],
   rooms: Rect[],
   floor: number,
   ceiling: number,
 ): { joinery: Slab[]; plaster: Slab[] } {
   const { alongV, along, thick } = bandAxis(w);
   const low = alongV ? w.u : w.v;
-  const doorCuts = cuts.filter((c) => c.y0 <= EPS);
-  const doorSpans = solidSpans(doorCuts, along);
+  // From the FULL cuts, not casingCuts: the baseboard has to break at every real
+  // doorway -- there is no wall there, casing or no -- so an interior door with its
+  // casing filtered out for rendering must still be a gap this function knows about,
+  // or the baseboard runs straight across the passage as if it were solid wall.
+  const doorSpans = solidSpans(
+    cuts.filter((c) => c.y0 <= EPS),
+    along,
+  );
   const railSpans = solidSpans(cuts.filter((c) => c.y1 > RAIL_H + EPS), along);
   const faces = w.kind === "exterior" ? [roomFaceIsLow(w, rooms)] : [true, false];
+  // Casing itself, unlike the baseboard break above, only goes up around a door this
+  // suite still wants VISIBLE as a door -- casingCuts is the entry-only list.
+  const casingDoorCuts = casingCuts.filter((c) => c.y0 <= EPS);
 
   const joinery: Slab[] = [];
   const plaster: Slab[] = [];
@@ -529,7 +539,7 @@ function roomTrimSlabs(
         : { u: w.u + p.u, v: across, du: p.du, dv: p.dv, y0: floor + p.y0, y1: floor + p.y1 };
       (p.material === "plaster" ? plaster : joinery).push(slab);
     }
-    for (const c of doorCuts) {
+    for (const c of casingDoorCuts) {
       for (const p of doorCasingParts(c.hi - c.lo, c.y1)) {
         const localU = p.u + c.lo;
         const across = roomLow ? low + p.v : low + thick - p.v - p.dv;
@@ -683,12 +693,19 @@ export function bathWainscotSlab(w: Wall, cuts: Cut[], bath: Rect, floor: number
  * geometry contradicting a route the code still walks. The entry is the one
  * doorway walk.ts's own solidsOf() deliberately never cuts -- "never leaves
  * the suite" is the property docs/phases/P7-P8.md asks for -- so a leaf
- * standing almost closed there is the geometry telling the TRUTH: a viewer
- * cannot walk through this one. Not fully closed (0 deg): a hair open is what
- * tells the two shots apart at a glance, and is what a real door left
- * unlatched looks like.
+ * standing shut there is the geometry telling the TRUTH: a viewer cannot
+ * walk through this one.
+ *
+ * FULLY CLOSED (0 deg), not a hair ajar. It used to be 12 -- distinguishable
+ * from the wide-open interior doors at a glance -- but every interior door
+ * lost its leaf entirely once this suite kept only the front door visible,
+ * so there is nothing left to distinguish it FROM. And since stage 5 mounts
+ * the real exterior behind glazing (P14 row 8), a 12-degree gap at the one
+ * exterior-facing door was a crack a viewer could see straight through: the
+ * Yard, showing through the front door, at the one spot in the suite that is
+ * supposed to be sealed. Shut is both the more honest geometry and the fix.
  */
-const ENTRY_AJAR_DEG = 12;
+const ENTRY_AJAR_DEG = 0;
 
 export function doorLeafSlabs(
   walls: Wall[],
@@ -884,14 +901,17 @@ function buildSuiteGeometry(params: SuiteParams, hidden: ReadonlySet<string>): S
     const sash = sashSlabs(w, cuts, suite.rooms, floor);
     sashJoinery.push(...sash.joinery);
     glazing.push(...sash.glass);
-    const trimCuts = cutsFor(w, trimOpenings, wallH);
-    const trim = roomTrimSlabs(w, trimCuts, suite.rooms, floor, wallH);
+    const casingCuts = cutsFor(w, trimOpenings, wallH);
+    const trim = roomTrimSlabs(w, cuts, casingCuts, suite.rooms, floor, wallH);
     sashJoinery.push(...trim.joinery);
     cornice.push(...trim.plaster);
     // Threshold boards are oak, same as the floor either side of them, so they
     // join the SAME merged geometry rather than opening a mesh of their own --
-    // the doorway reads as two rooms without costing a draw call for it.
-    oak.push(...thresholdSlabs(w, trimCuts, floor));
+    // the doorway reads as two rooms without costing a draw call for it. From the
+    // FULL cuts, same reasoning as roomTrimSlabs()'s doorSpans: every real doorway
+    // still gets a threshold, casing or no -- it is the floor's own business, not
+    // the door's.
+    oak.push(...thresholdSlabs(w, cuts, floor));
     if (bath) tile.push(...bathWainscotSlab(w, cuts, bath, floor));
   }
   // Fixtures (P14 row 9), walked once like the leaf below rather than per wall: they
