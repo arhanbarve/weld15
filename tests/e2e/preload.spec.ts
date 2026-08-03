@@ -42,20 +42,23 @@ const preloadOf = (page: Page) =>
  * Measured ceiling with real margin: the step 0 sessions (28 and 56 poses, 1 GB lruCache
  * cap) settled in 228-249s, against which 300s carried comfortable headroom.
  *
- * RAISED FOR THE lruCache CAP FIX (this task). The 1 GB loading-phase cap (Tiles.tsx's own
- * `onRootTileset`) was already smaller than what the descent settled at (~1.07 GB observed),
- * so it was evicting from the moment it filled -- measured directly: a stage jump straight
- * after a "done" preload queued 538 fresh tile downloads, because the content that stage
- * needed had already been evicted to make room for whatever loaded after it. Raising the cap
- * to 1.5 GB fixes that, but a bigger cap that evicts less also lets more content accumulate
- * before a batch goes idle, so the preload itself legitimately takes longer -- measured at
- * 306-309s across repeated isolated runs against the fixed cap (vs. the 228-249s baseline at
- * 1 GB). 450s keeps the same kind of comfortable margin over that new baseline the original
- * 300s carried over the old one, short of "never" if a real regression (e.g. a batch's
- * idle-frame check never firing) reintroduces the timeout-every-batch bug this phase's own
- * history already found once (docs/phases/P13-PRELOAD.md's BATCH_TIMEOUT_MS comment).
+ * RAISED TWICE FOR THE lruCache CAP FIX (this task; see Tiles.tsx's own `onRootTileset`
+ * comment for the full history). The 1 GB loading-phase cap was already smaller than what
+ * the descent settled at (~1.07 GB), so it was evicting from the moment it filled -- a
+ * stage jump straight after a "done" preload queued 538 fresh tile downloads. Raising the
+ * cap to 1.5 GB fixed a straight stage-N jump but NOT a real user scrubbing continuously
+ * through Harvard Square's dense building cluster, which still showed visibly shattered
+ * geometry -- parent tiles standing in for children that never finished resident. 4 GB is
+ * the smallest cap that produced a clean, fully-resolved frame there (confirmed by
+ * screenshot). A bigger cap that evicts less also lets more content accumulate before a
+ * batch goes idle, so the preload itself legitimately takes longer -- measured at 510-515s
+ * across repeated isolated runs at 4 GB (vs. the 228-249s baseline at 1 GB). 700s keeps
+ * comfortable margin over that new baseline, short of "never" if a real regression (e.g. a
+ * batch's idle-frame check never firing) reintroduces the timeout-every-batch bug this
+ * phase's own history already found once (docs/phases/P13-PRELOAD.md's BATCH_TIMEOUT_MS
+ * comment).
  */
-const PRELOAD_DEADLINE_MS = 450_000;
+const PRELOAD_DEADLINE_MS = 700_000;
 
 test.setTimeout(PRELOAD_DEADLINE_MS + 60_000);
 
