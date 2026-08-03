@@ -470,10 +470,23 @@ export function materials(): Palette {
   // No grain on oakDeep: it dresses furniture sides, and furniture geometry does not
   // go through scaleFloorUv, so its 0..1 UVs would put a whole 4 ft tile across a
   // 3 ft drawer front.
+  //
+  // POLYGON OFFSET, because this is also Suite.tsx's sash-joinery material, and
+  // window/door casing is built exactly flush against the wall behind it (sash.ts's
+  // CASING_PR: v = -CASING_PR to v = 0, the same v = 0 the wall's own front face
+  // sits at) -- a genuinely coincident plane, not a near-miss, so the depth buffer
+  // cannot consistently pick a winner per pixel. That reads as a dithered, hatched
+  // flicker along every casing edge, worst at a grazing angle -- exactly what
+  // z-fighting looks like, and exactly the shape a Screenshot of a window head
+  // casing showed. Biasing this material slightly toward the camera makes the
+  // trim win outright, which is correct: it is what actually stands in front.
   const oakDeep = new THREE.MeshStandardMaterial({
     color: DAY.oakDeep,
     roughness: 0.6,
     metalness: 0,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
   });
 
   // Bedding and textiles. Cloth has effectively no specular lobe.
