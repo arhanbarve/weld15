@@ -409,6 +409,92 @@ export function plasterNormalMap(size: number = DEFAULT_PLASTER_PX): THREE.Textu
   return tex;
 }
 
+/**
+ * Room and entrance signage: a small engraved-brass plaque, one per label.
+ *
+ * SAME MACHINERY AS THE GRAIN MAPS ABOVE, not a new pattern: a CanvasTexture drawn
+ * once and cached, guarded by grainCanvas() for the same headless-Node reason. The
+ * difference is the canvas is not square (a plaque reads left to right) and the
+ * result is the map on a real MeshStandardMaterial rather than a normalMap, since
+ * the text itself -- not a bump -- is the whole content.
+ */
+const SIGN_PX_W = 512;
+const SIGN_PX_H = 200;
+
+function drawSign(ctx: Ctx2D, text: string): void {
+  const w = SIGN_PX_W;
+  const h = SIGN_PX_H;
+  // The dark mounting plate, proud of the wall itself -- a plaque is not just its
+  // own face, it is a rim standing off the wood or plaster behind it.
+  ctx.fillStyle = "#1c1a16";
+  ctx.fillRect(0, 0, w, h);
+  // Brushed-brass fill, a diagonal gradient so it catches light unevenly the way a
+  // real polished plate does rather than reading as a flat colour swatch.
+  const margin = 14;
+  const grad = ctx.createLinearGradient(0, 0, w, h);
+  grad.addColorStop(0, "#d9b45c");
+  grad.addColorStop(0.5, "#c9a24a");
+  grad.addColorStop(1, "#8a6d2f");
+  ctx.fillStyle = grad;
+  ctx.fillRect(margin, margin, w - margin * 2, h - margin * 2);
+  // Engraved lettering: dark serif, centred. A real engraving is cut IN to the
+  // brass, which a flat dark fill cannot show -- close enough at plaque scale and
+  // reading distance, which is what this asks for.
+  ctx.fillStyle = "#2b2200";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `bold ${Math.floor(h * 0.34)}px Georgia, "Times New Roman", serif`;
+  ctx.fillText(text.toUpperCase(), w / 2, h / 2 + h * 0.02);
+}
+
+/** Same headless guard as grainCanvas(), generalized to a non-square canvas: a plaque reads left to right, not as a tile. */
+function signCanvas(w: number, h: number): { canvas: Canvas2D; ctx: Ctx2D } | null {
+  if (typeof document !== "undefined" && typeof document.createElement === "function") {
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    return ctx ? { canvas, ctx } : null;
+  }
+  if (typeof OffscreenCanvas !== "undefined") {
+    const canvas = new OffscreenCanvas(w, h);
+    const ctx = canvas.getContext("2d");
+    return ctx ? { canvas, ctx } : null;
+  }
+  return null;
+}
+
+const signCache = new Map<string, THREE.MeshStandardMaterial>();
+
+/** The brass plaque material for one label, built once and reused for the life of the process. */
+export function signMaterial(text: string): THREE.MeshStandardMaterial {
+  const hit = signCache.get(text);
+  if (hit) return hit;
+
+  const surface = signCanvas(SIGN_PX_W, SIGN_PX_H);
+  let map: THREE.Texture | null = null;
+  if (surface) {
+    drawSign(surface.ctx, text);
+    map = new THREE.CanvasTexture(surface.canvas);
+    // Unlike the grain/tooth maps above, this one IS colour, not a vector -- it
+    // needs the sRGB tag those normal maps explicitly must not carry.
+    map.colorSpace = THREE.SRGBColorSpace;
+  }
+
+  // Headless (no map): a flat brass MeshStandardMaterial color carries the fixture's
+  // presence and general tone without the text -- harmless in Node, and importing
+  // this module there stays harmless too, the same contract oakNormalMap() keeps.
+  const mat = new THREE.MeshStandardMaterial({
+    map,
+    color: map ? 0xffffff : 0xc9a24a,
+    roughness: 0.35,
+    metalness: 0.75,
+  });
+  mat.name = `sign-${text}`;
+  signCache.set(text, mat);
+  return mat;
+}
+
 export type Palette = {
   plaster: THREE.MeshStandardMaterial;
   oak: THREE.MeshStandardMaterial;

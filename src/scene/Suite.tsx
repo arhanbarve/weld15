@@ -13,7 +13,7 @@ import { bathFixtureParts, ceilingFixturePart, roomRadiatorPart } from "@/geo/fi
 import { suiteToThree, floorLevel } from "@/geo/place";
 import type { Piece } from "@/geo/furniture";
 import { hiddenWalls, type CutawayMode } from "./cutaway";
-import { materials, scaleFloorUv } from "./materials";
+import { materials, scaleFloorUv, signMaterial } from "./materials";
 import { Furniture } from "./Furniture";
 
 /**
@@ -308,6 +308,28 @@ function slabGeometry(s: Slab, yaw: number, params: SuiteParams): THREE.BufferGe
     new THREE.Matrix4().compose(
       new THREE.Vector3(c[0], c[1], c[2]),
       new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw + (s.turn ?? 0), 0)),
+      new THREE.Vector3(1, 1, 1),
+    ),
+  );
+  return g;
+}
+
+/**
+ * A sign's own box, positioned and rotated exactly like slabGeometry() above --
+ * same suiteToThree()/yaw transform, so a plaque sits precisely where its Slab
+ * says it does -- but WITHOUT applyAoColor() or scaleFloorUv(). A plaque's colour
+ * comes entirely from its own CanvasTexture (materials.ts's signMaterial()); a
+ * baked-AO vertex colour would multiply against that texture and dull the brass
+ * exactly the way it was never meant to.
+ */
+function signGeometry(s: Slab, yaw: number, params: SuiteParams): THREE.BufferGeometry {
+  const height = s.y1 - s.y0;
+  const g = new THREE.BoxGeometry(s.du, height, s.dv);
+  const c = suiteToThree(s.u + s.du / 2, s.v + s.dv / 2, (s.y0 + s.y1) / 2, params);
+  g.applyMatrix4(
+    new THREE.Matrix4().compose(
+      new THREE.Vector3(c[0], c[1], c[2]),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0)),
       new THREE.Vector3(1, 1, 1),
     ),
   );
@@ -774,6 +796,81 @@ export function doorLeafSlabs(
   return out;
 }
 
+/** A small brass plaque, reading width x height x how far it stands proud of the wall. */
+const SIGN_WIDTH_FT = 0.9;
+const SIGN_HEIGHT_FT = 0.35;
+const SIGN_PROUD_FT = 0.04;
+/** Reading height: centre of the plaque, floor to this, ft. ASSUMED, ordinary eye-level signage. */
+const SIGN_MOUNT_Y = 5.3;
+/** Clearance between a plaque's near edge and the door jamb it sits beside, ft. */
+const SIGN_MARGIN_FT = 0.4;
+
+/**
+ * One plaque per door this suite still wants labelled: the front door ("Entrance")
+ * and every interior doorway, reading the room it leads INTO -- the same convention
+ * a real corridor's room-number plates use, mounted beside the door rather than
+ * over it, on the side you approach from.
+ *
+ * MOUNTED ON `connects[0]`'S SIDE, not the room being labelled. walls.ts's door()
+ * always names the approach room first and the destination second (door("hall",
+ * "bedA") reads "from the hall, into bedroom A"), so connects[0] is already the
+ * corridor-side room for every door this suite has, entrance included (hall is
+ * connects[0], "outside" is connects[1] there too). No separate rule needed for
+ * the entrance beyond the label itself: "outside" is not a room this model has,
+ * so it never matches a real room id and always falls to the "Entrance" case.
+ *
+ * WALKED ONCE OVER EVERY OPENING, same reasoning as doorLeafSlabs() above: a sign
+ * needs the specific room it mounts against, which a per-wall Cut no longer
+ * carries once merged.
+ */
+export function signSlabs(
+  walls: Wall[],
+  openings: Opening[],
+  rooms: Rect[],
+  floor: number,
+): { slab: Slab; label: string }[] {
+  const byId = new Map(rooms.map((r) => [r.id, r]));
+  const out: { slab: Slab; label: string }[] = [];
+  for (const o of openings) {
+    if (o.kind !== "door") continue;
+    const mountRoom = byId.get(o.connects[0] ?? "");
+    if (!mountRoom) continue; // the approach side is always a real room but guard anyway
+    const destRoom = byId.get(o.connects[1] ?? "");
+    const label = destRoom ? (destRoom.id === "k" ? "K" : destRoom.label) : "Entrance";
+    const w = walls.find((x) => x.id === o.wallId);
+    if (!w) continue;
+    const { alongV, along, thick } = bandAxis(w);
+    const roomLow = roomIsOnLowSide(w, mountRoom);
+    const proudOrigin = roomLow ? -SIGN_PROUD_FT : thick;
+    // Beside the jamb on whichever side leaves room for the plaque -- low side
+    // first, high side if the door sits too close to the band's own start.
+    const alongPos =
+      o.offset - SIGN_MARGIN_FT - SIGN_WIDTH_FT >= 0
+        ? o.offset - SIGN_MARGIN_FT - SIGN_WIDTH_FT
+        : Math.min(along - SIGN_WIDTH_FT, o.offset + o.width + SIGN_MARGIN_FT);
+    const y0 = floor + SIGN_MOUNT_Y - SIGN_HEIGHT_FT / 2;
+    const slab: Slab = alongV
+      ? {
+          u: w.u + proudOrigin,
+          v: w.v + alongPos,
+          du: SIGN_PROUD_FT,
+          dv: SIGN_WIDTH_FT,
+          y0,
+          y1: y0 + SIGN_HEIGHT_FT,
+        }
+      : {
+          u: w.u + alongPos,
+          v: w.v + proudOrigin,
+          du: SIGN_WIDTH_FT,
+          dv: SIGN_PROUD_FT,
+          y0,
+          y1: y0 + SIGN_HEIGHT_FT,
+        };
+    out.push({ slab, label });
+  }
+  return out;
+}
+
 /**
  * The mark across the unknown room's floor: two ribs corner to corner.
  *
@@ -826,6 +923,9 @@ type SuiteGeometry = {
   tile: THREE.BufferGeometry | null;
   /** The bathroom's mirror -- the one fixture with a material of its own. */
   mirror: THREE.BufferGeometry | null;
+  /** Room and entrance plaques -- each its own mesh, since each carries different
+   *  text and cannot merge into a shared batch the way the rest of this suite does. */
+  signs: { geometry: THREE.BufferGeometry; label: string }[];
   yaw: number;
 };
 
@@ -972,6 +1072,10 @@ function buildSuiteGeometry(params: SuiteParams, hidden: ReadonlySet<string>): S
     ceiling: mergeSlabs(ceiling, yaw, params, "ceiling"),
     tile: mergeSlabs(tile, yaw, params, "bathroom tile"),
     mirror: mergeSlabs(mirror, yaw, params, "bathroom mirror"),
+    signs: signSlabs(walls, openings, suite.rooms, floor).map(({ slab, label }) => ({
+      geometry: signGeometry(slab, yaw, params),
+      label,
+    })),
     yaw,
   };
 }
@@ -1158,6 +1262,10 @@ export function Suite({
       for (const g of Object.values(geo)) {
         if (g instanceof THREE.BufferGeometry) g.dispose();
       }
+      // `signs` is an array of {geometry, label}, not a bare BufferGeometry, so the
+      // loop above never reaches it -- disposed explicitly here for the same reason
+      // every other geometry in this component is.
+      for (const s of geo.signs) s.geometry.dispose();
     };
   }, [geo]);
 
@@ -1208,6 +1316,9 @@ export function Suite({
       {furniture ? (
         <Furniture opacity={opacity} params={params} yaw={geo.yaw} pieces={pieces} />
       ) : null}
+      {geo.signs.map((s) => (
+        <mesh key={s.label} geometry={s.geometry} material={signMaterial(s.label)} />
+      ))}
     </group>
   );
 }

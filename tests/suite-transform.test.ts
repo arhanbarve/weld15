@@ -11,6 +11,7 @@ import {
   bathWainscotSlab,
   applyAoColor,
   aoSegments,
+  signSlabs,
   AO_DEPTH_FT,
   AO_MIN,
   type Slab,
@@ -409,3 +410,89 @@ function bandAxis_forTest(w: { u: number; v: number; du: number; dv: number }) {
  *  is not a dependency it should import, since the whole point is to catch a
  *  drift between the implementation and what the number is supposed to be. */
 const WAINSCOT_PROUD_forTest = 0.05;
+
+describe("signSlabs()", () => {
+  const params = DEFAULT_PARAMS;
+  const suite = buildSuite(params);
+  const { walls, openings } = buildWalls(suite);
+  const floor = floorLevel(1);
+  const byId = new Map(suite.rooms.map((r) => [r.id, r]));
+
+  const signs = signSlabs(walls, openings, suite.rooms, floor);
+  const doors = openings.filter((o) => o.kind === "door");
+
+  it("produces exactly one plaque per door -- the entrance plus every interior doorway", () => {
+    expect(signs.length).toBe(doors.length);
+    expect(signs.length).toBeGreaterThan(0);
+  });
+
+  it("labels the front door \"Entrance\", not a room name", () => {
+    const front = signs.find((s) => s.label === "Entrance");
+    expect(front, "no plaque reads Entrance").toBeDefined();
+    // Exactly one: "outside" only ever appears as one door's connects[1].
+    expect(signs.filter((s) => s.label === "Entrance").length).toBe(1);
+  });
+
+  it("never labels a plaque \"Hall\" -- the hub is never a door's destination", () => {
+    expect(signs.some((s) => s.label === "Hall")).toBe(false);
+  });
+
+  it("labels K plainly, not by its full descriptive room label", () => {
+    const kSign = signs.find((s) => s.label === "K");
+    expect(kSign, "no plaque reads K").toBeDefined();
+    expect(signs.some((s) => s.label.includes("second common room"))).toBe(false);
+  });
+
+  it("labels every other interior door by its destination room's own label", () => {
+    const labels = new Set(signs.map((s) => s.label));
+    for (const want of ["Bedroom A", "Bedroom B", "Bathroom", "Common room"]) {
+      expect(labels.has(want), `missing plaque for ${want}`).toBe(true);
+    }
+  });
+
+  it("mounts every plaque on the door's connects[0] (approach) side, standing proud of that wall -- not embedded in it, not on the far side", () => {
+    for (const o of doors) {
+      const sign = signs.find((s) => {
+        const dest = byId.get(o.connects[1] ?? "");
+        const want = dest ? (dest.id === "k" ? "K" : dest.label) : "Entrance";
+        return s.label === want;
+      });
+      expect(sign, `no plaque for door ${o.id}`).toBeDefined();
+      const w = walls.find((x) => x.id === o.wallId)!;
+      const mountRoom = byId.get(o.connects[0]!)!;
+      const { alongV, thick } = bandAxis_forTest(w);
+      const low = alongV ? w.u : w.v;
+      const roomLow = (alongV ? mountRoom.u + mountRoom.du / 2 : mountRoom.v + mountRoom.dv / 2) <= (alongV ? w.u + w.du / 2 : w.v + w.dv / 2);
+      const acrossOrigin = alongV ? sign!.slab.u : sign!.slab.v;
+      const acrossSize = alongV ? sign!.slab.du : sign!.slab.dv;
+      if (roomLow) {
+        // Proud OUTWARD from the low face: the whole box sits at or below `low`.
+        expect(acrossOrigin + acrossSize).toBeLessThanOrEqual(low + 1e-9);
+      } else {
+        // Proud outward from the high face: the whole box sits at or beyond `low + thick`.
+        expect(acrossOrigin).toBeGreaterThanOrEqual(low + thick - 1e-9);
+      }
+    }
+  });
+
+  it("keeps every plaque's along-axis span within its own wall band", () => {
+    for (const o of doors) {
+      const w = walls.find((x) => x.id === o.wallId)!;
+      const { alongV, along } = bandAxis_forTest(w);
+      const dest = byId.get(o.connects[1] ?? "");
+      const want = dest ? (dest.id === "k" ? "K" : dest.label) : "Entrance";
+      const sign = signs.find((s) => s.label === want)!;
+      const alongOrigin = alongV ? sign.slab.v - w.v : sign.slab.u - w.u;
+      const alongSize = alongV ? sign.slab.dv : sign.slab.du;
+      expect(alongOrigin).toBeGreaterThanOrEqual(-1e-9);
+      expect(alongOrigin + alongSize).toBeLessThanOrEqual(along + 1e-9);
+    }
+  });
+
+  it("mounts every plaque at ordinary reading height, well within the ceiling", () => {
+    for (const { slab } of signs) {
+      expect(slab.y0).toBeGreaterThan(floor + 3);
+      expect(slab.y1).toBeLessThan(floor + params.ceiling);
+    }
+  });
+});
