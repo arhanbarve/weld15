@@ -26,7 +26,7 @@ import type { SuiteParams } from "@/geo/rooms";
 import type { StageId } from "@/state/store";
 import { keyframes, type Keyframe } from "./stages";
 import { journeyPose } from "./pose";
-import { fromJourney } from "./journey";
+import { fromJourney, toJourney } from "./journey";
 import { altitudeOf } from "./geo/frame";
 
 /** One sampled pose along the descent, plus which batch it belongs to. */
@@ -96,6 +96,23 @@ export const TOTAL_BATCHES = Math.ceil(N_POSES / POSES_PER_BATCH);
  */
 const STAGE5_EPS = 1e-6;
 
+/**
+ * Every stage a "jump to stage N" click can land on directly, save stage 0 (u=0 is already
+ * exactly sampled at i=0) and stage 5 (never sampled -- see this file's own header).
+ *
+ * WHY THE UNIFORM GRID ALONE IS NOT ENOUGH FOR THESE. clicking a stage button (Hud.tsx's
+ * setStage) or pressing `[`/`]` resets `t` to exactly 0 -- it does not land on whatever u
+ * the uniform grid happens to carry nearest that stage's own boundary. Measured (this
+ * file's own scripts/measure-preload.mjs-style probe, run against a live session): the
+ * uniform sample nearest stage 2's own u=0.6860 sits at u=0.6909, du=0.0050 -- small in u,
+ * but altitude 755 ft against the real 815 ft, a 7% difference at a range where Google's own
+ * SSE-driven LOD selection is exactly as sensitive as the N_POSES header already warns.
+ * Jumping to stage 2 straight after a "complete" preload queued 538 fresh tiles and took 22s
+ * to settle -- the coarse/streaming frame during that wait is the pixelation this fixes,
+ * not a cosmetic gap.
+ */
+const ANCHOR_STAGES: StageId[] = [1, 2, 3, 4];
+
 export function preloadPoses(params: SuiteParams): PreloadPose[] {
   const kf = keyframes(params);
   const out: PreloadPose[] = [];
@@ -112,5 +129,32 @@ export function preloadPoses(params: SuiteParams): PreloadPose[] {
       batch: Math.floor(i / POSES_PER_BATCH),
     });
   }
+
+  // SNAP THE NEAREST GRID SAMPLE TO EACH ANCHOR, IN PLACE -- `u` and `batch` are left
+  // untouched (so ordering, spacing and every batch-assignment invariant this file's own
+  // tests check are unaffected); only the pose actually registered as a camera is replaced,
+  // with the EXACT (stage, t=0) pose real stage-jump navigation lands on rather than
+  // whatever nearby (stage, t) the uniform grid happened to carry.
+  const used = new Set<number>();
+  for (const stage of ANCHOR_STAGES) {
+    const uAnchor = toJourney(stage, 0, params);
+    let nearest = -1;
+    for (let i = 0; i < out.length; i++) {
+      if (used.has(i)) continue;
+      if (nearest === -1 || Math.abs(out[i]!.u - uAnchor) < Math.abs(out[nearest]!.u - uAnchor)) {
+        nearest = i;
+      }
+    }
+    used.add(nearest);
+    const pose = journeyPose(kf, stage, 0, false, null, null);
+    out[nearest] = {
+      ...out[nearest]!,
+      stage,
+      t: 0,
+      pose,
+      altFt: altitudeOf(pose.position),
+    };
+  }
+
   return out;
 }

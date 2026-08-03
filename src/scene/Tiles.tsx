@@ -425,20 +425,39 @@ export function Tiles() {
        * problem with a queue-depth fix, not a bandwidth one -- `downloadQueue.maxJobs`
        * stayed at its default 25 because the baseline never showed a download backlog.
        *
-       * `lruCache.maxBytesSize` 0.4 GB -> 1 GB (`minBytesSize` 0.3 -> 0.75 GB, same ratio):
-       * the baseline's `inCache` dropped from 693 at stage 4 to 610 at stage 5 while
-       * `loaded` only rose -- eviction, not stage unmounting, since Tiles itself never
-       * unmounts. ~650-700 photorealistic mesh tiles at the default 0.4 GB cap is right
-       * where the byte ceiling (not the 8,000-item ceiling, never close) starts trading a
-       * tile this session already paid to download for one it has not, on a page about to
-       * need both again if the viewer scrubs back. The item ceilings (`minSize`/`maxSize`,
-       * 6,000/8,000) are untouched: nothing this app does gets within an order of magnitude
-       * of them.
+       * `lruCache.maxBytesSize` 0.4 GB -> 1 GB (P11) -> 1.5 GB (P13, this task; `minBytesSize`
+       * kept at the same ratio, 0.75 -> 1.2 GB): the P11 baseline's `inCache` dropped from 693
+       * at stage 4 to 610 at stage 5 while `loaded` only rose -- eviction, not stage
+       * unmounting, since Tiles itself never unmounts. 1 GB was sized against THAT baseline's
+       * per-stage footprint, before P13's preloader existed to hold the WHOLE descent's tiles
+       * resident at once. Measured against the preloader instead (this task): a full descent's
+       * worth of tiles settles at ~1.07-2.7 GB cached depending on the cap itself (a smaller
+       * cap that evicts more also traverses less deeply before a batch goes idle, so total
+       * cached bytes is not independent of the cap). At the old 1 GB cap -- already below the
+       * ~1.07 GB the descent settled at, so it was evicting from the moment it filled, not
+       * just under some later edge case -- a stage jump straight after a "complete" preload
+       * queued 538 fresh downloads (measured, this session), because the content jumping
+       * there needed had already been evicted to make room for whatever loaded after it.
+       *
+       * 1.5 GB, NOT A MUCH LARGER CAP -- MEASURED AGAINST BOTH FAILURE MODES, NOT JUST THE
+       * FIRST ONE. A cap sized to hold the whole descent with near-zero eviction pressure
+       * (3 GB, tried first) does cut the re-fetch (538 tiles -> 30 on the same stage jump),
+       * but the preload itself went from this codebase's own 228-249s baseline
+       * (docs/phases/P13-PRELOAD.md, `preload.spec.ts`'s own deadline comment) to 306-309s at
+       * 1.5 GB and further still at 3 GB -- comfortably fitting more into the cache trades
+       * against how long the preloader spends filling it, since nothing here bounds the
+       * traversal's own depth except cache pressure. 1.5 GB is the smaller of the two sizes
+       * actually measured against the specific eviction this task found (538 -> 112 queued on
+       * the same stage-2 jump), chosen to keep the preload itself inside a reasonable budget
+       * rather than trading one bad wait for a longer one. `preload.spec.ts`'s own deadline
+       * comment carries the current measured preload time. The item ceilings
+       * (`minSize`/`maxSize`, 6,000/8,000) are untouched: nothing this app does gets within an
+       * order of magnitude of them.
        */
       tiles.errorTarget = 8;
       tiles.parseQueue.maxJobs = 16;
-      tiles.lruCache.maxBytesSize = 1 * 2 ** 30;
-      tiles.lruCache.minBytesSize = 0.75 * 2 ** 30;
+      tiles.lruCache.maxBytesSize = 1.5 * 2 ** 30;
+      tiles.lruCache.minBytesSize = 1.2 * 2 ** 30;
 
       rootRequests += 1;
       publishProbe();

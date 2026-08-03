@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { DEFAULT_PARAMS } from "@/geo/rooms";
 import { preloadPoses, N_POSES, TOTAL_BATCHES, POSES_PER_BATCH } from "@/scene/preloadPlan";
+import { toJourney } from "@/scene/journey";
 
 describe("preloadPoses", () => {
   const poses = preloadPoses(DEFAULT_PARAMS);
@@ -67,5 +68,22 @@ describe("preloadPoses", () => {
     const minBatch0 = Math.min(...batch0.map((p) => p.altFt));
     const maxRest = Math.max(...rest.map((p) => p.altFt));
     expect(minBatch0).toBeGreaterThan(maxRest);
+  });
+
+  // A "jump to stage N" click (Hud.tsx's stage buttons, and `[`/`]`) resets t to exactly 0
+  // and lands the real camera there -- not on whatever u the uniform grid happens to carry
+  // nearest that boundary. Without an exact sample at that pose, a settled preload still
+  // queues hundreds of fresh tiles the instant the viewer jumps to a stage: measured at
+  // stage 2, 538 tiles queued and 22s to settle, straight after `__preload.done` fired. Each
+  // stage 1-4 must therefore have a sample at exactly (stage, t=0), not merely a nearby one.
+  it("stages 1-4 each have an exact (stage, t=0) sample, for direct stage-jump navigation", () => {
+    for (const stage of [1, 2, 3, 4] as const) {
+      const uAnchor = toJourney(stage, 0, DEFAULT_PARAMS);
+      const exact = poses.find((p) => p.stage === stage && p.t === 0);
+      expect(exact, `no exact (stage ${stage}, t=0) sample`).toBeDefined();
+      // u is left at its original grid position (batching/ordering untouched); only the
+      // pose itself is replaced, so it can land close to but not exactly at uAnchor.
+      expect(Math.abs(exact!.u - uAnchor)).toBeLessThan(0.05);
+    }
   });
 });
