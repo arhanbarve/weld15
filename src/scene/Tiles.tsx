@@ -418,12 +418,92 @@ export function Tiles() {
        * network, this machine): baseline never settled stage 3-5 within 30 s (184-213 tiles
        * still parsing); the table in the phase 4 section has both sessions' numbers.
        *
-       * `parseQueue.maxJobs` 5 -> 16: the baseline session's own `stats` is the measurement
-       * -- at stage 3 every one of 184 pending tiles had ALREADY finished downloading
-       * (`stats.downloading === 0`, `stats.queued === 0`) and sat waiting on 5 parse slots.
-       * Parsing is CPU-bound glTF/Draco decode, not network, so this is a queue-depth
-       * problem with a queue-depth fix, not a bandwidth one -- `downloadQueue.maxJobs`
-       * stayed at its default 25 because the baseline never showed a download backlog.
+       * `parseQueue.maxJobs` 5 -> 16 (P11): the baseline session's own `stats` is the
+       * measurement -- at stage 3 every one of 184 pending tiles had ALREADY finished
+       * downloading (`stats.downloading === 0`, `stats.queued === 0`) and sat waiting on 5
+       * parse slots. Not network, so this is a queue-depth problem with a queue-depth fix
+       * -- `downloadQueue.maxJobs` stayed at its default 25 because the baseline never
+       * showed a download backlog.
+       *
+       * `parseQueue.maxJobs` 16 -> 64 (this task), AND THE P11 COMMENT ABOVE CALLED THE
+       * REASON WRONG. P11 said "CPU-bound glTF/Draco decode"; Preload.tsx's own
+       * BATCH_TIMEOUT_MS comment repeated it as "CPU-bound and single-threaded". Both are
+       * wrong on all three counts, checked against the library and against real tile bytes
+       * rather than inferred:
+       *
+       *   NO DRACO, NO KTX2, NO WORKERS ANYWHERE IN THIS PIPELINE. `Worker`, `DRACOLoader`,
+       *   `KTX2Loader` and `setWorkerLimit` appear in exactly one implementation file under
+       *   node_modules/3d-tiles-renderer/src -- `three/plugins/GLTFExtensionsPlugin.js`
+       *   (plus its own `.d.ts` and `three/plugins/API.md`, and nothing else in the package),
+       *   which this app does not register and does not need to: Google's photorealistic
+       *   content is plain uncompressed glTF. Fetched and unpacked real .glb tiles straight
+       *   off tile.googleapis.com (root.json -> leaf, session token and Referer supplied by
+       *   hand): every one reports `extensionsUsed: ["KHR_materials_unlit"]` and nothing
+       *   else, a single primitive with float32 POSITION/TEXCOORD_0 and uint8 indices at
+       *   138-194 vertices, and one `image/jpeg` in a bufferView that is 60-85% of the
+       *   tile's bytes. So there is no worker pool to enlarge here -- `DRACOLoader
+       *   .setWorkerLimit(n)` is a real three.js API (node_modules/three/examples/jsm/
+       *   loaders/DRACOLoader.js:146, default 4) with nothing in this app to act on.
+       *
+       *   SO "parsing" IS ONE JPEG PER TILE, AND THE ONLY PART OF IT THAT LEAVES THE MAIN
+       *   THREAD ALREADY DOES. three's GLTFLoader hands buffer-view images to
+       *   ImageBitmapLoader (GLTFLoader.js:2600-2606), i.e. `createImageBitmap`, which the
+       *   browser decodes off-thread (node_modules/three/src/loaders/ImageBitmapLoader.js).
+       *
+       *   WHICH MEANS `maxJobs` IS NOT A CORE COUNT AND `navigator.hardwareConcurrency`
+       *   (18 on this machine) IS THE WRONG YARDSTICK. `parseQueue` is a `PriorityQueue`
+       *   (core/renderer/utilities/PriorityQueue.js): it dispatches only from a
+       *   requestAnimationFrame callback (`scheduleJobRun` -> `Scheduler
+       *   .requestAnimationFrame`, lines 85-89 and 333-343) and holds at most `maxJobs`
+       *   jobs in flight. Its throughput is therefore maxJobs / job-latency, and job
+       *   latency here is not compute -- it is waiting.
+       *
+       * MEASURED, ON A LIVE KEYED SESSION, INSTRUMENTED RATHER THAN REASONED. Wrapping
+       * `parseQueue.add`/`tryRunJobs` and every WebGL2 prototype entry point over a 40 s
+       * window inside a real preload (batch 2 onward): main thread 98.7% busy by
+       * PerformanceObserver longtask, frame time p50 229 ms (4.4 fps), parse-slot occupancy
+       * pinned at 16 with 456 tiles backlogged, per-job latency p50 1,335 ms -- about six
+       * frames -- and `createImageBitmap` awaits averaging 685 ms. Total time inside ALL
+       * WebGL calls was 202 ms of that 40 s window (0.5%), and texture upload specifically
+       * (430 texSubImage2D + generateMipmap pairs, the `gl.initTexture` calls below) was
+       * 11 ms. So the 16 slots were spending their time queued behind a busy main thread,
+       * not decoding.
+       *
+       * 16 -> 64 IS WORTH ~2.3-2.7x PARSE THROUGHPUT, AND 64 IS THE KNEE. Alternating
+       * windows within single live sessions -- the fair comparison here, since the machine
+       * and the network drift over a 9-minute preload and successive batches are not
+       * equally expensive: 13.7 tiles/s at 16 against 32.1 at 64 (batch 2-3); at batch 4,
+       * where frame time collapses to ~1 s, 0.8 jobs/s at 16 with 1,158 tiles backlogged
+       * against 13.4 at 64 in the very next window. Past 64 it stops paying, because
+       * latency starts scaling with concurrency instead of throughput doing so: 1,029 ms
+       * p50 at 64 against 1,687 ms at 128, for 46.6 against 43.0 tiles/s. 64 costs some
+       * preload frame rate (4.39 -> 3.15 fps) which nobody sees -- Preloader.tsx's overlay
+       * is up -- and costs nothing afterwards, because ordinary in-app streaming never
+       * builds the several-hundred-tile backlog a deep queue exists to drain.
+       *
+       * DISCLOSED, NOT BURIED: every number above was taken in the same headless Chromium
+       * this project's own measurement scripts use, and that Chromium renders through
+       * SwiftShader -- `WEBGL_debug_renderer_info` reports "ANGLE (Google, Vulkan 1.3.0
+       * (SwiftShader Device ...), SwiftShader driver)" -- i.e. software rasterisation, which
+       * is exactly why frame time is ~229 ms and why 88% of a CPU profile's samples land in
+       * native `(program)` rather than in any JS frame. That makes these numbers directly
+       * comparable to the 510-570 s preload figures this file and P13-PRELOAD.md already
+       * carry (same harness), but it also means a real user's GPU-accelerated browser has
+       * shorter frames, shorter parse latency, and therefore less to gain from the extra
+       * slots than the 2.3-2.7x measured here. The direction is not in doubt -- parse latency
+       * is a round trip through `createImageBitmap` and back through the main thread, which
+       * is waiting rather than compute on any renderer -- but the magnitude on real hardware
+       * is unmeasured, and 64 was chosen as the knee of the curve the harness could show.
+       *
+       * WHAT IS STILL LEFT ON THE TABLE IS NOT IN THIS FILE. The preload is rendering-bound
+       * before it is parse-bound: ~5,900 drawElements per frame (234,452 in that 40 s
+       * window), because TilesRenderer draws the UNION of every registered synthetic
+       * camera's selection every frame and Preload.tsx accumulates 4 to 28 of them. Setting
+       * `tiles.group.visible = false` for the duration measured 34 tiles/s at maxJobs 16 and
+       * 91 at 64 -- a further ~2.5x on top of this change -- but that is a preload-lifecycle
+       * decision belonging next to the code that registers and removes those cameras, not a
+       * property of how the tileset is configured, so it is recorded here as a finding
+       * rather than done here.
        *
        * `lruCache.maxBytesSize` 0.4 GB -> 1 GB (P11) -> 4 GB (P13, this task; `minBytesSize`
        * kept at the same ratio, 0.75 -> 3.5 GB): the P11 baseline's `inCache` dropped from 693
@@ -453,7 +533,7 @@ export function Tiles() {
        * of them.
        */
       tiles.errorTarget = 8;
-      tiles.parseQueue.maxJobs = 16;
+      tiles.parseQueue.maxJobs = 64;
       tiles.lruCache.maxBytesSize = 4 * 2 ** 30;
       tiles.lruCache.minBytesSize = 3.5 * 2 ** 30;
 

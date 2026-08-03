@@ -62,6 +62,14 @@ export type PreloadPose = {
  * scripts/measure-preload.mjs and scripts/verify-retention.mjs after any further change to
  * this constant; a bounded residual can be disclosed (LoadingBar.tsx covers ordinary
  * in-app streaming for exactly this case) but should not be assumed away.
+ *
+ * RE-TRIED AT 28 AGAINST THE 4 GB lruCache CAP (Tiles.tsx's own `onRootTileset` comment),
+ * hoping the bigger cache made density a cheaper lever than it was against the old 1 GB one.
+ * It is not: an isolated run at 28 poses (`POSES_PER_BATCH` scaled to 4 to keep 7 batches)
+ * cut total preload time only ~10% (510-567s -> 476s) while the settle time at the exact
+ * mid-scrub position this task's own shattered-geometry bug reproduced at got slightly WORSE
+ * (74s vs ~68-74s at 56), not better -- sampling density and cache headroom are independent
+ * levers, and halving the first bought nothing on the actual complaint. Reverted to 56.
  */
 export const N_POSES = 56;
 

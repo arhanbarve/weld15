@@ -39,8 +39,11 @@ And the decisive observation, already recorded in `Tiles.tsx:398`: at stage 3, *
 
 So the costs, in order of how much they hurt:
 
-- **(b) Parse** — Draco/glTF decode. CPU-bound, main-thread, serial. `parseQueue.maxJobs = 16`
-  buys queue depth, not parallelism. This is what pushes frame time to 440 ms (≈2.3 fps).
+- **(b) Parse** — ~~Draco/glTF decode. CPU-bound, main-thread, serial.~~ **This characterisation
+  was wrong and was later re-measured — see §6.4.** There is no Draco anywhere in Google's
+  photorealistic content and no worker in `3d-tiles-renderer`'s parse path; "parse" is one
+  embedded JPEG per tile through `createImageBitmap`, and its latency is *waiting*, not
+  compute. `parseQueue.maxJobs` therefore buys real throughput, and is now 64, not 16.
 - **(c) GPU upload and shader compile** — every tile's texture uploads on first draw;
   `tilesCarve.ts` runs `onBeforeCompile` per material.
 - **(a) Fetch** — real, not dominant.
@@ -428,7 +431,67 @@ on a generous 50% bound (roughly 3–4× the measured residual) rather than zero
 regression in retention is still caught without the gate being permanently on the edge of
 flaking over an already-understood, already-bounded gap.
 
-### 6.4 An observed reliability risk, not just a theoretical one
+### 6.4 Re-measuring the parse bottleneck: §0.1's bullet (b) named the wrong cause
+
+`parseQueue.maxJobs` was raised 5 → 16 in P11 on solid evidence (tiles finished downloading
+and sat waiting on slots) but with an explanation that was never checked: "Draco/glTF decode,
+CPU-bound, main-thread, serial", repeated in `Preload.tsx`'s `BATCH_TIMEOUT_MS` comment as
+"CPU-bound and single-threaded". Checked against the library and against real tile bytes:
+
+- **No Draco, no KTX2, no workers.** `Worker` / `DRACOLoader` / `KTX2Loader` /
+  `setWorkerLimit` appear in exactly one implementation file in `3d-tiles-renderer@0.5.0`
+  (`three/plugins/GLTFExtensionsPlugin.js`), which this app does not register — and does not
+  need to. Real `.glb` tiles pulled straight off `tile.googleapis.com` report
+  `extensionsUsed: ["KHR_materials_unlit"]` and nothing else: one primitive, float32
+  `POSITION`/`TEXCOORD_0`, uint8 indices, 138–194 vertices, and one `image/jpeg` bufferView
+  that is 60–85% of the tile's bytes. So there is no worker pool to enlarge.
+- **The one part that can leave the main thread already does.** three's `GLTFLoader` routes
+  buffer-view images to `ImageBitmapLoader`, i.e. `createImageBitmap`, decoded off-thread.
+- **`maxJobs` is not a core count.** `PriorityQueue` dispatches only from a
+  `requestAnimationFrame` callback and holds ≤ `maxJobs` in flight, so throughput is
+  `maxJobs / job-latency` — and job latency here is queueing behind a busy main thread.
+
+Instrumented over a 40 s window inside a real preload (batch 2 on): main thread **98.7%**
+busy, frame time p50 **229 ms** (4.4 fps), parse occupancy pinned at 16 with **456** tiles
+backlogged, job latency p50 **1,335 ms** (≈6 frames), `createImageBitmap` awaits averaging
+**685 ms**. Time inside *all* WebGL calls: **202 ms of 40 s (0.5%)**; texture upload
+(`gl.initTexture`, §6's step 6) **11 ms**. Nothing was decoding — the slots were waiting.
+
+Alternating windows inside single live sessions (the fair comparison — successive batches are
+not equally expensive, so a between-run wall-clock A/B would confound the two):
+
+| `maxJobs` | tiles/s (batch 2–3) | job latency p50 | at batch 4 (≈1 s frames) |
+|---|---|---|---|
+| 16 | 13.7 | 1,335 ms | 0.8 jobs/s, 1,158 backlogged |
+| 64 | 32.1 | 1,029 ms | 13.4 jobs/s |
+| 128 | 43.0 | 1,687 ms | — |
+
+**64 is the knee**: past it, latency scales with concurrency instead of throughput doing so.
+Shipped as 64 (`Tiles.tsx`'s `onRootTileset`). Cost: preload frame rate 4.39 → 3.15 fps, which
+nobody sees behind `Preloader.tsx`'s overlay, and nothing afterwards — ordinary in-app
+streaming never builds the several-hundred-tile backlog a deep queue exists to drain.
+
+**Caveat, stated rather than hidden.** All of this — including §6.2's wall-clock figures — was
+measured in headless Chromium rendering through **SwiftShader** (`WEBGL_debug_renderer_info`:
+"ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device …), SwiftShader driver)"). That is why frame
+time is ~229 ms and why 88% of profile samples land in native `(program)`. The numbers are
+internally comparable, but a GPU-accelerated browser has shorter frames and less to gain.
+
+**The bigger lever was not in `Tiles.tsx` — it was in `Preload.tsx`, and it IS implemented
+now.** The preload is rendering-bound before it is parse-bound: **~5,900 `drawElements` per
+frame** (234,452 in that 40 s window), because `TilesRenderer` draws the union of every
+registered synthetic camera's selection every frame and this phase accumulates 4 → 28 of
+them. Hiding `tiles.group` for the duration of the blocking overlay (nobody can see it
+regardless — `Preloader.tsx`'s ladder is the only thing on screen) measured **34 tiles/s at
+`maxJobs` 16 and 91 at 64** in isolation — a further ~2.5×. Shipped in `Preload.tsx`'s own
+job loop (`tiles.group.visible = j.batch > UNLOCK_AFTER_BATCH`, revealed exactly at unlock,
+since the real camera needs it visible from that point on). Combined with `maxJobs` 64 and progressive unlock (the app becomes interactive after
+`UNLOCK_AFTER_BATCH` settles rather than waiting for the whole descent -- see
+`Preload.tsx`'s own `UNLOCK_AFTER_BATCH` comment for the full reasoning): a clean isolated
+run went from 510-515s total to **235.8s**, and this phase's own e2e gate (preload plus a
+full 0→1→0 scrub) dropped from 9.4-9.7 minutes to **4.9 minutes**.
+
+### 6.5 An observed reliability risk, not just a theoretical one
 
 Across the real-key runs taken while measuring this phase, the SwiftShare-rendered
 (software) Chromium instance driving `scripts/measure-preload.mjs` crashed outright once

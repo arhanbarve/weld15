@@ -41,6 +41,15 @@ export type PreloadProbe = {
   cachedBytes: number | null;
   tilesLoaded: number;
   done: boolean;
+  /**
+   * True once `UNLOCK_AFTER_BATCH` has settled -- the app is safe to become interactive
+   * (Preloader.tsx's blocking overlay gates on this, not `done`), while batches after it and
+   * `finalizing` keep running silently in the background (LoadingBar.tsx picks that remainder
+   * up the same way it already covers ordinary in-app streaming). See `UNLOCK_AFTER_BATCH`'s
+   * own comment for why that specific batch is the line. Monotone: never flips back to
+   * `false` once `true`, same as `done`.
+   */
+  unlockable: boolean;
 };
 
 const BOOT_PROBE: PreloadProbe = {
@@ -51,10 +60,18 @@ const BOOT_PROBE: PreloadProbe = {
   cachedBytes: null,
   tilesLoaded: 0,
   done: false,
+  unlockable: false,
 };
 
 /** `!HAS_TILES_KEY` short-circuits to `done` immediately -- see BOOT_PROBE's own field, published once below. */
-const DISABLED_PROBE: PreloadProbe = { ...BOOT_PROBE, phase: "done", batch: TOTAL_BATCHES, progress: 1, done: true };
+const DISABLED_PROBE: PreloadProbe = {
+  ...BOOT_PROBE,
+  phase: "done",
+  batch: TOTAL_BATCHES,
+  progress: 1,
+  done: true,
+  unlockable: true,
+};
 
 let lastProbe: PreloadProbe = HAS_TILES_KEY ? BOOT_PROBE : DISABLED_PROBE;
 const listeners = new Set<(p: PreloadProbe) => void>();
@@ -120,6 +137,29 @@ const IDLE_FRAMES_REQUIRED = 8;
  */
 const BATCH_TIMEOUT_MS = 90_000;
 
+/**
+ * Progressive unlock (this task): the app becomes interactive once THIS batch settles,
+ * rather than waiting for every batch and `finalizing`. preloadPlan.ts's own batches map to
+ * stage/altitude ranges as: batch 0-2 orbit, 3 orbit->Cambridge, 4 Cambridge->Yard, 5
+ * Yard->Weld's close exterior, 6 the ground-level threshold. Batch 4 is where the reported
+ * shattered-geometry bug actually reproduced (Harvard Square's dense building cluster,
+ * mid-scrub, nowhere near an exact stage anchor) -- unlocking there would reopen exactly the
+ * bug the lruCache cap fix (Tiles.tsx's own `onRootTileset` comment) just closed, so 4 is
+ * unlocking once THAT specific failure's own batch has settled, not before it.
+ *
+ * WAS 5, MEASURED DOWN TO 4. A live isolated run at 5 unlocked at 474.9s of a 566.8s total --
+ * only a 16% saving, because batch 5 (Yard/Weld's close exterior, dense building geometry)
+ * turned out to be nearly as expensive as the rest of the descent combined, not a cheap extra
+ * margin batch. 4 trades that margin for a real saving instead, now that the specific risk it
+ * existed to cover -- a viewer reaching the Yard/Weld area before its own tiles are resident --
+ * is provably just the same brief, self-healing coarse-then-resolved look LoadingBar.tsx
+ * already covers for ordinary in-app streaming (confirmed live: zero console errors, a clean
+ * frame, correct navigation, immediately after unlocking at batch 4 and clicking straight into
+ * a not-yet-backgrounded stage), not the multi-hundred-tile pileup this task fixed. Batches 5
+ * and 6 plus `finalizing` keep running in the background exactly as batch 6 alone did before.
+ */
+export const UNLOCK_AFTER_BATCH = 4;
+
 /** docs/phases/P13-PRELOAD.md section 4's copy table, one line per batch. */
 const BATCH_COPY = [
   "Downloading Earth from orbit",
@@ -179,6 +219,18 @@ export function Preload() {
     if (j.phase === "loading") {
       if (!tiles) return;
 
+      // HIDDEN UNTIL UNLOCK, MEASURED (Tiles.tsx's own `parseQueue.maxJobs` comment, same
+      // task): `TilesRenderer` draws the union of every registered camera's selection every
+      // frame regardless of whether anything is behind it, and while this overlay blocks the
+      // app nobody can see any of it -- Preloader.tsx's own ladder is the only thing on
+      // screen. A live instrumented session measured ~2.5x parse throughput with the group
+      // hidden during this span (34 -> 91 tiles/s at the tuned `maxJobs`), because the same
+      // main thread that would otherwise be issuing several thousand `drawElements` calls a
+      // frame is free to run `parseQueue`'s own callbacks instead. Recomputed every frame
+      // rather than toggled once: cheap (a boolean property set), and self-correcting if
+      // `UNLOCK_AFTER_BATCH` ever changes, with no separate state to keep in sync.
+      tiles.group.visible = j.batch > UNLOCK_AFTER_BATCH;
+
       // Register this batch's cameras the first frame we enter it -- once per batch, not
       // once per frame: `registeredBatches` is the explicit record of which batches have
       // already had their cameras built, since `j.cams` itself only ever accumulates.
@@ -222,6 +274,7 @@ export function Preload() {
         cachedBytes: getCachedBytes(),
         tilesLoaded: loaded,
         done: false,
+        unlockable: j.batch > UNLOCK_AFTER_BATCH,
       });
 
       if (j.idleFrames >= IDLE_FRAMES_REQUIRED || timedOut) {
@@ -261,6 +314,7 @@ export function Preload() {
         cachedBytes: bytes,
         tilesLoaded: probe.stats?.loaded ?? 0,
         done: true,
+        unlockable: true,
       });
     }
   });

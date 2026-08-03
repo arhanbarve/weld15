@@ -103,7 +103,11 @@ export function LoadingBar() {
   // docs/phases/P13-PRELOAD.md section 1 decision 1's own accepted gap) -- not first load,
   // which is Preloader.tsx's blocking overlay. Showing both at once would be two progress
   // UIs arguing about the same wait, so this one stays hidden until the preloader's own
-  // `done` flips (or never applies at all, `!HAS_TILES_KEY`/`?preload=0`).
+  // `unlockable` flips (or never applies at all, `!HAS_TILES_KEY`/`?preload=0`). Progressive
+  // unlock (this task, Preload.tsx's own `UNLOCK_AFTER_BATCH` comment) means the app can
+  // already be interactive while later batches and `finalizing` keep running in the
+  // background -- gating on `unlockable` rather than `done` is what lets THIS bar pick that
+  // remainder up and show it, exactly the same as any other in-app streaming.
   useEffect(() => subscribePreload(setPreload), []);
 
   // The creep floor's clock. Only ticks while there is a real episode in flight -- boot,
@@ -132,7 +136,7 @@ export function LoadingBar() {
    * flip to 0 immediately on hide (so the transition has something to animate) while
    * `mounted` only flips false once `FADE_MS` has actually elapsed.
    */
-  const shouldShow = HAS_TILES_KEY && probe.phase !== "settled" && preload.done;
+  const shouldShow = HAS_TILES_KEY && probe.phase !== "settled" && preload.unlockable;
   useEffect(() => {
     if (shouldShow) {
       const id = setTimeout(() => {
