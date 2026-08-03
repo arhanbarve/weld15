@@ -495,47 +495,57 @@ export function Tiles() {
        * is waiting rather than compute on any renderer -- but the magnitude on real hardware
        * is unmeasured, and 64 was chosen as the knee of the curve the harness could show.
        *
-       * WHAT IS STILL LEFT ON THE TABLE IS NOT IN THIS FILE. The preload is rendering-bound
-       * before it is parse-bound: ~5,900 drawElements per frame (234,452 in that 40 s
-       * window), because TilesRenderer draws the UNION of every registered synthetic
-       * camera's selection every frame and Preload.tsx accumulates 4 to 28 of them. Setting
-       * `tiles.group.visible = false` for the duration measured 34 tiles/s at maxJobs 16 and
-       * 91 at 64 -- a further ~2.5x on top of this change -- but that is a preload-lifecycle
-       * decision belonging next to the code that registers and removes those cameras, not a
-       * property of how the tileset is configured, so it is recorded here as a finding
-       * rather than done here.
+       * WHAT WAS LEFT ON THE TABLE HERE, AND ISN'T ANY MORE. The preload used to be
+       * rendering-bound before it was parse-bound: ~5,900 drawElements per frame (234,452 in
+       * a 40 s measurement window), because TilesRenderer draws the UNION of every registered
+       * synthetic camera's selection every frame and Preload.tsx accumulates several of them
+       * per batch. Preload.tsx now hides `tiles.group` for the whole blocking span (nobody
+       * can see it regardless -- Preloader.tsx's overlay is the only thing on screen) and
+       * reveals it exactly at unlock; see that file's own `UNLOCK_AFTER_BATCH` comment.
+       * Measured a further ~2.5x parse throughput on top of the `maxJobs` change above.
        *
-       * `lruCache.maxBytesSize` 0.4 GB -> 1 GB (P11) -> 4 GB (P13, this task; `minBytesSize`
-       * kept at the same ratio, 0.75 -> 3.5 GB): the P11 baseline's `inCache` dropped from 693
-       * at stage 4 to 610 at stage 5 while `loaded` only rose -- eviction, not stage
+       * `lruCache.maxBytesSize` 0.4 GB -> 1 GB (P11) -> 4 GB -> 8 GB (this pass; `minBytesSize`
+       * kept at the same ratio, 0.75 -> 3.5 -> 7 GB): the P11 baseline's `inCache` dropped from
+       * 693 at stage 4 to 610 at stage 5 while `loaded` only rose -- eviction, not stage
        * unmounting, since Tiles itself never unmounts. 1 GB was sized against THAT baseline's
        * per-stage footprint, before P13's preloader existed to hold the WHOLE descent's tiles
        * resident at once, and it was already too small for that job: a full descent settles
-       * at ~1.07 GB minimum, so the 1 GB cap was evicting from the moment it filled, not just
-       * under some later edge case -- a stage jump straight after a "complete" preload queued
-       * 538 fresh downloads (measured), because the content jumping there needed had already
-       * been evicted to make room for whatever loaded after it.
-       *
-       * 1.5 GB WAS TRIED FIRST AND WAS STILL NOT ENOUGH -- MEASURED AGAINST THE DENSE PART OF
-       * THE DESCENT, NOT JUST ONE STAGE'S OWN ANCHOR. 1.5 GB fixes a straight stage-N jump
-       * (538 -> 112 queued tiles) but a real user scrubbing continuously through Harvard
-       * Square's dense building cluster (stage 1, mid-scrub, nowhere near an exact anchor)
-       * still showed visibly shattered/faceted geometry -- parent-level tiles standing in
-       * for children that never finished resident, not just a coarser LOD. The user's own
-       * priority, stated directly: let it take longer, but make it actually finish. 4 GB
-       * (measured settling at ~2.2-2.7 GB cached, comfortable headroom above that) is the
-       * smallest cap tested that produced a clean, fully-resolved frame at that exact
-       * position after landing -- confirmed by screenshot, not assumed. The tradeoff is
-       * preload time: ~510-515s isolated at 4 GB against the original 228-249s baseline at
-       * 1 GB (`preload.spec.ts`'s own deadline comment carries the current measured figure).
-       * That is the deliberate trade this cap makes. The item ceilings (`minSize`/`maxSize`,
-       * 6,000/8,000) are untouched: nothing this app does gets within an order of magnitude
-       * of them.
+       * at ~1.07 GB minimum, so the 1 GB cap was evicting from the moment it filled -- a stage
+       * jump straight after a "complete" preload queued 538 fresh downloads, because the
+       * content jumping there needed had already been evicted to make room for whatever
+       * loaded after it. 1.5 GB fixed a straight stage-N jump (538 -> 112 queued) but not a
+       * real user scrubbing through Harvard Square's dense cluster, still showing shattered
+       * geometry. 4 GB fixed that specific position -- confirmed by screenshot -- but the
+       * parseQueue/rendering fixes above changed the calculus again: faster settling per
+       * batch means MORE content accumulates before a batch goes idle (a batch that used to
+       * time out or idle-out shallow now keeps refining while it still can), and a live run at
+       * 4 GB after those fixes reached ~3.7 GB cached -- close enough to the cap that the
+       * SAME eviction risk this file's own history keeps finding could reopen again under a
+       * denser part of the descent this session's own measurements have not yet hit. 8 GB
+       * restores the same order of headroom over that new, higher high-water mark that 4 GB
+       * once had over the old one, rather than assuming the fixes above didn't also raise how
+       * much the descent settles at. The item ceilings (`minSize`/`maxSize`, 6,000/8,000) are
+       * untouched: nothing this app does gets within an order of magnitude of them.
+       */
+      /**
+       * `downloadQueue.maxJobs` default 25 -> 64 (this pass), NOW THAT THE P11 BASELINE'S
+       * OWN REASON FOR LEAVING IT ALONE NO LONGER HOLDS. P11 kept the default because that
+       * baseline never showed a download backlog -- but that was measured against
+       * `parseQueue.maxJobs = 5`, where parsing was so far behind that downloads could never
+       * get ahead of it either. A live preload with the parse fix above (64, no longer the
+       * bottleneck) shows a REAL download-side backlog instead: `stats.queued` peaked at
+       * 1,051 while `stats.downloading` peaked at 50 -- already above the 25-job default,
+       * which means requests were completing faster than the queue's own accounting could
+       * be sampled at 1 Hz, and a four-figure queued count sitting behind a 25-deep window
+       * is exactly the P11 "queue-depth problem, not a bandwidth one" pattern recurring one
+       * level up. Matched to `parseQueue`'s own tuned value rather than picked separately --
+       * there is no reason to over-provision one queue past what the other can drain.
        */
       tiles.errorTarget = 8;
       tiles.parseQueue.maxJobs = 64;
-      tiles.lruCache.maxBytesSize = 4 * 2 ** 30;
-      tiles.lruCache.minBytesSize = 3.5 * 2 ** 30;
+      tiles.downloadQueue.maxJobs = 64;
+      tiles.lruCache.maxBytesSize = 8 * 2 ** 30;
+      tiles.lruCache.minBytesSize = 7 * 2 ** 30;
 
       rootRequests += 1;
       publishProbe();

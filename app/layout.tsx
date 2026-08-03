@@ -29,6 +29,20 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className={`${plexMono.variable} ${baskerville.variable}`}>
+      <head>
+        {/*
+          Google's Photorealistic 3D Tiles (Tiles.tsx) are the very first cross-origin
+          fetches the app makes once a key is present, and there are thousands of them
+          over one preload -- paying the DNS + TLS + HTTP/2 handshake for the FIRST one
+          rather than the one after it is a real, free head start. Next.js hoists a
+          Server Component's own <link> into <head> automatically; no next/head needed
+          in the App Router. `crossOrigin` matches how the tile fetches themselves run
+          (CORS mode, GoogleCloudAuthPlugin's session token in the request, not cookies),
+          since a preconnect without it only covers same-mode requests.
+        */}
+        <link rel="preconnect" href="https://tile.googleapis.com" crossOrigin="anonymous" />
+        <link rel="dns-prefetch" href="https://tile.googleapis.com" />
+      </head>
       <body>{children}</body>
     </html>
   );

@@ -138,27 +138,29 @@ const IDLE_FRAMES_REQUIRED = 8;
 const BATCH_TIMEOUT_MS = 90_000;
 
 /**
- * Progressive unlock (this task): the app becomes interactive once THIS batch settles,
- * rather than waiting for every batch and `finalizing`. preloadPlan.ts's own batches map to
- * stage/altitude ranges as: batch 0-2 orbit, 3 orbit->Cambridge, 4 Cambridge->Yard, 5
- * Yard->Weld's close exterior, 6 the ground-level threshold. Batch 4 is where the reported
- * shattered-geometry bug actually reproduced (Harvard Square's dense building cluster,
- * mid-scrub, nowhere near an exact stage anchor) -- unlocking there would reopen exactly the
- * bug the lruCache cap fix (Tiles.tsx's own `onRootTileset` comment) just closed, so 4 is
- * unlocking once THAT specific failure's own batch has settled, not before it.
+ * Progressive unlock: the app becomes interactive once THIS batch settles, rather than
+ * waiting for every batch and `finalizing`. preloadPlan.ts's own batches map to stage/altitude
+ * ranges as: batch 0-2 orbit, 3 orbit->Cambridge, 4 Cambridge->Yard, 5 Yard->Weld's close
+ * exterior, 6 the ground-level threshold. Batch 4 is where the reported shattered-geometry bug
+ * actually reproduced (Harvard Square's dense building cluster, mid-scrub, nowhere near an
+ * exact stage anchor) -- unlocking there would reopen exactly the bug the lruCache cap fix
+ * (Tiles.tsx's own `onRootTileset` comment) just closed, so 4 is the earliest batch that could
+ * even be considered.
  *
- * WAS 5, MEASURED DOWN TO 4. A live isolated run at 5 unlocked at 474.9s of a 566.8s total --
- * only a 16% saving, because batch 5 (Yard/Weld's close exterior, dense building geometry)
- * turned out to be nearly as expensive as the rest of the descent combined, not a cheap extra
- * margin batch. 4 trades that margin for a real saving instead, now that the specific risk it
- * existed to cover -- a viewer reaching the Yard/Weld area before its own tiles are resident --
- * is provably just the same brief, self-healing coarse-then-resolved look LoadingBar.tsx
- * already covers for ordinary in-app streaming (confirmed live: zero console errors, a clean
- * frame, correct navigation, immediately after unlocking at batch 4 and clicking straight into
- * a not-yet-backgrounded stage), not the multi-hundred-tile pileup this task fixed. Batches 5
- * and 6 plus `finalizing` keep running in the background exactly as batch 6 alone did before.
+ * 4 WAS TRIED, MOVED BACK TO 5. A live isolated run at 5 (BEFORE the parseQueue/rendering
+ * fixes below existed) unlocked at only a 16% time saving over waiting for everything, because
+ * batch 5 (Yard/Weld's close exterior, dense building geometry) was nearly as expensive as the
+ * rest of the descent combined -- that measurement is what motivated trying 4 instead, and 4
+ * measured clean at the time (zero console errors, correct navigation, self-healing streaming
+ * afterward). Moved back to 5 regardless: covering through Yard/Weld's own close exterior --
+ * one batch short of the ground-level threshold, i.e. everything up to entering Weld Hall --
+ * before unlocking is the safer bar for a build this many rendering regressions have already
+ * been found in, and the `maxJobs`/hidden-rendering fixes below make the wait to reach batch 5
+ * far shorter than the original 474.9s measurement now reflects -- re-measure rather than
+ * assume. Batch 6 plus `finalizing` keep running in the background regardless of which of these
+ * two the app unlocks at.
  */
-export const UNLOCK_AFTER_BATCH = 4;
+export const UNLOCK_AFTER_BATCH = 5;
 
 /** docs/phases/P13-PRELOAD.md section 4's copy table, one line per batch. */
 const BATCH_COPY = [
