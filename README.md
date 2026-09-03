@@ -69,6 +69,8 @@ npm run test:e2e  # Playwright e2e (playwright.config.ts)
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE). Third-party imagery and building-footprint datasets
-carry their own terms; see [`docs/SOURCES.md`](docs/SOURCES.md) for per-dataset
-attribution.
+MIT — see [`LICENSE`](LICENSE).
+
+Third-party imagery and building-footprint datasets carry their own terms and are
+**not** covered by the MIT grant; see [`NOTICE`](NOTICE) for the summary and
+[`docs/SOURCES.md`](docs/SOURCES.md) for per-dataset attribution.

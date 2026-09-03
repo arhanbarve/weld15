@@ -1,0 +1,39 @@
+# NOTICE
+
+The MIT licence in `LICENSE` covers this project's own code and content. It does
+not cover the third-party data and imagery this project redistributes or derives
+from. Those carry their own terms, summarised here and documented per dataset in
+`docs/SOURCES.md`.
+
+## Imagery (`public/imagery/`)
+
+Every file under `public/imagery/` is a derived crop or resampling of third-party
+photography. `scripts/fetch-imagery.mjs` records each source URL, bounding box,
+projection, resampling, and a SHA-256 of what was downloaded.
+
+- **NASA Blue Marble Next Generation** (topography and bathymetry, August 2004,
+  MODIS at 500 m) — a US federal work, not subject to copyright in the United
+  States. Acknowledgement is requested rather than required, and is given both
+  here and in the app's Sources panel.
+- **USDA NAIP** (Farm Service Agency, flown July 2023) — a US federal work, not
+  subject to copyright in the United States.
+- **MassGIS** (Bureau of Geographic Information, Commonwealth of Massachusetts
+  EOTSS; flown March–April 2025 at 15 cm) — redistribution of derived crops is
+  permitted; acknowledgement is requested and is given in the app.
+
+## Building footprints and campus data
+
+- **OpenStreetMap** (way 29824449) — © OpenStreetMap contributors, ODbL.
+- **Microsoft GlobalMLBuildingFootprints** — ODbL.
+- **Harvard PPM public ArcGIS**, **Cambridge GIS `BASEMAP_Buildings`**,
+  **MassGIS Building Structures**, and **Cambridge BEUDO** — public datasets used
+  under their respective terms.
+
+Use of the ODbL-licensed footprint data in a derived work carries ODbL
+obligations that the MIT grant above does not waive.
+
+## Affiliation
+
+This is not a Harvard product. It is not affiliated with, endorsed by, or
+sponsored by Harvard University. Building names and identifiers are used
+descriptively to identify the subject of the model.
