@@ -31,7 +31,7 @@ describe("buildSuite at defaults", () => {
     expect(suite.residuals.across).toBeCloseTo(0, 6);
   });
 
-  it("reproduces every dimension the resident gave, within his stated one foot", () => {
+  it("reproduces every dimension the resident gave, within their stated one foot", () => {
     const checks: [string, number, number][] = [
       ["common1", 15, 20],
       ["k", 12, 10],

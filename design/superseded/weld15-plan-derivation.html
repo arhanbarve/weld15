@@ -129,7 +129,7 @@
       <div class="frame-body"><svg id="axes" role="img" aria-label="Diagram of the suite band and its two measured axes"></svg></div>
     </div>
     <div class="note">
-<b>Depth is 20 ft, and the resident told us without meaning to.</b> He gave the common room as
+<b>Depth is 20 ft, and the resident told us without meaning to.</b> They gave the common room as
 "15 ft by 15-20 ft" &mdash; one number confident, one a range. A range appears when you are reading a
 plan and cannot tell where a wall lands. The common room runs from the end wall back to the
 corridor, so its uncertain dimension <b>is</b> the band depth.</div>
@@ -220,7 +220,7 @@ selector, because being wrong should cost one click.</div>
   </section>
 
   <footer>
-    <span>Given dimensions: housing office, 29 July 2026. Explicitly approximate, plus or minus one foot, read from a 1995 blueprint.</span>
+    <span>Given dimensions: housing office email. Explicitly approximate, plus or minus one foot, read from a 1995 blueprint.</span>
     <span>Building geometry: Harvard Planning &amp; Project Management public ArcGIS, Facilities3D layer. Weld Hall 54 x 151 ft, 87.01 ft tall, long axis 13.2 deg east of north. Cross-checked against OpenStreetMap way 29824449.</span>
     <span>Bathroom benchmark: three-quarter baths average 36 sq ft, range 18 to 50. Room history: The Harvard Crimson, 22 November 1983.</span>
   </footer>
@@ -515,12 +515,12 @@ selector, because being wrong should cost one click.</div>
   /* ---------------- ledger ---------------- */
 
   const LEDGER = [
-    ["Common room", "15 x 20 ft", "given", "the resident: \"a big rectangle... roughly 15 ft by 15-20 ft\". The range resolves to the band depth.", "no"],
-    ["Bedroom A", "10 x 16 ft", "given", "the resident: \"the first one is a dorm room measuring about 10 ft by 16 ft\".", "no"],
-    ["Bedroom B", "10 x 16 ft", "given", "the resident wrote \"16 ft by 10 ft\". Same shape, different word order, not a rotation.", "no"],
-    ["Room K", "10 x 12 ft", "given", "the resident: \"attached to the common room... on the blueprint it has the letter K\".", "no"],
-    ["Entry opens into a hall", "-", "given", "the resident: \"you will enter into a hallway\".", "no"],
-    ["Common room on the right", "-", "given", "the resident: \"immediately to your right will be the common room\".", "no"],
+    ["Common room", "15 x 20 ft", "given", "The resident: \"a big rectangle... roughly 15 ft by 15-20 ft\". The range resolves to the band depth.", "no"],
+    ["Bedroom A", "10 x 16 ft", "given", "The resident: \"the first one is a dorm room measuring about 10 ft by 16 ft\".", "no"],
+    ["Bedroom B", "10 x 16 ft", "given", "The resident wrote \"16 ft by 10 ft\". Same shape, different word order, not a rotation.", "no"],
+    ["Room K", "10 x 12 ft", "given", "The resident: \"attached to the common room... on the blueprint it has the letter K\".", "no"],
+    ["Entry opens into a hall", "-", "given", "The resident: \"you will enter into a hallway\".", "no"],
+    ["Common room on the right", "-", "given", "The resident: \"immediately to your right will be the common room\".", "no"],
     ["Three doors down the hall", "-", "given", "Bedroom, bathroom, bedroom; the third \"at the end of the hall\".", "no"],
     ["Weld clear width", "51 ft", "derived", "54 ft exterior from Harvard GIS, less two 1.5 ft masonry walls.", "no"],
     ["Band depth", "20 ft", "derived", "Upper bound of the resident's common-room range. Confirmed by 16 + 0.5 + 3.5 closing exactly.", "yes"],
@@ -530,14 +530,14 @@ selector, because being wrong should cost one click.</div>
     ["Bedroom B ends the hall", "-", "derived", "\"Third door at the end of the hall\", with B keeping A's 10 x 16 shape.", "no"],
     ["West strip", "~7 x 20 ft", "derived", "Rooms account for 44 of the 51 ft clear width. The rest is not yours. Left blank; earlier drafts wrongly called it an elevator.", "yes"],
     ["Region behind the bath", "7 x 7 ft", "derived", "What is left of a 16 ft deep column after an 8.5 ft bathroom. Assigned to no room; an earlier draft gave it to bedroom A.", "yes"],
-    ["Bathroom", "7 x 8.5 ft, 60 sq ft", "inferred", "the resident gave no bathroom dimension. Three-quarter baths average 36 sq ft, range 18-50; 60 sits above that, defensible only for a shared suite bath with a double vanity.", "yes"],
+    ["Bathroom", "7 x 8.5 ft, 60 sq ft", "inferred", "The resident gave no bathroom dimension. Three-quarter baths average 36 sq ft, range 18-50; 60 sits above that, defensible only for a shared suite bath with a double vanity.", "yes"],
     ["Hall width", "3.5 ft", "inferred", "Set so bedroom depth plus partition plus hall closes on 20 ft. Above the 36 in code minimum.", "yes"],
     ["Partition thickness", "6 in", "inferred", "Standard stud partition. Chosen because it makes the column arithmetic close exactly.", "yes"],
     ["Masonry thickness", "1.5 ft", "inferred", "Typical load-bearing brick of the period.", "yes"],
     ["Ceiling height", "10 ft 6 in", "inferred", "Typical for an 1871 Queen Anne first floor. In no public source for Weld.", "yes"],
     ["Window positions", "4 bays on the gable", "inferred", "Bay rhythm read from exterior photographs, not from any plan.", "yes"],
-    ["Does K have a window?", "drawn with one", "inferred", "I earlier assumed it had none and let that move the room. the resident never said.", "yes"],
-    ["Closets", "not modelled", "inferred", "the resident mentions none. Every dorm suite has them; where is unknown.", "yes"]
+    ["Does K have a window?", "drawn with one", "inferred", "I earlier assumed it had none and let that move the room. The resident never said.", "yes"],
+    ["Closets", "not modelled", "inferred", "The resident mentions none. Every dorm suite has them; where is unknown.", "yes"]
   ];
 
   /* ---------------- build the page ---------------- */

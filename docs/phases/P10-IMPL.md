@@ -13,8 +13,8 @@ derivation, `P10.md` has it.
 **Environment**
 
 ```
-worktree   /Users/arhanbarve/Code/weld15-ux        branch p10-ux, cut from origin/main @ 8e6ef50
-dev        cd /Users/arhanbarve/Code/weld15-ux && npx next dev -p 3010
+worktree   ~/Code/weld15-ux        branch p10-ux, cut from origin/main @ 8e6ef50
+dev        cd ~/Code/weld15-ux && npx next dev -p 3010
 gates      npm run typecheck && npm test           # tsc --noEmit, then vitest run
 e2e        npx playwright test                     # baseURL comes from playwright.config.ts
 ```

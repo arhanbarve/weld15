@@ -756,7 +756,7 @@ swap, not the conformance question.
 # P10 — colour on the ground, and the buildings are the buildings
 
 Task 15 of `docs/phases/P10-EXTERIOR-PLAN.md`, the final task of the phase. Implemented on branch
-`p10-imagery` in the worktree `/Users/arhanbarve/Code/weld15-imagery`. Everything below is a
+`p10-imagery` in the worktree `~/Code/weld15-imagery`. Everything below is a
 measurement taken against that build, not the plan's prediction — where the two differ, both are
 given, per `docs/phases/P9.md`'s own precedent of recording every divergence from the spec rather
 than quietly reconciling to it.
@@ -912,7 +912,7 @@ view does not occur in normal use. `WINDOWS = true` kept in `CampusMesh.tsx`.
 `webServer.url`, with `reuseExistingServer: true` — and its own header comment already names the
 exact trap this ran into: "a full P9 run" was lost to it before. At the start of this task, port
 3000 was occupied by the **main checkout's** own `next-server` (confirmed via `lsof -p <pid>` →
-cwd `/Users/arhanbarve/Code/weld15`, not this worktree), which does not carry any of this branch's
+cwd `~/Code/weld15`, not this worktree), which does not carry any of this branch's
 changes. Running `npm run test:e2e` unmodified would have silently adopted that server and tested
 the wrong code while reporting green. Worked around by running the suite against a temporary,
 untracked config (`playwright.p10-verify.config.ts`, deleted after the run) pointed at this

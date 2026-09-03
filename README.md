@@ -66,3 +66,9 @@ docs/           Implementation plan, phase docs, sources, audits
 npm test          # unit tests
 npm run test:e2e  # Playwright e2e (playwright.config.ts)
 ```
+
+## License
+
+MIT — see [`LICENSE`](LICENSE). Third-party imagery and building-footprint datasets
+carry their own terms; see [`docs/SOURCES.md`](docs/SOURCES.md) for per-dataset
+attribution.

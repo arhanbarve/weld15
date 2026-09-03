@@ -246,29 +246,18 @@ input knows about the other.
 
 ## 3. Harvard's official housing assignment — the best source we have
 
-Supplied by the client from the Harvard housing portal. This is authoritative, first-party, and
-current, which makes it the highest-quality source in the project. Verbatim:
-
-```
-Your space
-  [verbatim housing record omitted]
-  [verbatim housing record omitted]
-  [verbatim housing record omitted]
-  [verbatim housing record omitted]
-
-Your residential community
-  [verbatim housing record omitted]
-  [verbatim housing record omitted]
-  [verbatim housing record omitted]
-  [verbatim housing record omitted]
-```
+Supplied by the client from Harvard's housing portal. This is authoritative, first-party, and
+current, which makes it the highest-quality source in the project. What it records, in summary:
+the suite is Weld 15, with **two bedrooms, two common rooms, and an ensuite bathroom**; its
+residential community is **Elm Yard**, entryway **Weld 1**. The portal defines an entryway as 14
+to 41 students sharing a floor or section within a dorm building.
 
 ### What this settles
 
 | Question | Resolution | Effect |
 |---|---|---|
-| What is "K"? | **The second common room.** Harvard records two common rooms; the resident described one big rectangle plus a room marked K he could not identify. K is that second common room. | The single largest open question in the project, closed. No longer "kitchen vs study vs storage". |
-| Is the room inventory complete? | **Yes.** Two bedrooms + two common rooms + one ensuite bath is exactly the five rooms the resident described. | Nothing is missing from his account, which raises confidence in the whole description. |
+| What is "K"? | **The second common room.** Harvard records two common rooms; the resident described one big rectangle plus a room marked K they could not identify. K is that second common room. | The single largest open question in the project, closed. No longer "kitchen vs study vs storage". |
+| Is the room inventory complete? | **Yes.** Two bedrooms + two common rooms + one ensuite bath is exactly the five rooms the resident described. | Nothing is missing from their account, which raises confidence in the whole description. |
 | Bedroom count | **2**, confirmed independently of the resident | verified |
 | Bathroom | **Ensuite**, confirmed independently of the resident | verified |
 | Entryway | **Weld 1** | Weld's entryways are numbered, not lettered. Suggests the first digit of a room number is the entryway: 15 = entryway 1, room 5. Would also explain "Weld South 24" and JFK's "Weld 32". |
@@ -283,7 +272,7 @@ this says it should probably not be inside the suite boundary at all.
 ### Occupancy — settled
 
 **Four people in two bedrooms: two doubles.** Confirmed by the client from the housing assignment,
-which names three roommates alongside him. This overrides the inference pressure from Weld's
+which records four occupants. This overrides the inference pressure from Weld's
 documented "quints and sextuplets" and from the seven students recorded in this suite in 1983 —
 whatever was true in 1983, the 2026-27 assignment for this suite is four.
 
@@ -301,17 +290,16 @@ common rather than doubling as sleeping space. 160 sq ft per bedroom for two peo
 
 ## 4. The room program — one source, explicitly approximate
 
-Everything below comes from a single email from the housing office dated 29 July 2026,
-read off a blueprint the sender described as 31 years old, with the caveat that dimensions "could be
-off by about a foot."
+Everything below comes from a single email from a Harvard housing office, read off a blueprint the
+sender described as 31 years old, with the caveat that dimensions "could be off by about a foot."
 
-Provenance detail worth being precise about: the email opens "Hi [suitemate]", so it was written to one
-of the three roommates and forwarded, not written to the client. That adds no uncertainty to the
-numbers themselves, but the source is second-hand by one step and should be described that way.
+Provenance detail worth being precise about: the email was addressed to another occupant of the
+suite and forwarded, not written to the client. That adds no uncertainty to the numbers themselves,
+but the source is second-hand by one step and should be described that way.
 
 | Room | Stated | Status |
 |---|---|---|
-| Common room | 15 × 15–20 ft | single-source. The range is the tell: it is the band depth he could not read off the plan. |
+| Common room | 15 × 15–20 ft | single-source. The range is the tell: it is the band depth they could not read off the plan. |
 | Bedroom A, first door | "about 10 ft by 16 ft" | single-source |
 | Bedroom B, third door | "about 16 ft by 10 ft" | single-source, read as 10 × 16 per the client |
 | Room K | "roughly 10 ft by 12 ft" | single-source for the size. Purpose now **resolved**: Harvard records the suite as having two common rooms, so K is the second common room. |
@@ -385,7 +373,7 @@ east facade and 5.298 ft on the west.
 So something occupies a 5.2 × 22 ft slab of Weld on the far side of the common room's window wall.
 **It is masonry and a chimney breast, not floor.** Three reasons:
 
-1. the resident gives the common room as 15 × 15–20 ft. The straight facade already puts it at the top of
+1. The resident gives the common room as 15 × 15–20 ft. The straight facade already puts it at the top of
    that range, 20 ft deep. Stepping the facade takes it to 25.17 ft and 377 sq ft, which contradicts
    the only dimension given for that room. Nothing else in this project overrides a GIVEN figure on
    the strength of a DERIVED one.

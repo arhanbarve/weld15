@@ -22,7 +22,7 @@ it (143 less two 15 ft stair halls and the porch, halved).
 occupancy, and it is the only source for it — `layout()`'s default of four beds comes from here and
 nowhere else. §3 of the audit.
 
-**the resident's email** (a current resident, describing the suite from inside). Supplies the room sequence
+**A resident's email**, describing the suite from inside. Supplies the room sequence
 off the private hall, the common room at 15 × 15–20 ft, bedrooms at about 10 × 16 ft, K at roughly
 10 × 12 ft, and the door order. It gives **no bathroom dimension** — audit error 4 is this project
 inventing one and rendering it in the same typographic style as the sourced numbers.

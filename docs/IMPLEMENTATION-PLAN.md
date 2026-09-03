@@ -12,7 +12,7 @@ Status: **plan awaiting approval. No application code written yet.**
 **Goal.** A single-page web app that takes you from a globe down to the inside of Weld 15 in one
 continuous move, then hands you the room to explore and rearrange. The campus is built from
 Harvard's real published building geometry. The suite is built from a parametric room graph derived
-from the housing office's description, where every uncertain dimension is a control
+from a housing office's description, where every uncertain dimension is a control
 you can move rather than a number baked into a mesh.
 
 **Non-goals.**
@@ -49,7 +49,7 @@ you can move rather than a number baked into a mesh.
 2. Bedroom B is **10 × 16**, same orientation as A. Removes the phantom unaccounted space.
 3. Bathroom is **7 × 9 and touches the hall**, so its door opens into the bathroom. Earlier I had
    closets between hall and bath, which meant door two opened into a closet.
-4. Bathroom size is **inferred, not given**. the resident supplied no bathroom dimension. Benchmark:
+4. Bathroom size is **inferred, not given**. The resident supplied no bathroom dimension. Benchmark:
    three-quarter baths average 36 sq ft, range 18–50.
 5. The leftover west strip is **not labelled "elevator"**. It is ~7 ft that is simply outside the
    suite. Naming it was a guess dressed as a fact.
@@ -462,7 +462,7 @@ WebGL engine, with 420 ms of total blocking time of which 322 ms is evaluating t
 
 ## 11. Still open, none of it blocking
 
-1. **Occupancy.** Does your housing letter give a number or roommate names? Default is four.
+1. **Occupancy.** Does the housing assignment give an occupant count? Default is four.
 2. **Placement.** Unknowable from public sources. Default north-gable; selector ships regardless.
 3. **What K actually is.** Modelled as a study. You will find out in September.
 4. **JFK layer.** Weld 15 is the post-1962 renumbering of Kennedy's Weld 32. Currently out of scope;

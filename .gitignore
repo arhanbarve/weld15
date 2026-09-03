@@ -25,3 +25,6 @@ __pycache__/
 .DS_Store
 .cache/
 playwright.p9.config.ts
+
+# local agent state and vendored skills
+.claude/

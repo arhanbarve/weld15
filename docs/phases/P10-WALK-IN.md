@@ -1,6 +1,6 @@
 # P10 — Walk in, or do not arrive: no teleport, no toggle, and a head that turns
 
-Branch `p10-walk-in`, worktree `/Users/arhanbarve/Code/weld15-walkin`, cut from `main` at `8e6ef50`.
+Branch `p10-walk-in`, worktree `~/Code/weld15-walkin`, cut from `main` at `8e6ef50`.
 Three other worktrees are live on the same repo (`weld15-p10`/`p10-fidelity`, `weld15-ux`/`p10-ux`,
 and `main` itself), so nothing here touches `main` and nothing here is committed to it.
 

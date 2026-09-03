@@ -589,11 +589,11 @@ built from.
 Four sessions are running against this repo:
 
 ```
-/Users/arhanbarve/Code/weld15          main            8e6ef50
-/Users/arhanbarve/Code/weld15-imagery  p10-imagery               ← this work
-/Users/arhanbarve/Code/weld15-p10      p10-fidelity    interior + stage 4 camera
-/Users/arhanbarve/Code/weld15-ux       p10-ux          HUD / measurement harness
-/Users/arhanbarve/Code/weld15-walkin   p10-walk-in     walk mechanics + tests
+~/Code/weld15          main            8e6ef50
+~/Code/weld15-imagery  p10-imagery               ← this work
+~/Code/weld15-p10      p10-fidelity    interior + stage 4 camera
+~/Code/weld15-ux       p10-ux          HUD / measurement harness
+~/Code/weld15-walkin   p10-walk-in     walk mechanics + tests
 ```
 
 **The overlap that existed has been resolved, by the other session, with the user.** `p10-fidelity`

@@ -23,7 +23,7 @@ for (const r of suite.rooms) {
     `| ${r.label} | ${f(r.du)} x ${f(r.dv)} | ${f(r.du * r.dv)} | ${r.stated ?? "derived"} |`,
   );
 }
-console.log(`| **the resident's five rooms** | | **${f(suite.roomArea)}** | |`);
+console.log(`| **The resident's five rooms** | | **${f(suite.roomArea)}** | |`);
 console.log(
   `| **With hall and the unknown strip** | | **${f(suite.netArea)}** | ${f(suite.netArea / 4)} per person for four |`,
 );

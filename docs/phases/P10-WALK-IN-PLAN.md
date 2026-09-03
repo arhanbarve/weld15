@@ -5,7 +5,7 @@ file is the execution order: what gets edited, in what sequence, what command pr
 the commit says. Spec approved 2026-07-31, including all three judgment calls (double-click lock,
 arrows follow the selection, brackets live at stage 5).
 
-**Workspace.** `/Users/arhanbarve/Code/weld15-walkin`, branch `p10-walk-in`, base `8e6ef50`.
+**Workspace.** `~/Code/weld15-walkin`, branch `p10-walk-in`, base `8e6ef50`.
 Dev server on **:3007** (other sessions hold 3000/3001). Three sibling worktrees are live —
 `weld15` (main), `weld15-p10` (`p10-fidelity`), `weld15-ux` (`p10-ux`) — so **every** git command
 below runs inside this worktree, `git status` is checked before each commit, and nothing is

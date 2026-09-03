@@ -954,7 +954,7 @@ describe("property sweep over randomised suites", () => {
    * numbers and it goes to nothing. Deriving it keeps residuals.along at zero,
    * which is the closure tests/rooms.test.ts asserts at the defaults.
    *
-   * Spreads: the resident's own "could be off by about a foot" on everything he stated,
+   * Spreads: the resident's own "could be off by about a foot" on everything they stated,
    * doubled where he gave a range himself (the common room's 15-20 depth) or
    * where the number is inferred rather than stated (the bathroom, the hall).
    */

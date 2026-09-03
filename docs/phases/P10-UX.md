@@ -1,6 +1,6 @@
 # P10 — the controls get out of the way, and the descent becomes one move
 
-Branch `p10-ux`, worktree `/Users/arhanbarve/Code/weld15-ux`, cut from `origin/main` at `8e6ef50`.
+Branch `p10-ux`, worktree `~/Code/weld15-ux`, cut from `origin/main` at `8e6ef50`.
 Three other sessions hold `p10-fidelity` (`../weld15-p10`), `p10-walk-in` (`./weld15-walkin`) and `main`
 itself. Nothing in this phase edits a file outside the list in section 4, and section 8 records the
 merge hazards where that list overlaps another branch's likely surface.

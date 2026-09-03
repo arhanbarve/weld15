@@ -27,7 +27,7 @@ and is imported by both the app and the build scripts.
 2. **Never loosen a failing gate.** Three e2e gates are expected to fail (Task 13). Each is rebuilt
    from a fresh measurement, the way P9 rebuilt the 236 threshold. `docs/phases/P9.md` §6.10 is the
    precedent and it says this explicitly.
-3. **Work in the worktree `/Users/arhanbarve/Code/weld15-imagery` on branch `p10-imagery`.** Three
+3. **Work in the worktree `~/Code/weld15-imagery` on branch `p10-imagery`.** Three
    sibling worktrees are running other sessions. Do not touch them. Do not commit to `main`.
    File ownership is agreed and recorded in `docs/phases/P10-EXTERIOR.md` §11: this branch owns
    `Ground.tsx`, `Campus.tsx`, `CampusMesh.tsx`, `WeldExterior.tsx`, `weldGeometry.ts` and the two
