@@ -1,6 +1,7 @@
 {
   "name": "weld15",
   "version": "0.1.0",
+  "license": "MIT",
   "private": true,
   "description": "Interactive 3D model of Weld 15, Harvard Yard",
   "scripts": {
